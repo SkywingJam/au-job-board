@@ -100,17 +100,18 @@ verified. Getting
 the source and installing dependencies may both use the network; the offline
 checks and the synthetic demo do not.
 
-The intended repository is `https://github.com/SkywingJam/au-job-board`, but it has **not
-been created or published yet**: it returned 404 when checked on 2026-10-08. The
-clone command below cannot succeed until the owner publishes it, and a failed or
-missing address is not an installation result. If you already have the source (a
-download or a copy you were given), use that directory instead. Once the
-repository is published, clone it into a new directory:
+Get the source from `https://github.com/SkywingJam/au-job-board`. If you already have it (a
+download or a copy you were given), use that directory instead. Otherwise clone
+it into a new directory:
 
 ```bash
 git clone https://github.com/SkywingJam/au-job-board au-job-board
 cd au-job-board
 ```
+
+If the address is unreachable, returns 404 or you lack access, the source is not
+available from there; ask the project owner for another source. A failed clone is
+not an installation result.
 
 ### Agent-assisted installation
 
@@ -119,13 +120,11 @@ An AI coding agent can follow the same steps through the
 to the agent:
 
 > Install AU Job Board from source following docs/install.md and
-> docs/agent-install.md. The intended repository is
-> https://github.com/SkywingJam/au-job-board, which may not be
-> published yet. Clone it into a new directory I name only if it is reachable;
-> if it returns 404, is unreachable or you lack access, report that the source
-> is unavailable and ask me for another source, such as a downloaded copy. Do
-> not guess another address, use a private remote, or create or publish a
-> repository. Create a project-local virtual
+> docs/agent-install.md. Get the source from https://github.com/SkywingJam/au-job-board
+> into a new directory I name. If that address is unreachable, returns 404 or
+> you lack access, report that the source is unavailable and ask me for another
+> source, such as a downloaded copy. Do not guess another address, use a private
+> remote, or create or publish a repository. Create a project-local virtual
 > environment with Python 3.12 and install requirements.txt. Getting the source
 > and installing dependencies may both use the network. Keep any existing
 > configuration and database untouched. Before guessing any personal setting,
@@ -166,28 +165,25 @@ to the agent:
 
 ## Project status
 
-AU Job Board is **not formally released yet**. What is settled and checked:
+AU Job Board is source-only: you install it from the repository at
+`https://github.com/SkywingJam/au-job-board` into your own virtual environment. There is no
+packaged release.
 
-- **Name and address.** The project is AU Job Board; the intended repository is
-  `https://github.com/SkywingJam/au-job-board`. That repository has not been created or
-  published (it returned 404 on 2026-10-08), so no clone from it has been
-  verified.
-- **License and scope.** MIT (see [License](#license)). The public contents are a
-  fixed set of 296 files.
-- **Clean history and local install check.** A new history with a single root
-  commit was built from those files. A local fresh clone of it, with a new
-  Python virtual environment, passed on 2026-10-08 on one macOS 15.8 (arm64)
-  machine with Python 3.12.4 and Node 24.5.0: dependency install, CLI help, the
-  read-only eligibility profile, the synthetic demo, the synthetic-demo panel
-  and all 16 public offline tests. Details and limits are in
-  [installation verification](docs/installation-verification.md).
+- **License and scope.** MIT (see [License](#license)). The public contents are
+  the 296 files of the initial public file set, built on a clean history that
+  has none of the earlier private development history.
+- **What has been checked.** A fresh local clone installed in a new Python
+  virtual environment on one macOS 15 (arm64) machine, and the 16 public offline
+  tests ran in GitHub Actions on macOS 15 with Python 3.12 and Node 24.21.0. The
+  dated records, versions and limits are in
+  [installation verification](docs/installation-verification.md). The offline
+  test workflow runs on pull requests into `main`, on pushes to `main`, and
+  manually.
 
 Not verified, and the documentation does not imply otherwise:
 
-- getting the source from a public GitHub repository, and the GitHub Actions
-  offline-test workflow (it targets Node 24.21.0; the local check used 24.5.0);
-- other operating systems, other Python versions, and anything beyond that one
-  machine;
+- other operating systems, other Python versions, and any machine other than
+  those recorded;
 - real fetching from SEEK, Indeed or LinkedIn, and installing the macOS
   LaunchAgent templates (they have only been validated offline);
 - every eligibility rule and source behaviour.
@@ -209,7 +205,7 @@ Not verified, and the documentation does not imply otherwise:
 | [Contributing](docs/contributing.md) | Working on the project, tests, data rules |
 | [Public tests](docs/public-tests.md) | The curated offline test entry and CI boundary |
 | [macOS automation](docs/launchd-examples.md) | LaunchAgent templates |
-| [Installation verification](docs/installation-verification.md) | The current install verification and its limits |
+| [Installation verification](docs/installation-verification.md) | Dated install and CI verification records, and their limits |
 | [All documents](docs/README.md) | Index, including maintainer records |
 
 ## License

@@ -1,10 +1,9 @@
 # Contributing
 
 This project is released under the MIT License; see [LICENSE](../LICENSE)
-(Copyright (c) 2026 SkywingJam). The final public name and repository address are
-still undecided, so there is no public issue tracker or pull-request process to
-point to yet. Until then, this page describes the working conventions that
-already apply, so that future contributions fit.
+(Copyright (c) 2026 SkywingJam). The repository is
+<https://github.com/SkywingJam/au-job-board>. This page describes the working conventions and how changes are
+made.
 
 ## What the project is for
 
@@ -72,13 +71,22 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python tools/test_legacy_rule_profiles.py
 
 `tools/regression_corpus.py` needs a private corpus and is not a public test.
 The entry is a fixed list, so a maintainer-only test is never collected by
-accident. A `workflow_dispatch`-only GitHub Actions workflow for macOS 15 and
-Python 3.12 is configured but has not been run on GitHub. The source install
-and what it checks are in [install.md](install.md) and
+accident. A GitHub Actions workflow for macOS 15 and Python 3.12 runs the same
+entry; see [public-tests.md](public-tests.md). The source install and what it
+checks are in [install.md](install.md) and
 [installation-verification.md](installation-verification.md).
 
 Do not use `fetch`, `details`, `run` or `analyze` against your own database as a
 test.
+
+## Pull requests
+
+Changes to `main` are made through a pull request. The workflow check named
+`macOS 15 / Python 3.12 / Node 24.21.0` (the 16 public offline tests) runs
+automatically on the pull request and should pass, and review discussions should
+be resolved, before merging. No second person's approval is required. The
+maintainer may use an emergency exception, and only through a pull request.
+Force-pushing to `main` or deleting it is not part of the process.
 
 ## Documentation
 

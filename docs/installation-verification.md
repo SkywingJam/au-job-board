@@ -1,12 +1,10 @@
 # Installation verification
 
-This records the current local verification of AU Job Board's source
-installation, and what it does and does not show. The project is **not formally
-released**: the intended repository, `https://github.com/SkywingJam/au-job-board`,
-had not been created or published when this was recorded (it returned 404), so
-nothing here verifies getting the source from GitHub.
+This records dated verifications of AU Job Board's source installation, and what
+each does and does not show. Each entry is a historical fact about the named run
+and commit; it is not re-run when later changes are made.
 
-## Current verification (2026-10-08)
+## Local fresh clone and new environment (2026-10-08)
 
 The subject was the public candidate tree: 296 files under the MIT license,
 committed as a **single root commit** (`9386c8e9c5dffbda3e3d45f92641cc090385c9f2`)
@@ -72,13 +70,46 @@ commit. The virtual environment, `out/` and other generated files are ignored by
   installs its declared dependencies in a new environment, the CLI and read-only
   profile command run, the synthetic demo is generated, the panel serves the
   synthetic demo on loopback and stops, and the 16 public offline tests pass.
-- Does **not** show: getting the source from a public GitHub repository (the
-  address was not published), the GitHub Actions workflow, other operating
-  systems or Python versions, a different machine, or the same Node version as
-  CI. It also does not cover real fetching from SEEK, Indeed or LinkedIn,
+- Does **not** show: getting the source from GitHub or the GitHub Actions
+  workflow (recorded in the next section), other operating systems or Python
+  versions, a different machine, or the same Node version as CI. It also does not cover real fetching from SEEK, Indeed or LinkedIn,
   installing the macOS LaunchAgent templates, or the correctness of every
   eligibility rule or source. A new virtual environment on this machine is not a
   separate physical machine.
+
+## GitHub access and cloud CI (2026-10-08)
+
+This entry covers the repository `https://github.com/SkywingJam/au-job-board` at a later commit than the section
+above. At that commit the history was two commits: the root commit
+(`9386c8e9c5dffbda3e3d45f92641cc090385c9f2`) and one documentation commit,
+`9c03c0b1e0d4ebe6c9bb0989b591bfa5b4c7d7ba` (tree
+`4f6df1c21ee433b20a0a36adb3f187110d5f436b`, 296 tracked files). The documentation
+commit changed six Markdown files, so the per-file SHA-256, byte and blob
+identities in the previous section describe the root commit's files, not this
+later tree.
+
+- **GitHub access.** The repository was **private** at the time. A clone made
+  with the maintainer's authenticated access reported the same HEAD and tree, two
+  commits, 296 files and a clean working tree, with no `alternates`. That is an
+  authenticated clone, not an anonymous or public one; anonymous access is not
+  part of this record.
+- **Cloud CI.** The offline workflow was started manually on `main` (event
+  `workflow_dispatch`, run 37724352157, commit `9c03c0b1…`) and concluded
+  `success`:
+  <https://github.com/SkywingJam/au-job-board/actions/runs/37724352157>.
+  The runner was `macos-15-arm64` (macOS 15.7.9) with Python 3.12.10 and Node
+  24.21.0. Dependencies installed (`python-jobspy 1.2.0`, `PyYAML 6.0.3`), the
+  private-path guard passed, and `tools/run_public_tests.py` reported
+  **16 passed, 0 failed, 0 not applicable**.
+- **A line that looks like a failure.** The fixture-boundary test prints a
+  `[FAIL]` line from a deliberate negative control: it feeds a wrong expected
+  value to confirm that the check fails when it should. The test as a whole
+  exits 0; the outer exit status is what counts, and the run summary above is
+  from the entry's own count.
+
+Limits: one runner image and one date; other operating systems, Python versions
+and Node versions are not covered, and neither is real fetching or installing
+the macOS LaunchAgent templates.
 
 ## Earlier record (2026-10-07)
 
@@ -97,4 +128,4 @@ direct versions as above.
 That record was reconstructed from retained run logs and is a normalized
 description, not a verbatim transcript. It was explicitly **not** a clean-history
 fresh-clone acceptance, and it ran neither the full public suite nor CI. It is
-kept only as history; the 2026-10-08 verification above is the current one.
+kept only as history; the 2026-10-08 records above are the current ones.
