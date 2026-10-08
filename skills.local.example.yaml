@@ -1,0 +1,6 @@
+# Optional user-local skill overlay. Copy to skills.local.yaml to customize.
+# The runtime treats a missing local overlay as empty; the example is not loaded.
+version: 1
+add: []
+alias: {}
+remove: []

@@ -1,0 +1,188 @@
+# 技能词表 —— 从 JD 里抽出技术栈，存表、打 tag、做筛选。
+#
+# 它**不是判断**，是词汇表：可再生、随手可改、不进打分。因此刻意与 rules.yaml
+# 分开 —— rules.yaml 是评分面，手调、要 bump version；改技能表不该动规则版本。
+# 抽取在 analyze 时进行，结果落在 job_skills 表；面板据此打 tag、做多选筛选
+# （筛选**默认关闭**：有些岗位正文里一个技能词都没有，默认开启会静默藏掉
+# 它们，里面包括没写技术名词的 IT 支持岗）。
+#
+# 字段：
+#   name       规范名，也是参与匹配的 token，同时是面板上的 tag 文案
+#   aliases    别名，同样参与匹配（大小写不敏感）。**第一版就必须留这个字段**，
+#              否则以后加 k8s/kube/kubectl 之类要改数据格式、已标的词得重来
+#   not        负向正则：**全篇**命中任一则该技能整条不计。用词要谨慎，
+#              全篇语义意味着一次无关提及会否掉整篇（所以只给 Swift 这种用）
+#   ambiguous  true = 该词有歧义，必须同篇还出现**另一个**技能词才认
+#              （例如 \bgo\b 会命中 "go to the gym" / "go-to-market"；
+#               \bswift\b 会命中银行的 SWIFT 报文）
+#
+# 匹配用**非词字符边界** (?<![\w+#])token(?![\w+#])，**不是 \b**：
+# \b 在 + / # 前也算边界，于是 \bC\b 会把 C#/.NET 和 C++ 一起命中。
+# 同族：C++ / C# / F# / Objective-C / ASP.NET。
+# 匹配**最长优先并抑制重叠区间**：先 React Native 再 React、先 Spring Boot 再
+# Spring，否则同一处命中会打两个重叠 tag。
+#
+# 长尾照收（数据便宜），面板的筛选器只展示实际命中最多的那批。
+version: 1
+
+skills:
+  # ---- 云 / 基础设施 / 运维 ----
+  - name: AWS
+    aliases: ["Amazon Web Services"]
+    not: []
+  - name: Azure
+    aliases: ["Microsoft Azure"]
+    not: []
+  - name: GCP
+    aliases: ["Google Cloud", "Google Cloud Platform"]
+    not: []
+  - name: Docker
+    aliases: []
+    not: []
+  - name: Kubernetes
+    aliases: ["K8s", "Kube", "kubectl"]
+    not: []
+  - name: Terraform
+    aliases: []
+    not: []
+  - name: Ansible
+    aliases: []
+    not: []
+  - name: Jenkins
+    aliases: []
+    not: []
+  - name: Linux
+    aliases: []
+    not: []
+  - name: Windows
+    aliases: []
+    not: []
+  - name: PowerShell
+    aliases: []
+    not: []
+  - name: Git
+    aliases: []
+    not: []
+
+  # ---- 语言 / 框架 ----
+  - name: Python
+    aliases: []
+    not: []
+  - name: SQL
+    aliases: []
+    not: []
+  - name: Java
+    aliases: []
+    not: []
+  - name: JavaScript
+    aliases: ["Java Script", "JS"]
+    not: []
+  - name: TypeScript
+    aliases: ["TS"]
+    not: []
+  - name: C#
+    aliases: ["C Sharp", "CSharp"]
+    not: []
+  - name: C++
+    aliases: ["Cpp", "C Plus Plus"]
+    not: []
+  - name: C
+    aliases: []
+    not: []
+  - name: Go
+    aliases: ["Golang"]
+    not: []
+    ambiguous: true
+  - name: Rust
+    aliases: []
+    not: []
+  - name: Ruby
+    aliases: ["Ruby on Rails"]
+    not: []
+  - name: PHP
+    aliases: []
+    not: []
+  - name: Kotlin
+    aliases: []
+    not: []
+  - name: Swift
+    aliases: []
+    # SWIFT 是银行报文系统，与 Swift 语言无关。reaction/response 这类
+    # 日常英语的 "swift reaction times" 也会误命中。
+    not: ['\bswift\b[^.\n]{0,20}\b(message|payment|network|transfer|code|MT|reaction|response|turnaround)\b']
+  - name: Scala
+    aliases: []
+    not: []
+  - name: .NET
+    aliases: ["dotnet", "ASP.NET", ".NET Core"]
+    not: []
+  - name: Node.js
+    aliases: ["NodeJS", "Node"]
+    not: []
+  - name: React
+    aliases: ["ReactJS", "React.js"]
+    not: []
+  - name: React Native
+    aliases: ["ReactNative"]
+    not: []
+  - name: Angular
+    aliases: ["AngularJS"]
+    not: []
+  - name: Vue
+    aliases: ["VueJS", "Vue.js"]
+    not: []
+  - name: Spring
+    aliases: ["Spring Boot"]
+    not: []
+  - name: Django
+    aliases: []
+    not: []
+
+  # ---- 数据 ----
+  - name: PostgreSQL
+    aliases: ["Postgres"]
+    not: []
+  - name: MySQL
+    aliases: []
+    not: []
+  - name: MongoDB
+    aliases: ["Mongo"]
+    not: []
+  - name: Redis
+    aliases: []
+    not: []
+  - name: Kafka
+    aliases: ["Apache Kafka"]
+    not: []
+  - name: Spark
+    aliases: ["Apache Spark", "PySpark"]
+    not: []
+  - name: Snowflake
+    aliases: []
+    not: []
+  - name: Elasticsearch
+    aliases: ["Elastic Search", "ELK"]
+    not: []
+
+  # ---- 数据科学 / 企业软件（T2/T3 支持岗常见） ----
+  - name: Machine Learning
+    aliases: ["ML"]
+    not: []
+  - name: Artificial Intelligence
+    aliases: []
+    not: []
+  - name: ServiceNow
+    aliases: []
+    not: []
+  - name: Salesforce
+    aliases: []
+    not: []
+  - name: SAP
+    aliases: []
+    not: []
+  - name: Jira
+    aliases: []
+    not: []
+  - name: Confluence
+    aliases: []
+    not: []

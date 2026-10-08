@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Generic macOS LaunchAgent example for the scheduled full pipeline.
+
+  This is a template. Replace the __PLACEHOLDER__ values before use; see
+  docs/launchd-examples.md for the placeholder table and a standard-library
+  renderer. It is not installed or loaded by the repository.
+
+  The scheduled job runs the "run" subcommand once per day. It deliberately has
+  no KeepAlive and does not run at load: it is a timer, not a resident service.
+  "run" fetches over the network, analyzes and writes the user's database and
+  reports, so it is not an offline smoke test.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.au-job-pipeline.fetch</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_PATH__</string>
+        <string>-u</string>
+        <string>-m</string>
+        <string>jobs.cli</string>
+        <string>--config</string>
+        <string>__CONFIG_PATH__</string>
+        <string>run</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_DIR__</string>
+
+    <!-- Example schedule: daily at 07:30 local time. Edit as you like. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <!-- A timer, not a resident service. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Lower priority so a long run shares the machine politely. -->
+    <key>Nice</key>
+    <integer>5</integer>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/fetch.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/fetch.err</string>
+</dict>
+</plist>

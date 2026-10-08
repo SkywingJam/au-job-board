@@ -1,0 +1,380 @@
+# 过滤与打分规则。这是唯一的调参面 —— 改这里不需要重新抓取。
+#
+# 设计原则：
+#   硬过滤必须窄。误杀是永久且不可见的，误放只花 2 秒扫一眼。
+#   所以这里只放「铁定不可能」的规则，模糊的一律交给打分。
+#
+# 每次改动请 bump version，决策会记录 version 以便追溯。
+
+version: 8
+
+# ---------------------------------------------------------------
+# 硬排除。任一规则命中 -> 排除；但若命中 overrides 中任一条 -> 不排除。
+# 每条规则支持:
+#   any:        [正则] 命中任一即触发
+#   none:       [正则] 命中任一则本条不触发（用于排除噪音）
+#   none_scope: text（默认，全篇生效）
+#               | overlap（只否决与之字符重叠的那次命中）
+#               | sentence（只否决与之同分句的那次命中）
+#               —— 详见 jobs/filters.py 里的说明。三种粒度：
+#                  text 挡「一出现整篇就不再可靠」的噪音；
+#                  overlap 挡只涉及一个词组/短语的噪音（如 police clearance）；
+#                  sentence 是更宽的通用粒度，当前规则集未使用。
+#               EEO / 多元包容样板语由 citizenship.requirement 用 **overlap**
+#               处理：只有某次门槛命中本身跨越了 EEO 词句时，那次才作废；
+#               同句里独立的 must / required / hold / have 要求不受影响。
+# ---------------------------------------------------------------
+exclude:
+
+  - id: clearance.named
+    desc: 保密等级特有名词。零误伤，无需上下文判断。
+    any:
+      - '\bNV1\b'
+      - '\bNV2\b'
+      - '\bTSPV\b'
+      - '\bTS-?PA\b'
+      - '\bAGSVA\b'
+      - 'negative\s+vetting'
+
+  - id: clearance.baseline
+    desc: |
+      baseline 单独出现容易误杀（security baseline 是 cyber 岗核心术语），
+      因此必须要求保密语境共现。
+    any:
+      - 'baseline\s+(security\s+)?clearance'
+      - 'clearance[^.\n]{0,40}\bbaseline\b'
+      - '\bbaseline\b[^.\n]{0,30}\bor\s+higher\b'
+      - '\bbaseline\b[^.\n]{0,40}\b(NV1|NV2|TSPV)\b'
+
+  - id: clearance.generic
+    desc: |
+      通用保密审查措辞。naive /clearance/ 会误杀，
+      主因是把 National Police Clearance（犯罪记录检查，可满足）算了进来。
+    # none 必须用 overlap：护栏挡的是 "police clearance" 这个**词组**。
+    # 用 text（全篇）会连带救走同一句里的 security clearance，
+    # 例如 "police checks and obtain a security clearance where required"
+    # 与 "National Police Clearance and an Australian Defence Security
+    # Clearance" 都因此容易漏杀。
+    none_scope: overlap
+    any:
+      - '(security|government|defence|defense)\s+clearance'
+    none:
+      # police clearance / police check 是另一回事，持有效工作签证者可以满足
+      - 'police\s+(clearance|check|record)'
+      - 'national\s+police'
+
+  # 公民 / PR 资格门槛，拆成三条以便 provenance 能看出是哪一类命中。
+  #
+  # 血泪教训：**不要照着个别原句写正则**。
+  # 初版把 "be an Australian/New Zealand Citizen or Permanent Resident" 原样抄成
+  # 一条 pattern，结果 "an Australian / New Zealand Citizen or Australian
+  # Permanent Resident"（多了个 Australian、没有 be）就漏掉了，
+  # 让一个不能申请的岗位排到了第 1 名。要按语义结构写：
+  #   (a) 排他措辞  (b) citizen 与 PR 的析取  (c) 要求动词 + 公民
+  #
+  # 关键区分：**"Citizen or PR" 两个选项对工签都关闭，必须排除；
+  # 但 "Citizen, PR or hold a valid visa" 是开放的，由 overrides 救回。**
+  # 两者只差一个连词后的内容，所以模糊匹配在这里是错的工具。
+
+  - id: citizenship.exclusive
+    desc: 排他性措辞，最直白的一类。
+    any:
+      - '(only|exclusively)\s+open\s+to\s+(australian|suitable)'
+      - '\baustralian\s+citizens?\s+only'
+      - '\bcitizenship\s+only'
+      - '\bcitizenships?\s+(is\s+)?(mandatory|required|essential)'
+      - '\baustralian\s+citizenship\s+is\s+mandatory'
+      - '\bpermanent\s+residents?\s+only'
+      - '(citizens?|citizenship)\s+(and|or)\s+(australian\s+)?permanent\s+residents?\s+only'
+      # 不带 only 的 "open to Australian Citizens" 同样是排他声明
+      - '\bopen\s+to\s+australian\s+citizens?'
+      # "Australian or New Zealand Citizen" / "Australian / NZ Citizen"。
+      # 两个国籍是析取，但都不含工作签证持有者 —— 与 citizen/PR 析取同类。
+      # 实测漏杀：有的岗位写 "are either Australian or New Zealand Citizen"，
+      # 原有的 "are an Australian citizen" 被中间的 either ... or 打断了。
+      - '\baustralian\s*(/|&|and|or)\s*(new\s+zealand|nz)\s+citizens?'
+      - '\b(new\s+zealand|nz)\s+or\s+australian\s+citizens?'
+
+  - id: citizenship.or_pr
+    desc: |
+      citizen 与 permanent resident 的析取。两个选项对工作签证持有者都是关闭的。
+      必须与 "Citizen, PR or hold a valid work permit/visa" 区分 —— 后者由
+      overrides 救回。实测这一类最容易漏杀。
+    any:
+      - '\bcitizens?(ship)?\b[^.\n]{0,60}\bor\s+(australian\s+)?(permanent\s+resident|\bpr\b)'
+      - '\b(permanent\s+resident|\bpr\b)\b[^.\n]{0,40}\bor\s+(australian\s+)?citizens?'
+      - '\baustralian\s+citizenship\s+(or|and)\s+(australian\s+)?permanent\s+residen'
+      # 泛化版：citizenship 与 permanent residency 的析取，中间允许插入国籍词。
+      # 必须泛化 —— 写成 "Australian citizenship or..." 会漏掉
+      # "Australian/New Zealand citizenship or permanent residency"。
+      - '\bcitizenship\b[^.\n]{0,40}\b(or|and)\b[^.\n]{0,40}\bpermanent\s+residen'
+      - '\bcitizenship\b[^.\n]{0,25}\b(or|and)\b[^.\n]{0,25}\bpr\b'
+      - '\baustralian\s+or\s+new\s+zealand\s+citizen[^.\n]{0,60}\bpermanent\s+resident'
+      - '\bpr\b\s*/\s*citizenship|\bcitizenship\s*/\s*\bpr\b'
+
+  - id: citizenship.requirement
+    desc: |
+      要求动词 + 公民身份。**不要求写 "an"**（"must be Australian Citizen" 也算），
+      并覆盖项目符号式写法（"* Australian Citizen"，前面只有段落标题没有动词）。
+    # 明确要求候选（must / required / hold / have …）：EEO 只否决它**本身跨越**
+    # 的命中（overlap），同句里独立的明确要求不受影响。
+    none_scope: overlap
+    any:
+      - '(must|require[sd]?|need)\s+(be\s+)?(an?\s+)?(australian|new\s+zealand)\s*citizens?'
+      - '\bbe\s+an?\s+(australian|new\s+zealand)\s*citizen'
+      - '\b(are|is)\s+an?\s+(australian|new\s+zealand)\s+citizen'
+      - '\b(hold|have|has)\s+(australian|new\s+zealand)\s*citizenship'
+      - '\bunable\s+to\s+consider[^.\n]{0,40}(temporary|visa)'
+      - '\bsponsorship\s+is\s+not\s+available'
+      # 单独的 PR 要求（无 citizen 并列）。要求有门槛语境，避免误伤。
+      - '\b(a|an)\s+permanent\s+resident\b[^.\n]{0,40}(and\s+currently|of\s+australia|required|only)'
+      - '\bare\s+you\s+a\s+permanent\s+resident'
+      # "permanent residency" 的**名词形式**。初版只写了 permanent resident，
+      # 于是 "Candidates must have permanent residency for this role." 整个漏掉
+      #（resident ≠ residency，差一个字母）。
+      - '(must|require[sd]?|need[s]?)\s+(have|hold)\s+[^.\n]{0,25}\bpermanent\s+residen'
+      - '\bpermanent\s+residen(ce|cy|t)\b[^.\n]{0,30}\b(required|essential|mandatory|necessary)\b'
+      - '\brequired\s+to\s+be\s+a\s+permanent\s+residen'
+    none:
+      # 合成护栏说明：样板语里的 "citizenship" / 国籍词不是门槛。这些模式
+      # 只否决与它们字符重叠的明确要求候选。
+      - 'regardless\s+of[^.\n]{0,160}citizenship'
+      - 'equal\s+employment\s+opportunit'
+      - 'citizenship,\s*marital\s+status'
+      - 'citizenship,\s*national\s+origin'
+    # 宽资格标题窗口（"About you / Eligibility … Australian Citizen"）性质不同：
+    # 它只是「标题附近出现公民字眼」，会把欢迎语误命中成门槛。单独给它一个
+    # 同分句护栏：命中所在分句出现 welcome / encourage / regardless / EEO 时，
+    # 这次宽窗口命中作废；明确要求候选不受此护栏影响。
+    weak_none_scope: sentence
+    weak_none:
+      - 'welcom\w*'
+      - 'encourag\w*'
+      - 'invit\w*'
+      - 'regardless\s+of[^.\n]{0,160}citizenship'
+      - 'equal\s+employment\s+opportunit'
+      - 'citizenship,\s*marital\s+status'
+      - 'citizenship,\s*national\s+origin'
+    weak_any:
+      # 资格段落标题 + 项目符号（窗口内无句号）
+      - '(about you|who you are|eligibility|to be eligible|requirements?|essential|you will)\b[^.\n]{0,240}\baustralian\s*citizens?'
+
+  - id: indigenous.identified
+    desc: |
+      只匹配「排他性资格声明」。绝不能匹配 indigenous/aboriginal 字面 ——
+      该词大多出现在多元包容欢迎语里，直接匹配会误杀。
+    any:
+      - '\bidentified\s+position\b'
+      - 'designated\s+for\s+aboriginal'
+      - 'only\s+aboriginal'
+      - 'aboriginal\s+(and[/\s]+or\s+)?torres\s+strait\s+islander\s+(people\s+)?(only|are\s+eligible)'
+      - 'confirmation\s+of\s+aboriginality'
+      - 'section\s+14\s*\(d\)'
+
+  - id: adf.enlistment
+    desc: 澳洲国防军入伍岗位要求公民身份。
+    any:
+      - 'at\s+the\s+time\s+of\s+enlistment'
+
+# ---------------------------------------------------------------
+# 覆盖规则：命中任一条则「不排除」。
+# 持 full working rights 工作签证者，凡写明可持签证/工作许可的岗位都可投。
+# ---------------------------------------------------------------
+overrides:
+  - id: visa.or
+    desc: |
+      "Citizen, Permanent Resident or hold a valid work permit or visa"
+      这类并列结构对持工作签证者是开放的，必须从公民排除里救回来。
+      实测这类常被 naive 规则误杀。
+    any:
+      - '(citizen|citizenship)[^.\n]{0,60}\bor\s+(hold\s+)?(a\s+)?(valid\s+)?(work\s+)?(permit|visa)'
+      - 'or\s+hold\s+a\s+valid\s+work\s+(permit|visa)'
+      - 'valid\s+work\s+(permit|visa)\s+with\s+full\s+(unrestricted\s+)?working\s+rights'
+      # 加上 permanent residency 名词形式后，这类「PR **或** 签证」的开放写法
+      # 必须同样救得回来，否则新规则会把它们误杀。
+      - 'permanent\s+residen\w*[^.\n]{0,60}\bor\s+(hold\s+)?(a\s+)?(valid\s+)?(work\s+)?(permit|visa)'
+      - '(permit|visa)[^.\n]{0,40}\bor\s+permanent\s+residen'
+
+# ---------------------------------------------------------------
+# 打分。total = tier + level + adjust
+# ---------------------------------------------------------------
+tiers:
+  # SEEK 的 classification 字段比标题正则可靠，优先使用
+  #
+  # 注意：只用前置 \b，不要用后置 \b。
+  # 原因：\bcyber\b 匹配不到 "Cybersecurity"（复合词内部无词边界），
+  # 同理 \btest\b 匹配不到 "Testing"、\bgraduate\b 匹配不到 "Graduates"。
+  # 否则容易把 T1 岗位误判成 T3。
+  T1:
+    weight: 3
+    classification:
+      - 'Security'
+      - 'Engineering - Software'
+      - 'Developers/Programmers'
+      - 'Testing & Quality Assurance'
+      - 'Engineering - Network'
+      - 'Architects'
+      - 'Networks & Systems Administration'
+      - 'Database Development & Administration'
+    title:
+      - '\b(cyber|infosec|security|penetration|pentest|threat|vulnerab|malware|forensic|grc)'
+      - '\bsoc\b'
+      - '\b(software|full[- ]?stack|back[- ]?end|front[- ]?end|developer|programmer)'
+      - '\b(devops|sre|platform|cloud|infrastructure)'
+      - '\b(test|qa\b|quality assurance|automation)'
+      - '\barchitect'
+  T2:
+    weight: 1
+    classification:
+      - 'Help Desk & IT Support'
+    title:
+      - '\b(it support|help ?desk|service desk|desktop support|technical support|level [12] support)'
+      # 标题里写 support 但 classification 是 Consultants/Software 的，
+      # 实际是支持岗。
+      - '\bsupport\s+(consultant|officer|specialist)\b'
+  T3:
+    weight: 0
+
+level:
+  positive:
+    - {pattern: '\b(graduate|grads?\b)', score: 3}
+    - {pattern: '\b(junior|entry[- ]level)', score: 3}
+    - {pattern: '\b(intern|internship|cadet|trainee|apprentice)', score: 3}
+    - {pattern: '\b(no experience|training provided|willing to train)', score: 2}
+    - {pattern: '\b20(2[6-9])\b[^.\n]{0,30}\b(program|graduate|intake)', score: 2}
+    - {pattern: '\bassociate', score: 1}
+  negative:
+    - {pattern: '\b(senior|snr)', score: -3}
+    - {pattern: '\b(lead|principal|staff engineer)', score: -4}
+    - {pattern: '\b(manage|head of|director|chief|\bvp\b)', score: -5}
+    # 经验年限不在这里 —— level 规则只搜标题，而年限几乎只写在正文里，
+    # 标题里很少出现。见下面的 `experience` 段。
+
+# ---------------------------------------------------------------
+# 经验年限：**只减分，不排除**。
+#
+# 为什么单独一段、而且必须读正文：
+#   `level` 规则只搜标题（可预测，不会被 "work alongside senior engineers"
+#   误伤），但年限要求几乎只写在正文的 Requirements 段，
+#   而 `\d+\+?\s*years?\s+(of\s+)?experience` 在标题里很少出现。
+#
+# 为什么不能直接把正文喂给 level：正文里大量是**公司叙述**
+#   （"more than 30 years of experience"、"with over 40 years
+#   of experience"、"over 20 years"、"15 years of experience
+#   and are growing"）。所以正文命中必须带要求语境，且窗口内不能有
+#   叙述用词 —— 判定逻辑在 `scoring.score_experience()`。
+#
+# 为什么不做硬排除：年限是**软门槛**，3-5 年的岗位照样会收应届；
+# 用户明确「只分层、不排除」（误杀永久且不可见，误放只是扫一眼）。
+#
+# 回归用例：tools/test_experience_rules.py（正例取要求句，
+# 反例取公司叙述句与「毕业年限」类窗口）。
+# ---------------------------------------------------------------
+experience:
+  # 数字前/后各看多少字。窗口太小会漏掉 "…role (7+ years)" 这种括号写法，
+  # 太大又会把上一段的要求句算进来。
+  lookback: 70
+  lookahead: 26
+  # 数字前面出现这些词 = 要求语境（正则，大小写不敏感）
+  require_cue: '(you\b[^.\n]{0,20}\b(have|bring|need)|we.?re looking for|looking for|seeking|minimum|\bmin\b|at least|essential|must have|candidates? with|demonstrated|proven)'
+  # 窗口内出现这些词 = 叙述句/上限句，不算要求
+  #   more than N / over N  公司历史
+  #   our team / we have / …we/our  「我们团队有 N 年经验」
+  #   graduated in the last N years  毕业生招聘的**资格窗口**，不是经验要求
+  #   up to N / less than N / under N  上限句，说的恰恰是「够年轻就行」
+  #   working rights … N years          签证有效期要求，不是经验
+  deny_cue: '(our team|we (have|.ve)|has (more than|over)|more than\s+\d|with over\s+\d|\bover\s+\d|alongside|founded|established|\bago\b|graduated? (in|within) the (last|past)|(working|work) rights[^.\n]{0,60}\d{1,2}\s*(?:years?|yrs?)|\bvisa\b[^.\n]{0,60}\d{1,2}\s*(?:years?|yrs?)|years? of experience\b[^.\n]{0,20}\b(we|our)\b|years? .{0,14}\b(we|our)\b|\bup to\s+\d|\b(less|fewer) than\s+\d|\bunder\s+\d)'
+  # 年数（区间取**下界**）达到 min_years 就得该档分，取命中的**最高**一档。
+  # 1 年也给 -1：能写「至少 1 年」的岗位通常不是零经验岗。
+  buckets:
+    - {min_years: 5, score: -3}
+    - {min_years: 3, score: -2}
+    - {min_years: 1, score: -1}
+
+# LinkedIn 的 job_level 字段，比标题正则可靠（Indeed 该字段为空）
+job_level:
+  "entry level": 3
+  "internship": 3
+  "associate": 1
+  "mid-senior level": -3
+  "director": -6
+  "executive": -8
+
+# 单独的方向调整项
+adjust:
+  - id: architect.longterm
+    desc: |
+      架构属长期方向定位而非当前目标，
+      且几乎不存在入门级岗位，故降权。
+    pattern: '\barchitect\b'
+    score: -2
+
+  - id: clearance.soft
+    desc: |
+      preferred / desirable 是软要求，不是硬门槛，只降权不排除。
+      注意：**"obtain a security clearance where required" 已改为硬排除**
+      —— 保密审查的法定前提是澳洲公民身份（AGSVA 口径），
+      非公民连"以后去考"都走不通，所以那不是软要求。
+    pattern: '(clearance|citizenship)[^.\n]{0,40}\b(preferred|desirable|advantageous)\b'
+    score: -1
+
+  - id: licence.required
+    desc: |
+      岗位提到驾照。**刻意不做硬排除** —— 这不是法律门槛，是个人条件，
+      而且驾照是可以补的；硬排除会让整类 T2 支持岗静默消失
+      （提到驾照的岗位多在保留区，且以城市 IT 支持岗为主）。
+      所以只标记 + 轻微降权，让它可见、排在后面，而不是删掉。
+      注意 pattern 不区分 required/desirable，凡是提到都算 —— 因此只能是 minor。
+    # 撇号要同时认直的 ' 和弯的 ’ —— 招聘网站的正文从 Word 转来，
+    # 「Driver’s Licence」里是弯撇号，只写 ' 会整条漏掉。
+    pattern: "(driver['\u2019]?s?|driving)\\s+licen[cs]e"
+    score: -1
+
+# ---------------------------------------------------------------
+# 地点：不是硬门槛，只是一个**轻微的减分项**。
+#
+# 为什么加：「搬迁 / 偏远」是标注里出现频率最高的减分项
+# （备注里的 "-1" 只表示「这是个减分项」，且属于 minor 级别，不是 1 分）。
+# 外州岗位的跳过比例高于本地，但样本小，
+# 所以只给最小的一档权重。想关掉把 out_of_state_penalty 设为 0。
+# ---------------------------------------------------------------
+location:
+  # 命中任一即视为「本地 / 已覆盖」（大小写不敏感，匹配的是 location 字段）
+  local:
+    - '\bVIC\b'
+    - 'victoria'
+    - 'melbourne'
+  # 明确写了远程的，不按外州处理
+  flexible:
+    - '\bremote\b'
+    - '\bwfh\b'
+    - 'work from home'
+    - 'anywhere in australia'
+  out_of_state_penalty: -1
+
+# ---------------------------------------------------------------
+# 去重
+# ---------------------------------------------------------------
+dedupe:
+  # 同一公司 + 同一标题，只保留一条（全国性毕业生项目会在多个城市各发一条）。
+  # 设为 true 则把城市也算进去，多城市会被视为不同岗位。
+  include_city: false
+  # 标题相似度阈值（仅在同一公司的候选之间比较）
+  title_similarity: 0.90
+
+# ---------------------------------------------------------------
+# 薪资：**只做解析，不做判断**
+#
+# 薪资字段经常缺失；这里只把薪资原文折成一个可比的年化区间，**不评价高低** ——
+# 档位阈值（偏低/中级/资深…）假设太多，容易误判，故意留空。
+# ---------------------------------------------------------------
+salary:
+  enabled: true
+  # 年化系数（这两个是有依据的客观事实，不是拍的）：
+  #   时 x 1976 = 38h/周 x 52 周（澳洲全职标准）
+  #   日 x 260  = 年工作日
+  hours_per_year: 1976
+  days_per_year: 260
+  # bands 与 contract_shift 已停用
+
+

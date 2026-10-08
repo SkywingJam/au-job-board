@@ -1,0 +1,96 @@
+{
+  "_comment": "Hand-written synthetic labels for the screenshot mock. Default notes use the backend Chinese canonical tags (shown as Prioritize / Relocation etc. in the English UI); custom Chinese, custom English and emoji tags are kept as typed.",
+  "labels": [
+    {
+      "uid": "seek:DEMO-001",
+      "eligibility": "eligible",
+      "interest": "want",
+      "action": "saved",
+      "note": "技术栈匹配；优先投递；"
+    },
+    {
+      "uid": "seek:DEMO-004",
+      "eligibility": "eligible",
+      "interest": "want",
+      "action": "applied",
+      "note": "大厂；之前已投；follow up Friday；"
+    },
+    {
+      "uid": "linkedin:DEMO-005",
+      "eligibility": "ineligible",
+      "interest": "no",
+      "action": "skipped",
+      "ineligible_reason": "Synthetic example: the posting says citizenship is mandatory.",
+      "note": "需公民或PR；"
+    },
+    {
+      "uid": "indeed:DEMO-007",
+      "eligibility": "eligible",
+      "interest": "no",
+      "action": "skipped",
+      "note": "通勤远；搬迁；"
+    },
+    {
+      "uid": "seek:DEMO-015",
+      "eligibility": "unsure",
+      "interest": "maybe",
+      "action": "saved",
+      "note": "信息量低；"
+    },
+    {
+      "uid": "indeed:DEMO-017",
+      "eligibility": "eligible",
+      "interest": "want",
+      "action": "applied",
+      "note": "需驾照；🚗 check roster；"
+    },
+    {
+      "uid": "seek:MOCK-101",
+      "eligibility": "eligible",
+      "interest": "want",
+      "action": "saved",
+      "note": "优先投递；技术栈匹配；🔥 great mentoring；ask about hybrid days；"
+    },
+    {
+      "uid": "seek:MOCK-103",
+      "eligibility": "eligible",
+      "interest": "want",
+      "note": "优先投递；离家近 ✨；"
+    },
+    {
+      "uid": "linkedin:MOCK-104",
+      "eligibility": "ineligible",
+      "interest": "no",
+      "action": "skipped",
+      "ineligible_reason": "Synthetic example: requires an NV1 clearance I do not hold.",
+      "note": "需保密审查；"
+    },
+    {
+      "uid": "seek:MOCK-105",
+      "eligibility": "ineligible",
+      "interest": "maybe",
+      "ineligible_reason": "Synthetic example: citizens only.",
+      "note": "需公民或PR；重复挂出；"
+    },
+    {
+      "uid": "seek:MOCK-107",
+      "eligibility": "unsure",
+      "interest": "no",
+      "note": "资历略高；经验要求偏高；title is absurdly long, kept to test wrapping；"
+    },
+    {
+      "uid": "seek:MOCK-113",
+      "eligibility": "eligible",
+      "interest": "maybe",
+      "action": "saved",
+      "note": "地区偏远；搬迁；"
+    },
+    {
+      "uid": "indeed:MOCK-110",
+      "eligibility": "eligible",
+      "interest": "want",
+      "action": "applied",
+      "note": "技术栈匹配；优先投递；"
+    }
+  ]
+}

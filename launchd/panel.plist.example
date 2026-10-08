@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Generic macOS LaunchAgent example for the local web panel.
+
+  This is a template. Replace the __PLACEHOLDER__ values before use; see
+  docs/launchd-examples.md for the placeholder table and a standard-library
+  renderer. It is not installed or loaded by the repository.
+
+  The panel is a long-running local service, so it uses RunAtLoad and KeepAlive.
+  It binds to the loopback interface (127.0.0.1) only. Remote access requires
+  your own protected access layer; do not expose the port directly.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.au-job-pipeline.panel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_PATH__</string>
+        <string>-u</string>
+        <string>-m</string>
+        <string>jobs.cli</string>
+        <string>--config</string>
+        <string>__CONFIG_PATH__</string>
+        <string>panel</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8090</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_DIR__</string>
+
+    <!-- Start at login and restart on exit; wait 10s between restarts. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/panel.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/panel.err</string>
+</dict>
+</plist>

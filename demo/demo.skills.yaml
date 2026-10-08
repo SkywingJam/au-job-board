@@ -1,0 +1,72 @@
+# Demo skill vocabulary: generic technology names only (no personal additions).
+# The panel's "add skill / alias" edits go to skills.local.yaml next to the
+# *copy* of this file inside the generated demo root, never back into this repo.
+version: 1
+
+skills:
+  - name: AWS
+    aliases: ["Amazon Web Services"]
+    not: []
+  - name: Docker
+    aliases: []
+    not: []
+  - name: Kubernetes
+    aliases: ["K8s"]
+    not: []
+  - name: Terraform
+    aliases: []
+    not: []
+  - name: Ansible
+    aliases: []
+    not: []
+  - name: Jenkins
+    aliases: []
+    not: []
+  - name: Linux
+    aliases: []
+    not: []
+  - name: Python
+    aliases: []
+    not: []
+  - name: Java
+    aliases: []
+    not: []
+  - name: JavaScript
+    aliases: []
+    not: []
+  - name: TypeScript
+    aliases: []
+    not: []
+  - name: React
+    aliases: ["ReactJS"]
+    not: []
+  - name: Spring Boot
+    aliases: []
+    not: []
+  - name: SQL
+    aliases: []
+    not: []
+  - name: PostgreSQL
+    aliases: ["Postgres"]
+    not: []
+  - name: Git
+    aliases: []
+    not: []
+  - name: Selenium
+    aliases: []
+    not: []
+  - name: Splunk
+    aliases: []
+    not: []
+  - name: SIEM
+    aliases: []
+    not: []
+  - name: Tableau
+    aliases: []
+    not: []
+  - name: Active Directory
+    aliases: ["AD"]
+    not: []
+  - name: Windows
+    aliases: []
+    not: []

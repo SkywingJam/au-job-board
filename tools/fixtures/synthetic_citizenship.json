@@ -1,0 +1,266 @@
+[
+  {
+    "id": "synthetic_citizenship_001",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "Applications for this position are open to Australian citizens only."
+  },
+  {
+    "id": "synthetic_citizenship_002",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "Candidates must be Australian Citizen to be considered for this role."
+  },
+  {
+    "id": "synthetic_citizenship_003",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "For this appointment you must be an Australian citizen."
+  },
+  {
+    "id": "synthetic_citizenship_004",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "Applicants must be a New Zealand citizen for this vacancy."
+  },
+  {
+    "id": "synthetic_citizenship_005",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "Australian citizenship only will be accepted for this role."
+  },
+  {
+    "id": "synthetic_citizenship_006",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "To be eligible you must be an Australian Citizen or Permanent Resident."
+  },
+  {
+    "id": "synthetic_citizenship_007",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "This employer requires Australian citizenship or permanent residency."
+  },
+  {
+    "id": "synthetic_citizenship_008",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "**About you:** * Australian Citizen * Strong communication skills."
+  },
+  {
+    "id": "synthetic_citizenship_009",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "Australian Work Rights: PR/Citizenship."
+  },
+  {
+    "id": "synthetic_citizenship_010",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "Only applicants who hold PR or Citizenship will progress."
+  },
+  {
+    "id": "synthetic_citizenship_011",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "Eligibility: Australian citizens and permanent residents only."
+  },
+  {
+    "id": "synthetic_citizenship_012",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "Applicants must be Australian Citizens or Permanent Residents; temporary visa holders cannot be considered."
+  },
+  {
+    "id": "synthetic_citizenship_013",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "Australian citizenship or permanent residency is required. This is a sovereign requirement and sponsorship is not available."
+  },
+  {
+    "id": "synthetic_citizenship_014",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "Hold Australian citizenship or PR to be eligible."
+  },
+  {
+    "id": "synthetic_citizenship_015",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "This role requires PR or Australian Citizenship."
+  },
+  {
+    "id": "synthetic_citizenship_016",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "Due to client requirements, candidates must be Australian Citizens."
+  },
+  {
+    "id": "synthetic_citizenship_017",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "This position is open to Australian Citizens."
+  },
+  {
+    "id": "synthetic_citizenship_018",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "At application, hold Australian/New Zealand citizenship or permanent residency."
+  },
+  {
+    "id": "synthetic_citizenship_019",
+    "expected": "exclude",
+    "category": "pr_standalone",
+    "text": "You must be a permanent resident and currently based in Australia."
+  },
+  {
+    "id": "synthetic_citizenship_020",
+    "expected": "exclude",
+    "category": "pr_standalone",
+    "text": "Application question: are you a permanent resident of Australia?"
+  },
+  {
+    "id": "synthetic_citizenship_021",
+    "expected": "exclude",
+    "category": "pr_standalone",
+    "text": "Candidates must have permanent residency for this role."
+  },
+  {
+    "id": "synthetic_citizenship_022",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "Graduates who are either Australian or New Zealand Citizen may apply."
+  },
+  {
+    "id": "synthetic_citizenship_023",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "At application you must be an Australian / New Zealand Citizen."
+  },
+  {
+    "id": "synthetic_citizenship_024",
+    "expected": "exclude",
+    "category": "citizen_or_pr",
+    "text": "This intake is for permanent residents only."
+  },
+  {
+    "id": "synthetic_citizenship_025",
+    "expected": "exclude",
+    "category": "citizen_only",
+    "text": "You must be a New Zealand or Australian citizen."
+  },
+  {
+    "id": "synthetic_citizenship_026",
+    "expected": "exclude",
+    "category": "clearance_and_police",
+    "text": "Willingness to undergo police checks and obtain a security clearance where required."
+  },
+  {
+    "id": "synthetic_citizenship_027",
+    "expected": "exclude",
+    "category": "clearance_and_police",
+    "text": "This role requires a current National Police Clearance and an Australian Defence Security Clearance."
+  },
+  {
+    "id": "synthetic_citizenship_028",
+    "expected": "exclude",
+    "category": "security_clearance",
+    "text": "Applicants must hold a Baseline Security Clearance."
+  },
+  {
+    "id": "synthetic_citizenship_029",
+    "expected": "exclude",
+    "category": "security_clearance",
+    "text": "This position requires an NV1 clearance."
+  },
+  {
+    "id": "synthetic_citizenship_030",
+    "expected": "exclude",
+    "category": "security_clearance",
+    "text": "The role requires AGSVA clearance."
+  },
+  {
+    "id": "synthetic_citizenship_031",
+    "expected": "exclude",
+    "category": "sponsorship",
+    "text": "We cannot sponsor overseas applicants; sponsorship is not available for this role."
+  },
+  {
+    "id": "synthetic_citizenship_032",
+    "expected": "keep",
+    "category": "visa_open",
+    "text": "You must be a Permanent Resident or hold a valid work visa with full working rights."
+  },
+  {
+    "id": "synthetic_citizenship_033",
+    "expected": "keep",
+    "category": "police_clearance",
+    "text": "The successful applicant must obtain a National Police Clearance before starting."
+  },
+  {
+    "id": "synthetic_citizenship_034",
+    "expected": "keep",
+    "category": "visa_open",
+    "text": "Applicants must be an Australian Citizen, Permanent Resident or hold a valid work permit or visa with full unrestricted working rights."
+  },
+  {
+    "id": "synthetic_citizenship_035",
+    "expected": "keep",
+    "category": "visa_open",
+    "text": "Applicants must be an Australian Citizen, Permanent Resident or hold a valid work permit or visa."
+  },
+  {
+    "id": "synthetic_citizenship_036",
+    "expected": "keep",
+    "category": "visa_open",
+    "text": "You must be an Australian Citizen or hold a valid work permit or visa with full unrestricted working rights."
+  },
+  {
+    "id": "synthetic_citizenship_037",
+    "expected": "keep",
+    "category": "eeo_noise",
+    "text": "We are proud to be an equal opportunity workplace. We consider all applicants regardless of race, religion, sex, national origin, citizenship, disability or age."
+  },
+  {
+    "id": "synthetic_citizenship_038",
+    "expected": "exclude",
+    "category": "eeo_noise",
+    "text": "To be eligible you must be an Australian citizen. We are an equal employment opportunity employer."
+  },
+  {
+    "id": "synthetic_citizenship_039",
+    "expected": "keep",
+    "category": "diversity",
+    "text": "We encourage applications from Aboriginal and Torres Strait Islander peoples, people with disability and people from culturally diverse backgrounds."
+  },
+  {
+    "id": "synthetic_citizenship_040",
+    "expected": "keep",
+    "category": "police_clearance",
+    "text": "Applicants who have lived overseas may need to provide an International Police Check."
+  },
+  {
+    "id": "synthetic_citizenship_041",
+    "expected": "keep",
+    "category": "pr_narrative",
+    "text": "International graduates may start on a temporary contract and transition to an ongoing role once they obtain permanent residency."
+  },
+  {
+    "id": "synthetic_citizenship_042",
+    "expected": "keep",
+    "category": "police_clearance",
+    "text": "Preferred applicants will be required to undergo a National Police Record Check."
+  },
+  {
+    "id": "synthetic_citizenship_043",
+    "expected": "keep",
+    "category": "work_rights",
+    "text": "You must have the right to live and work in Australia. A National Police Check is required."
+  },
+  {
+    "id": "synthetic_citizenship_044",
+    "expected": "keep",
+    "category": "visa_open",
+    "text": "This role is open to all candidates with full working rights, including visa holders."
+  }
+]

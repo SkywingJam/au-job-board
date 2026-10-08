@@ -1,0 +1,115 @@
+# Demo rules: generic and synthetic. Written for the demo only; they are NOT a
+# copy of the production rules.yaml and say nothing about any real candidate.
+# Qualification handling here is the legacy keyword filter, nothing newer.
+
+version: 1
+
+exclude:
+  - id: clearance.named
+    desc: Named security-clearance levels.
+    any:
+      - '\bNV1\b'
+      - '\bNV2\b'
+      - '\bTSPV\b'
+      - '\bAGSVA\b'
+      - 'negative\s+vetting'
+
+  - id: citizenship.exclusive
+    desc: Explicit citizens-only wording.
+    any:
+      - '\baustralian\s+citizens?\s+only'
+      - '\baustralian\s+citizenship\s+is\s+(mandatory|required)'
+      - '\bopen\s+to\s+australian\s+citizens?\b'
+
+  - id: citizenship.or_pr
+    desc: Citizen-or-PR wording. The visa override below rescues the open phrasing.
+    any:
+      - '\bcitizens?\b[^.\n]{0,60}\bpermanent\s+residents?'
+
+overrides:
+  - id: visa.or
+    desc: Citizen / PR / valid work visa is an open phrasing, so keep the job.
+    any:
+      - 'or\s+hold\s+a\s+valid\s+work\s+(permit|visa)'
+
+tiers:
+  T1:
+    weight: 3
+    classification:
+      - 'Security'
+      - 'Developers/Programmers'
+      - 'Engineering - Software'
+      - 'Testing & Quality Assurance'
+      - 'Networks & Systems Administration'
+    title:
+      - '\b(cyber|security|soc\b)'
+      - '\b(software|full[- ]?stack|back[- ]?end|front[- ]?end|developer)'
+      - '\b(devops|platform|cloud|infrastructure)'
+      - '\b(test|qa\b|automation)'
+      - '\bnetwork'
+      - '\barchitect'
+  T2:
+    weight: 1
+    classification:
+      - 'Help Desk & IT Support'
+    title:
+      - '\b(it support|help ?desk|service desk)'
+      - '\bsupport\s+(consultant|officer|specialist)\b'
+  T3:
+    weight: 0
+
+level:
+  positive:
+    - {pattern: '\b(graduate|grads?\b)', score: 3}
+    - {pattern: '\b(junior|entry[- ]level)', score: 3}
+    - {pattern: '\b(intern|internship|trainee)', score: 3}
+  negative:
+    - {pattern: '\b(senior|snr)', score: -3}
+    - {pattern: '\b(lead|principal)', score: -4}
+    - {pattern: '\b(manager|head of|director)', score: -5}
+
+experience:
+  lookback: 70
+  lookahead: 26
+  require_cue: '(you\b[^.\n]{0,20}\b(have|bring|need)|looking for|minimum|at least|essential|must have)'
+  deny_cue: '(our team|we (have|.ve)|more than\s+\d|\bover\s+\d|founded|established|\bago\b)'
+  buckets:
+    - {min_years: 5, score: -3}
+    - {min_years: 3, score: -2}
+    - {min_years: 1, score: -1}
+
+job_level:
+  "entry level": 3
+  "internship": 3
+  "associate": 1
+  "mid-senior level": -3
+  "director": -6
+
+adjust:
+  - id: architect.longterm
+    desc: Architect roles are rarely entry level, so a small demo penalty.
+    pattern: '\barchitect\b'
+    score: -2
+  - id: licence.required
+    desc: Mentions a driver licence. Marked and down-weighted, never excluded.
+    pattern: "(driver['’]?s?|driving)\\s+licen[cs]e"
+    score: -1
+
+# "local" is just the demo's home region, used to show the small out-of-state penalty.
+location:
+  local:
+    - '\bVIC\b'
+    - 'victoria'
+    - 'melbourne'
+  flexible:
+    - '\bremote\b'
+  out_of_state_penalty: -1
+
+dedupe:
+  include_city: false
+  title_similarity: 0.90
+
+salary:
+  enabled: true
+  hours_per_year: 1976
+  days_per_year: 260

@@ -1,0 +1,67 @@
+name: Offline public tests
+
+# Manual dispatch only until a public repository exists. The maintainer
+# development checkout is not a public candidate, so there is deliberately no
+# push or pull_request trigger here. Enable automatic triggers only after the
+# clean public candidate is prepared and reviewed.
+on:
+  workflow_dispatch:
+
+# Least privilege: this workflow only reads the checkout.
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    name: macOS 15 / Python 3.12 / Node 24.21.0
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      # Official actions, looked up from the actions repositories on 2026-10-07
+      # and pinned to a full release tag:
+      #   actions/checkout     v7.0.1
+      #   actions/setup-python v7.0.0
+      #   actions/setup-node   v7.0.0
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Reject a private development checkout
+        shell: bash
+        run: |
+          set -eu
+          # Metadata only: list tracked paths, never read file contents.
+          tracked="$(git ls-files)"
+          banned="config.yaml skills.local.yaml .memory research data out"
+          found=""
+          for path in $banned; do
+            if printf '%s\n' "$tracked" | grep -qx "$path" \
+               || printf '%s\n' "$tracked" | grep -q "^$path/"; then
+              found="$found $path"
+            fi
+          done
+          if printf '%s\n' "$tracked" | grep -qE '^launchd/com\..*\.plist$'; then
+            found="$found launchd/com.*.plist"
+          fi
+          if [ -n "$found" ]; then
+            echo "::error::This checkout tracks private development inputs:$found"
+            echo "Run this workflow only on a clean public candidate."
+            exit 1
+          fi
+          echo "No known private paths are tracked; continuing."
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node 24.21.0
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "24.21.0"
+
+      - name: Install the runtime dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run the public offline test entry
+        run: python tools/run_public_tests.py

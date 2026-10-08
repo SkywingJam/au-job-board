@@ -1,0 +1,27 @@
+# Demo-only configuration template (synthetic demo).
+#
+# This file is NOT read by the production CLI or panel. jobs/demo.py loads it,
+# fills in the absolute demo paths (db_path, report.out_dir, skills_path) and
+# writes the result into the generated demo root as config.yaml.
+#
+# There is intentionally no seek / jobspy / queries section: the demo has no
+# scraping configuration and never imports a source adapter.
+
+db_path: jobs.db            # replaced by an absolute path inside the demo root
+
+report:
+  top_n: 20
+  out_dir: reports          # replaced by an absolute path inside the demo root
+
+# Loopback only. 8091 is the demo default; production commonly uses 8090.
+panel:
+  host: "127.0.0.1"
+  port: 8091
+  page_size: 10             # small on purpose, so paging is visible with ~16 postings
+  recommend:
+    low_ratio: 0.1
+    low_max_score: 0
+
+# Presence of this section turns on the "Demo · Synthetic data" banner.
+demo:
+  id: jd-board-demo-001

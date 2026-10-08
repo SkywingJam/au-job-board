@@ -1,0 +1,334 @@
+{
+  "_comment": "Hand-written synthetic postings for the standalone demo. Every company, role, link and sentence is fictional and was written for this file; nothing is copied or paraphrased from a real posting. Dates are stored as days_ago and resolved against the generation date so the demo never goes stale. Source names (seek / linkedin / indeed) are generic format enums only. Label text fields (note, ineligible_reason) are {en, zh} pairs; jobs.demo picks one with --lang (default en). Posting text itself stays English.",
+  "demo_id": "jd-board-demo-001",
+  "jobs": [
+    {
+      "source": "seek",
+      "source_id": "DEMO-001",
+      "title": "Graduate Software Engineer",
+      "company": "Quillfeather Systems Pty Ltd",
+      "location": "Melbourne VIC",
+      "salary": "$78,000 – $88,000 a year",
+      "work_type": "Full time",
+      "classification": "Developers/Programmers",
+      "job_level": null,
+      "days_ago": 3,
+      "teaser": "Join a small product team building scheduling software.",
+      "description": "Quillfeather Systems is a fictional company used for this demo. As a graduate engineer you will build and test features for an internal scheduling product alongside a friendly team. You will work mostly in Python and SQL, use Git every day, and learn how we ship with Docker. No commercial experience is needed; we will provide training and a named mentor. Applicants must hold full work rights in Australia."
+    },
+    {
+      "source": "linkedin",
+      "source_id": "DEMO-002",
+      "title": "Graduate Software Engineer",
+      "company": "Quillfeather Systems Pty. Ltd.",
+      "location": "Melbourne, Victoria, Australia",
+      "salary": null,
+      "work_type": "Full-time",
+      "classification": null,
+      "job_level": "Entry level",
+      "days_ago": 2,
+      "teaser": null,
+      "description": "Duplicate listing of the Quillfeather graduate role, cross-posted on a second platform with different company punctuation. Python, SQL, Git and Docker. Training provided for graduates and career changers."
+    },
+    {
+      "source": "indeed",
+      "source_id": "DEMO-003",
+      "title": "Graduate Software Engineer",
+      "company": "Quillfeather Systems",
+      "location": "Melbourne VIC",
+      "salary": null,
+      "work_type": "Full-time",
+      "classification": null,
+      "job_level": null,
+      "days_ago": 5,
+      "teaser": null,
+      "description": "Third copy of the same fictional graduate role, aggregated from the employer careers page. Python and SQL; mentoring and training provided."
+    },
+    {
+      "source": "seek",
+      "source_id": "DEMO-004",
+      "title": "Junior Security Analyst (SOC)",
+      "company": "Harbourlight Security Labs",
+      "location": "Melbourne VIC",
+      "salary": "$85k – $95k + super",
+      "work_type": "Full time",
+      "classification": "Security",
+      "job_level": null,
+      "days_ago": 4,
+      "teaser": "Monitor alerts, triage incidents, grow into threat hunting.",
+      "description": "Harbourlight Security Labs is a fictional company. You will triage alerts in our Splunk-based SIEM, document findings and escalate incidents to senior analysts. Comfort with Linux and basic scripting is expected; we will teach the rest. This is an entry-level seat in a rostered team. Candidates may be Australian citizens, permanent residents or hold a valid work visa."
+    },
+    {
+      "source": "linkedin",
+      "source_id": "DEMO-005",
+      "title": "Cybersecurity Graduate Program 2027",
+      "company": "Redgum Cyber Collective",
+      "location": "Sydney, New South Wales, Australia",
+      "salary": "$72,000 – $76,000 a year",
+      "work_type": "Full-time",
+      "classification": null,
+      "job_level": "Entry level",
+      "days_ago": 6,
+      "teaser": null,
+      "description": "A fictional twelve-month rotation across advisory, testing and response teams. Graduates join a cohort of six. Australian citizenship is mandatory for this program because of the nature of the client work."
+    },
+    {
+      "source": "seek",
+      "source_id": "DEMO-006",
+      "title": "Defence Software Tester",
+      "company": "Ironbark Defence Systems",
+      "location": "Canberra ACT",
+      "salary": "$110,000 – $125,000 a year",
+      "work_type": "Full time",
+      "classification": "Testing & Quality Assurance",
+      "job_level": null,
+      "days_ago": 8,
+      "teaser": "Test mission software for a fictional defence integrator.",
+      "description": "Ironbark Defence Systems is fictional. You will design and run test plans for embedded mission software. The role requires an active NV1 security clearance, and you will be sponsored for higher levels over time. Experience with Python test harnesses is useful."
+    },
+    {
+      "source": "indeed",
+      "source_id": "DEMO-007",
+      "title": "IT Support Officer",
+      "company": "Mossvale Community Health",
+      "location": "Melbourne VIC",
+      "salary": "$32 – $36 per hour",
+      "work_type": "Part time",
+      "classification": "Help Desk & IT Support",
+      "job_level": null,
+      "days_ago": 7,
+      "teaser": null,
+      "description": "A fictional community health provider needs a service desk officer for first-line support. You will reset passwords in Active Directory, look after Windows laptops and log tickets. Shifts are split across two clinic sites. Customer-friendly communication matters more than prior experience."
+    },
+    {
+      "source": "linkedin",
+      "source_id": "DEMO-008",
+      "title": "Platform Engineer (Cloud)",
+      "company": "Tidewater Cloud Co",
+      "location": "Melbourne, Victoria, Australia",
+      "salary": "$140,000 – $160,000 a year",
+      "work_type": "Full-time",
+      "classification": null,
+      "job_level": "Mid-senior level",
+      "days_ago": 9,
+      "teaser": null,
+      "description": "Tidewater Cloud Co is fictional. You will own Terraform modules and Kubernetes clusters on AWS for internal product teams. You have 5+ years of experience running production infrastructure and are comfortable being on a light on-call rota."
+    },
+    {
+      "source": "seek",
+      "source_id": "DEMO-009",
+      "title": "Senior Backend Developer",
+      "company": "Copperfield Fintech",
+      "location": "Brisbane QLD",
+      "salary": null,
+      "work_type": "Full time",
+      "classification": "Developers/Programmers",
+      "job_level": null,
+      "days_ago": 10,
+      "teaser": "Payments back end for a fictional fintech.",
+      "description": "Copperfield Fintech is a made-up company. You will design Java and Spring Boot services backed by PostgreSQL and mentor two junior developers. You bring at least 6 years of experience building reliable APIs. Hybrid, with two office days in Brisbane. No salary is listed on the advertisement."
+    },
+    {
+      "source": "seek",
+      "source_id": "DEMO-010",
+      "title": "Test Automation Analyst",
+      "company": "Larkspur Retail Tech",
+      "location": "Melbourne VIC",
+      "salary": "Competitive package",
+      "work_type": "Full time",
+      "classification": "Testing & Quality Assurance",
+      "job_level": null,
+      "days_ago": 11,
+      "teaser": null,
+      "description": "Larkspur Retail Tech is fictional. Build Selenium and Python test suites for an online store, run them in Jenkins and report defects clearly. We value curiosity and clear writing. The salary line on this advert is text only, which the parser cannot read as a number."
+    },
+    {
+      "source": "indeed",
+      "source_id": "DEMO-011",
+      "title": "Data Analyst - 6 month contract",
+      "company": "Saltbush Analytics",
+      "location": "Remote (Australia)",
+      "salary": "$520 – $580 per day",
+      "work_type": "Contract",
+      "classification": null,
+      "job_level": null,
+      "days_ago": 12,
+      "teaser": null,
+      "description": "Saltbush Analytics is a fictional consultancy. Support a reporting migration using SQL and Tableau; Python is a bonus. Fully remote within Australia, six-month initial term with possible extension."
+    },
+    {
+      "source": "seek",
+      "source_id": "DEMO-012",
+      "title": "Frontend Developer (React)",
+      "company": "Wattlebird Studio",
+      "location": "Melbourne VIC",
+      "salary": null,
+      "work_type": "Full time",
+      "classification": "Developers/Programmers",
+      "job_level": null,
+      "days_ago": 5,
+      "teaser": "Design-led product studio, fictional.",
+      "description": "Wattlebird Studio is an invented studio. You will build accessible React and TypeScript interfaces and review pull requests from teammates. Salary: $90,000 - $105,000 plus super, stated in the body only (the structured salary field is empty). Familiarity with plain JavaScript and automated tests is a plus."
+    },
+    {
+      "source": "linkedin",
+      "source_id": "DEMO-013",
+      "title": "Network Support Engineer",
+      "company": "Kestrel Networks",
+      "location": "Geelong, Victoria, Australia",
+      "salary": "$75,000 – $85,000 a year",
+      "work_type": "Full-time",
+      "classification": null,
+      "job_level": "Associate",
+      "days_ago": 6,
+      "teaser": null,
+      "description": "Kestrel Networks is fictional. Support small-business customers' routers, switches and wireless, with Linux-based monitoring. Regional travel is occasional. A driver's licence is required for site visits."
+    },
+    {
+      "source": "seek",
+      "source_id": "DEMO-014",
+      "title": "Network Support Engineer L2",
+      "company": "Kestrel Networks",
+      "location": "Geelong VIC",
+      "salary": null,
+      "work_type": "Full time",
+      "classification": "Networks & Systems Administration",
+      "job_level": null,
+      "days_ago": 4,
+      "teaser": null,
+      "description": "Near-duplicate of the Kestrel posting: the title differs by a level suffix, which the fuzzy matcher should still group with the other Kestrel listing. Linux monitoring and customer-site support."
+    },
+    {
+      "source": "seek",
+      "source_id": "DEMO-015",
+      "title": "Graduate Program - Technology",
+      "company": "Brightwater Group",
+      "location": "Melbourne VIC",
+      "salary": "$70,000 – $74,000 a year",
+      "work_type": "Full time",
+      "classification": "Engineering - Software",
+      "job_level": null,
+      "days_ago": 2,
+      "teaser": "Rotations across engineering, data and operations.",
+      "description": "Brightwater Group is fictional. This graduate program rotates across engineering, data and operations teams. Applicants must be Australian citizens, permanent residents or hold a valid work visa. You will meet a buddy in week one and present a showcase project at the end of each rotation."
+    },
+    {
+      "source": "seek",
+      "source_id": "DEMO-016",
+      "title": "Senior Cloud Architect",
+      "company": "Orrery Consulting",
+      "location": "Sydney NSW",
+      "salary": "$180,000 – $200,000 a year",
+      "work_type": "Full time",
+      "classification": "Engineering - Software",
+      "job_level": null,
+      "days_ago": 3,
+      "teaser": null,
+      "description": "Orrery Consulting is fictional. Lead cloud architecture engagements on AWS for large clients, set standards for infrastructure code and coach delivery teams. You have more than 10 years of experience and strong stakeholder skills."
+    },
+    {
+      "source": "indeed",
+      "source_id": "DEMO-017",
+      "title": "DevOps Engineer (Graduate)",
+      "company": "Fernhollow Logistics",
+      "location": "Melbourne VIC",
+      "salary": null,
+      "work_type": "Full-time",
+      "classification": null,
+      "job_level": null,
+      "days_ago": 6,
+      "teaser": null,
+      "description": "Fernhollow Logistics is fictional. Graduates will maintain CI pipelines in Jenkins, automate server setup with Ansible and keep Linux hosts healthy. A driver's licence is helpful for occasional depot visits. Training provided."
+    },
+    {
+      "source": "seek",
+      "source_id": "DEMO-018",
+      "title": "Junior Support Consultant",
+      "company": "Pebblecreek Software",
+      "location": "Melbourne VIC",
+      "salary": "$62,000 – $68,000 a year",
+      "work_type": "Full time",
+      "classification": "Help Desk & IT Support",
+      "job_level": null,
+      "days_ago": 45,
+      "teaser": null,
+      "description": "Pebblecreek Software is fictional. This advert has been live for 45 days, so the panel shows its age tag and keeps it out of the Recommended view. Answer customer tickets for a scheduling product and write short help articles."
+    },
+    {
+      "source": "linkedin",
+      "source_id": "DEMO-019",
+      "title": "QA Intern",
+      "company": "Dunmore Games",
+      "location": "Melbourne, Victoria, Australia",
+      "salary": null,
+      "work_type": "Internship",
+      "classification": null,
+      "job_level": "Internship",
+      "days_ago": 1,
+      "teaser": "Short teaser only; the full description has not been fetched yet.",
+      "description": null
+    }
+  ],
+  "labels": [
+    {
+      "uid": "seek:DEMO-001",
+      "eligibility": "eligible",
+      "interest": "want",
+      "action": "saved",
+      "note": {
+        "en": "Stack match; Apply first",
+        "zh": "技术栈匹配；优先投递"
+      }
+    },
+    {
+      "uid": "seek:DEMO-004",
+      "eligibility": "eligible",
+      "interest": "want",
+      "action": "applied",
+      "note": {
+        "en": "Well-known employer",
+        "zh": "大厂"
+      }
+    },
+    {
+      "uid": "linkedin:DEMO-005",
+      "eligibility": "ineligible",
+      "interest": "no",
+      "action": "skipped",
+      "ineligible_reason": {
+        "en": "Synthetic example: the posting says citizenship is mandatory.",
+        "zh": "合成示例：岗位写明必须具有公民身份。"
+      },
+      "note": {
+        "en": "Needs citizen or PR",
+        "zh": "需公民或PR"
+      }
+    },
+    {
+      "uid": "indeed:DEMO-007",
+      "eligibility": "eligible",
+      "interest": "no",
+      "action": "skipped",
+      "note": {
+        "en": "Long commute",
+        "zh": "通勤远"
+      }
+    },
+    {
+      "uid": "seek:DEMO-015",
+      "eligibility": "unsure",
+      "interest": "maybe",
+      "action": "saved"
+    },
+    {
+      "uid": "indeed:DEMO-017",
+      "eligibility": "eligible",
+      "interest": "want",
+      "action": "applied",
+      "note": {
+        "en": "Needs driver's licence",
+        "zh": "需驾照"
+      }
+    }
+  ]
+}

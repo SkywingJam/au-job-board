@@ -1,0 +1,108 @@
+# Example configuration for the job pipeline.
+#
+# Copy this file to config.yaml for a NEW installation and edit the values.
+# See docs/public-configuration.md for the public/private boundary and the
+# overwrite-safe copy command. Existing deployments should point at their own
+# file with --config instead of overwriting a running configuration.
+#
+# This file only controls WHAT is fetched. Filtering and scoring live in
+# rules.yaml. Only the fetch, details and run commands use the network.
+# analyze, report, audit, status, label, panel and the eligibility review
+# commands never fetch. Reading this file or starting the panel does not
+# trigger a fetch.
+
+# SQLite database path, relative to the project root (or absolute).
+# data/ and out/ are runtime output and are excluded from a public snapshot.
+db_path: data/jobs.db
+
+# Generic example search terms. Replace them with the roles you actually want.
+# These are deliberately broad and are not personal preferences.
+queries:
+  - cybersecurity
+  - security analyst
+  - software engineer
+  - full stack developer
+  - devops engineer
+  - test analyst
+  - graduate program technology
+  - IT support
+
+seek:
+  enabled: true
+  # SEEK "where" values. "All Australia" or a city/state such as "Melbourne VIC".
+  locations:
+    - "All Australia"
+  pages_per_query: 2        # 20 listings per page
+  daterange: 7              # server-side filter: only the last N days
+  detail_sleep: 0.25        # pause after each detail request (be polite)
+
+jobspy:
+  indeed:
+    enabled: true
+    location: "Melbourne VIC"
+    country_indeed: "australia"
+    results_wanted: 40
+  linkedin:
+    # LinkedIn is disabled by default: it is the slowest source and automated
+    # access is a grey area. Enable it only if you accept that trade-off.
+    enabled: false
+    location: "Melbourne, Victoria, Australia"
+    results_wanted: 20
+    fetch_description: true   # also fetch full descriptions (slow)
+
+# Report output. out_dir is relative to the project root (or absolute).
+report:
+  top_n: 60
+  out_dir: out
+
+# Local web panel. It has no built-in authentication, so keep it on a loopback
+# address such as 127.0.0.1 unless you add your own protected access layer.
+panel:
+  host: "127.0.0.1"
+  port: 8090
+  page_size: 40
+  # Calibration sampling for the "recommend" view: every N-th card is a
+  # low-score job so that low-scoring jobs still receive labelling samples.
+  # Set low_ratio to 0 to disable sampling.
+  recommend:
+    low_ratio: 0.1
+    low_max_score: 0
+
+# Filtering mode. This section is separate from eligibility. The missing
+# default is legacy: the existing folded-text rules engine in rules.yaml.
+# Only legacy is accepted; an explicit profile_v1 is rejected before the
+# database is opened. The public example stays on legacy.
+filtering:
+  mode: legacy
+
+# Legacy rule switches for analyze. Separate from the eligibility section:
+# this section selects which rules.yaml exclude / override entries run.
+# Supported profiles: citizen, permanent_resident, 485, student_visa, custom.
+#   485 / student_visa / custom keep every rule on (this example).
+#   citizen disables citizenship.exclusive and citizenship.or_pr.
+#   permanent_resident disables citizenship.or_pr.
+# Optional per-rule overrides by rule id: true runs it, false disables it.
+# citizenship.requirement is a mixed rule and stays on for every preset, so
+# citizen / PR presets can still exclude; visa.or stays a global override.
+# See docs/legacy-rule-profiles.md.
+# Editing this section does not recompute existing results, and the running
+# panel does not hot-reload it. Its Settings page shows the profile used by the
+# last analyze. To apply a change, run from the repo directory:
+#   .venv/bin/python -m jobs.cli analyze
+# This refreshes the machine analysis stored in the database, keeps your manual
+# labels and notes, and does not fetch new jobs. Later analyze / scheduled runs
+# read the new profile.
+legacy_rule_profile:
+  profile: "485"
+  # exclude:
+  #   citizenship.requirement: false
+  # overrides:
+  #   visa.or: false
+
+# Eligibility profile. This is a software capability template, not a legal
+# determination, and it is only read by the read-only eligibility-profile command.
+# Supported values: citizen, permanent_resident, 485, student_visa, custom.
+# Choose the one that matches your own situation. See docs/eligibility-profiles.md.
+# The value below is only an example of the syntax.
+eligibility:
+  profile: citizen

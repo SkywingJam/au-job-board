@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+
+# Private runtime configuration and the local vocabulary overlay.
+# config.example.yaml and skills.local.example.yaml are the public examples.
+config.yaml
+skills.local.yaml
+
+# Private corpora, memory and runtime reports.
+research/
+.memory/
+
+# Virtual environments (large, never committed)
+.runtime/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime databases and reports (rebuildable from a fetch)
+data/
+out/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
