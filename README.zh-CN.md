@@ -2,7 +2,7 @@
   <img src="docs/demo-video/banner-zh.png" alt="集中岗位、快速筛选、清晰跟进。多个招聘平台，一个清晰列表。" width="800">
 </p>
 
-# AU Job Pipeline
+# AU Job Board
 
 [English](README.md) · 简体中文
 
@@ -69,14 +69,16 @@
 ## 安装
 
 工具以源码方式安装到独立虚拟环境中。步骤见[安装指南](docs/install.md)（英文）。
-目前实测的是 Python 3.12 + macOS 15，其他版本和平台未验证。获取源码和安装依赖都可能需要联网；
+目前只在一台机器上实测了 Python 3.12 + macOS 15，其他版本和平台未验证。获取源码和安装依赖都可能需要联网；
 离线检查与合成演示不联网。
 
-从公开仓库获取源码。最终地址尚未确定，下面用占位符模板；运行前请替换，不要照抄占位符：
+拟定的仓库地址是 `https://github.com/SkywingJam/au-job-board`，但它**尚未创建或公开**（2026-10-08 查询返回 404）。
+在作者公开之前，下面的 clone 命令不会成功；地址失败或不存在不能算作安装结果。如果你已经有源码
+（下载或他人提供的副本），直接使用那个目录。仓库公开之后，再克隆到新目录：
 
 ```bash
-git clone <PUBLIC_REPOSITORY_URL> au-job-pipeline
-cd au-job-pipeline
+git clone https://github.com/SkywingJam/au-job-board au-job-board
+cd au-job-board
 ```
 
 ### Agent 辅助安装
@@ -84,10 +86,14 @@ cd au-job-pipeline
 AI Agent 可走同一套步骤，详见 [Agent 辅助安装](docs/agent-install.md)（英文）。把下面的指令
 复制给 Agent：
 
-> Install this project from source following docs/install.md and
-> docs/agent-install.md. Get the source from <PUBLIC_REPOSITORY_URL> into a new
-> directory I name; if that placeholder is not filled in, ask me for the address
-> and do not guess it or use a private remote. Create a project-local virtual
+> Install AU Job Board from source following docs/install.md and
+> docs/agent-install.md. The intended repository is
+> https://github.com/SkywingJam/au-job-board, which may not be
+> published yet. Clone it into a new directory I name only if it is reachable;
+> if it returns 404, is unreachable or you lack access, report that the source
+> is unavailable and ask me for another source, such as a downloaded copy. Do
+> not guess another address, use a private remote, or create or publish a
+> repository. Create a project-local virtual
 > environment with Python 3.12 and install requirements.txt. Getting the source
 > and installing dependencies may both use the network. Keep any existing
 > configuration and database untouched. Before guessing any personal setting,
@@ -122,17 +128,25 @@ AI Agent 可走同一套步骤，详见 [Agent 辅助安装](docs/agent-install.
 
 ## 项目状态
 
-本仓库**正在为可能的公开发布做准备**，尚未发布。以下事项尚未决定或尚未验证，文档不暗示相反的结论：
+AU Job Board **尚未正式发布**。已经确定并检查过的部分：
 
-- 最终项目名称和仓库地址（许可证已确定为 MIT，见[许可证](#许可证)）；
-- 公开版本会包含哪些配置、规则和词表文件；
-- 全新机器上的安装只作为候选流程在 Python 3.12 + macOS 15（验证时为 15.7.8）上验证过（见
-  [安装验证](docs/installation-verification.md)）；其他操作系统和 Python 版本未验证，
-  macOS 15 / Python 3.12 的离线测试工作流尚未在 GitHub 上实际运行；
-- 当前开发仓库的 Git 历史含有私人使用数据，不会原样公开。
+- **名称与地址**：项目名为 AU Job Board，拟定仓库为 `https://github.com/SkywingJam/au-job-board`。该仓库尚未创建或公开
+  （2026-10-08 查询返回 404），因此没有验证过从它克隆。
+- **许可证与范围**：MIT（见[许可证](#许可证)）；公开内容是固定的 296 个文件。
+- **干净历史与本机安装检查**：用这些文件建立了只有一个根提交的新历史。2026-10-08 在一台
+  macOS 15.8（arm64）机器上，用 Python 3.12.4 和 Node 24.5.0，从它的本地 fresh clone 加全新
+  Python 虚拟环境完成了验证：依赖安装、CLI 帮助、只读资格档案、合成演示、合成演示面板，以及全部
+  16 项公共离线测试。细节和限制见[安装验证](docs/installation-verification.md)（英文）。
 
-`requirements.txt` 列出运行依赖（`python-jobspy` 与 `PyYAML`）。macOS LaunchAgent 示例只是模板，
-仅做过离线验证。
+尚未验证，文档不暗示相反的结论：
+
+- 从公开 GitHub 仓库获取源码，以及 GitHub Actions 离线测试工作流（工作流目标是 Node 24.21.0，
+  本机检查用的是 24.5.0）；
+- 其他操作系统、其他 Python 版本，以及上述那一台机器之外的任何环境；
+- 对 SEEK、Indeed、LinkedIn 的真实抓取，以及 macOS LaunchAgent 模板的实际安装（只做过离线验证）；
+- 所有资格规则和来源行为。
+
+`requirements.txt` 列出运行依赖（`python-jobspy` 与 `PyYAML`）。
 
 ## 文档
 
@@ -151,7 +165,7 @@ AI Agent 可走同一套步骤，详见 [Agent 辅助安装](docs/agent-install.
 | [参与贡献](docs/contributing.md) | 开发、测试与数据规则 |
 | [公共测试](docs/public-tests.md) | 公共离线测试入口与 CI 边界 |
 | [macOS 自动化](docs/launchd-examples.md) | LaunchAgent 模板 |
-| [安装验证](docs/installation-verification.md) | 候选安装检查覆盖了什么 |
+| [安装验证](docs/installation-verification.md) | 当前安装验证及其限制 |
 | [全部文档](docs/README.md) | 索引（含维护记录） |
 
 ## 许可证

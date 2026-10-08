@@ -7,10 +7,10 @@ database.
 
 ## Tested environment
 
-- **Python 3.12** (3.12.14 during the candidate install verification).
-- **macOS 15** (15.7.8 during the candidate install verification).
-- Linux, Windows, other macOS versions and other Python versions are **not**
-  verified.
+- **Python 3.12** (3.12.4 in the 2026-10-08 verification).
+- **macOS 15** (15.8, arm64, in the 2026-10-08 verification).
+- Linux, Windows, other macOS versions, other Python versions and other machines
+  are **not** verified. See [installation-verification.md](installation-verification.md).
 
 Getting the source (step 1) and installing dependencies (step 3) may both use
 the network. The offline checks and the synthetic demo in step 6 do not fetch
@@ -23,18 +23,21 @@ the `jobs/` package.
 
 - If you already have the source (cloned, downloaded or extracted), use that
   directory's project root.
-- Otherwise clone the public repository into a **new** directory. The public
-  address is not final yet, so this guide uses a placeholder:
+- Otherwise clone the repository into a **new** directory. AU Job Board's
+  intended address is `https://github.com/SkywingJam/au-job-board`, but it has **not been
+  created or published yet** (it returned 404 on 2026-10-08), so the command
+  below cannot succeed until it is:
 
   ```bash
-  git clone <PUBLIC_REPOSITORY_URL> au-job-pipeline
-  cd au-job-pipeline
+  git clone https://github.com/SkywingJam/au-job-board au-job-board
+  cd au-job-board
   ```
 
-  Replace `<PUBLIC_REPOSITORY_URL>` with the address you were given. If it is
-  still the placeholder, stop and ask; do not guess the repository and do not
+  If the address returns 404, is unreachable or you have no access, stop: the
+  source is not available from there. Obtain the source another way, or wait
+  until the repository is published. Do not guess another repository and do not
   use a private development remote. Use the repository's default branch unless
-  the public guide or your own instruction says otherwise.
+  your own instruction says otherwise.
 
 Clone into a new directory; do not reset, clean or overwrite an existing
 checkout. Cloning may use the network.
@@ -60,9 +63,9 @@ This step uses the network to download packages.
 .venv/bin/python -m pip list | grep -E "python-jobspy|PyYAML"
 ```
 
-`requirements.txt` pins no exact versions. The candidate verification resolved
-`python-jobspy 1.2.0` and `PyYAML 6.0.3`; the transitive versions it recorded
-are in [installation-verification.md](installation-verification.md).
+`requirements.txt` pins no exact versions. The 2026-10-08 verification resolved
+`python-jobspy 1.2.0` and `PyYAML 6.0.3`; the main resolved versions are in
+[installation-verification.md](installation-verification.md).
 
 ## 4. Create your configuration
 

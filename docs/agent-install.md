@@ -8,10 +8,14 @@ in [install.md](install.md); it does not invent a different implementation.
 
 ## Copyable instruction for the user
 
-> Install this project from source following docs/install.md and
-> docs/agent-install.md. Get the source from <PUBLIC_REPOSITORY_URL> into a new
-> directory I name; if that placeholder is not filled in, ask me for the address
-> and do not guess it or use a private remote. Create a project-local virtual
+> Install AU Job Board from source following docs/install.md and
+> docs/agent-install.md. The intended repository is
+> https://github.com/SkywingJam/au-job-board, which may not be
+> published yet. Clone it into a new directory I name only if it is reachable;
+> if it returns 404, is unreachable or you lack access, report that the source
+> is unavailable and ask me for another source, such as a downloaded copy. Do
+> not guess another address, use a private remote, or create or publish a
+> repository. Create a project-local virtual
 > environment with Python 3.12 and install requirements.txt. Getting the source
 > and installing dependencies may both use the network. Keep any existing
 > configuration and database untouched. Before guessing any personal setting,
@@ -31,25 +35,28 @@ in [install.md](install.md); it does not invent a different implementation.
 
 ## Getting the source
 
-The public repository address is not final. This page uses
-`<PUBLIC_REPOSITORY_URL>` as a placeholder.
+The project is AU Job Board. The intended repository is
+`https://github.com/SkywingJam/au-job-board`, but it has not been created or published
+(it returned 404 on 2026-10-08), so it may not be reachable.
 
 - If the user already has the source, use that directory's project root (the
   directory containing `requirements.txt` and `jobs/`).
-- Otherwise clone the public repository into a **new** directory the user names:
+- Otherwise try to clone the repository into a **new** directory the user names:
 
   ```bash
-  git clone <PUBLIC_REPOSITORY_URL> <new-directory>
+  git clone https://github.com/SkywingJam/au-job-board <new-directory>
   cd <new-directory>
   ```
 
-  If `<PUBLIC_REPOSITORY_URL>` is still the placeholder, stop and ask the user
-  for the address. Do not execute the placeholder literally, do not guess a
-  repository, and do not use the maintainer's private development remote. Use the
-  default branch unless the public guide or the user explicitly says otherwise.
-  Clone into a non-existent new directory; do not reset, clean or overwrite an
-  existing checkout. Getting the source may use the network. Do not push anything
-  to GitHub.
+  If the address returns 404, is unreachable or you have no access, stop and
+  report that the source is unavailable; ask the user for another source, such
+  as a downloaded copy. A failed download or clone is a failed step, not a
+  success. Do not guess another repository, do not use the maintainer's private
+  development remote, and do not create, publish or change the visibility of a
+  repository to make the address work. Use the default branch unless the user
+  explicitly says otherwise. Clone into a non-existent new directory; do not
+  reset, clean or overwrite an existing checkout. Getting the source may use the
+  network. Do not push anything to GitHub.
 
 ## Inputs
 
@@ -176,9 +183,9 @@ does not grant permission to expose the panel or upload data.
 - Do **not** overwrite existing configuration or databases, and do **not**
   silently migrate or recompute an existing database; an update of an existing
   deployment is a different task.
-- Do **not** execute the `<PUBLIC_REPOSITORY_URL>` placeholder literally, guess a
-  repository, use a private remote, or push configuration or user data to
-  GitHub.
+- Do **not** guess a repository when the intended address is unavailable, use a
+  private remote, create or publish a repository, or push configuration or user
+  data to GitHub.
 - Do **not** escalate privileges, modify system settings, install background
   services, or change product logic, rules or vocabulary.
 - Do **not** bypass a platform's terms or anti-bot protections.
