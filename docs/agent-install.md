@@ -9,13 +9,11 @@ in [install.md](install.md); it does not invent a different implementation.
 ## Copyable instruction for the user
 
 > Install AU Job Board from source following docs/install.md and
-> docs/agent-install.md. The intended repository is
-> https://github.com/SkywingJam/au-job-board, which may not be
-> published yet. Clone it into a new directory I name only if it is reachable;
-> if it returns 404, is unreachable or you lack access, report that the source
-> is unavailable and ask me for another source, such as a downloaded copy. Do
-> not guess another address, use a private remote, or create or publish a
-> repository. Create a project-local virtual
+> docs/agent-install.md. Get the source from https://github.com/SkywingJam/au-job-board
+> into a new directory I name. If that address is unreachable, returns 404 or
+> you lack access, report that the source is unavailable and ask me for another
+> source, such as a downloaded copy. Do not guess another address, use a private
+> remote, or create or publish a repository. Create a project-local virtual
 > environment with Python 3.12 and install requirements.txt. Getting the source
 > and installing dependencies may both use the network. Keep any existing
 > configuration and database untouched. Before guessing any personal setting,
@@ -35,20 +33,18 @@ in [install.md](install.md); it does not invent a different implementation.
 
 ## Getting the source
 
-The project is AU Job Board. The intended repository is
-`https://github.com/SkywingJam/au-job-board`, but it has not been created or published
-(it returned 404 on 2026-10-08), so it may not be reachable.
+The source is at `https://github.com/SkywingJam/au-job-board`.
 
 - If the user already has the source, use that directory's project root (the
   directory containing `requirements.txt` and `jobs/`).
-- Otherwise try to clone the repository into a **new** directory the user names:
+- Otherwise clone the repository into a **new** directory the user names:
 
   ```bash
   git clone https://github.com/SkywingJam/au-job-board <new-directory>
   cd <new-directory>
   ```
 
-  If the address returns 404, is unreachable or you have no access, stop and
+  If the address is unreachable, returns 404 or you have no access, stop and
   report that the source is unavailable; ask the user for another source, such
   as a downloaded copy. A failed download or clone is a failed step, not a
   success. Do not guess another repository, do not use the maintainer's private

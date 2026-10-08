@@ -8,7 +8,8 @@ database.
 ## Tested environment
 
 - **Python 3.12** (3.12.4 in the 2026-10-08 verification).
-- **macOS 15** (15.8, arm64, in the 2026-10-08 verification).
+- **macOS 15** (15.8, arm64, in the 2026-10-08 local verification; the GitHub
+  Actions runner was macOS 15.7.9 with Python 3.12.10 and Node 24.21.0).
 - Linux, Windows, other macOS versions, other Python versions and other machines
   are **not** verified. See [installation-verification.md](installation-verification.md).
 
@@ -23,21 +24,18 @@ the `jobs/` package.
 
 - If you already have the source (cloned, downloaded or extracted), use that
   directory's project root.
-- Otherwise clone the repository into a **new** directory. AU Job Board's
-  intended address is `https://github.com/SkywingJam/au-job-board`, but it has **not been
-  created or published yet** (it returned 404 on 2026-10-08), so the command
-  below cannot succeed until it is:
+- Otherwise clone the repository into a **new** directory:
 
   ```bash
   git clone https://github.com/SkywingJam/au-job-board au-job-board
   cd au-job-board
   ```
 
-  If the address returns 404, is unreachable or you have no access, stop: the
-  source is not available from there. Obtain the source another way, or wait
-  until the repository is published. Do not guess another repository and do not
-  use a private development remote. Use the repository's default branch unless
-  your own instruction says otherwise.
+  If the address is unreachable, returns 404 or you have no access, stop: the
+  source is not available from there. Obtain it another way, for example a
+  downloaded copy from the project owner. Do not guess another repository and do
+  not use a private development remote. Use the repository's default branch
+  unless your own instruction says otherwise.
 
 Clone into a new directory; do not reset, clean or overwrite an existing
 checkout. Cloning may use the network.

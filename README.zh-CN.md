@@ -72,14 +72,16 @@
 目前只在一台机器上实测了 Python 3.12 + macOS 15，其他版本和平台未验证。获取源码和安装依赖都可能需要联网；
 离线检查与合成演示不联网。
 
-拟定的仓库地址是 `https://github.com/SkywingJam/au-job-board`，但它**尚未创建或公开**（2026-10-08 查询返回 404）。
-在作者公开之前，下面的 clone 命令不会成功；地址失败或不存在不能算作安装结果。如果你已经有源码
-（下载或他人提供的副本），直接使用那个目录。仓库公开之后，再克隆到新目录：
+从 `https://github.com/SkywingJam/au-job-board` 获取源码。如果你已经有源码（下载或他人提供的副本），直接使用那个目录。
+否则克隆到新目录：
 
 ```bash
 git clone https://github.com/SkywingJam/au-job-board au-job-board
 cd au-job-board
 ```
+
+如果该地址无法访问、返回 404 或你没有访问权限，说明无法从那里获取源码，请向项目作者索取其他来源。
+克隆失败不能算作安装结果。
 
 ### Agent 辅助安装
 
@@ -87,13 +89,11 @@ AI Agent 可走同一套步骤，详见 [Agent 辅助安装](docs/agent-install.
 复制给 Agent：
 
 > Install AU Job Board from source following docs/install.md and
-> docs/agent-install.md. The intended repository is
-> https://github.com/SkywingJam/au-job-board, which may not be
-> published yet. Clone it into a new directory I name only if it is reachable;
-> if it returns 404, is unreachable or you lack access, report that the source
-> is unavailable and ask me for another source, such as a downloaded copy. Do
-> not guess another address, use a private remote, or create or publish a
-> repository. Create a project-local virtual
+> docs/agent-install.md. Get the source from https://github.com/SkywingJam/au-job-board
+> into a new directory I name. If that address is unreachable, returns 404 or
+> you lack access, report that the source is unavailable and ask me for another
+> source, such as a downloaded copy. Do not guess another address, use a private
+> remote, or create or publish a repository. Create a project-local virtual
 > environment with Python 3.12 and install requirements.txt. Getting the source
 > and installing dependencies may both use the network. Keep any existing
 > configuration and database untouched. Before guessing any personal setting,
@@ -128,21 +128,17 @@ AI Agent 可走同一套步骤，详见 [Agent 辅助安装](docs/agent-install.
 
 ## 项目状态
 
-AU Job Board **尚未正式发布**。已经确定并检查过的部分：
+AU Job Board 只以源码形式提供：从 `https://github.com/SkywingJam/au-job-board` 获取源码，安装到你自己的虚拟环境。没有打包发行版。
 
-- **名称与地址**：项目名为 AU Job Board，拟定仓库为 `https://github.com/SkywingJam/au-job-board`。该仓库尚未创建或公开
-  （2026-10-08 查询返回 404），因此没有验证过从它克隆。
-- **许可证与范围**：MIT（见[许可证](#许可证)）；公开内容是固定的 296 个文件。
-- **干净历史与本机安装检查**：用这些文件建立了只有一个根提交的新历史。2026-10-08 在一台
-  macOS 15.8（arm64）机器上，用 Python 3.12.4 和 Node 24.5.0，从它的本地 fresh clone 加全新
-  Python 虚拟环境完成了验证：依赖安装、CLI 帮助、只读资格档案、合成演示、合成演示面板，以及全部
-  16 项公共离线测试。细节和限制见[安装验证](docs/installation-verification.md)（英文）。
+- **许可证与范围**：MIT（见[许可证](#许可证)）。公开内容是初始公开文件集的 296 个文件，建立在不含早期私人开发历史的干净历史上。
+- **已检查的内容**：在一台 macOS 15（arm64）机器上，用本地 fresh clone 加全新 Python 虚拟环境完成安装；
+  16 项公共离线测试在 GitHub Actions 的 macOS 15、Python 3.12、Node 24.21.0 上运行过。带日期的记录、
+  版本和限制见[安装验证](docs/installation-verification.md)（英文）。离线测试工作流会在提交到 `main` 的
+  pull request、对 `main` 的 push 时自动运行，也可手动运行。
 
 尚未验证，文档不暗示相反的结论：
 
-- 从公开 GitHub 仓库获取源码，以及 GitHub Actions 离线测试工作流（工作流目标是 Node 24.21.0，
-  本机检查用的是 24.5.0）；
-- 其他操作系统、其他 Python 版本，以及上述那一台机器之外的任何环境；
+- 其他操作系统、其他 Python 版本，以及已记录机器之外的任何环境；
 - 对 SEEK、Indeed、LinkedIn 的真实抓取，以及 macOS LaunchAgent 模板的实际安装（只做过离线验证）；
 - 所有资格规则和来源行为。
 
@@ -165,7 +161,7 @@ AU Job Board **尚未正式发布**。已经确定并检查过的部分：
 | [参与贡献](docs/contributing.md) | 开发、测试与数据规则 |
 | [公共测试](docs/public-tests.md) | 公共离线测试入口与 CI 边界 |
 | [macOS 自动化](docs/launchd-examples.md) | LaunchAgent 模板 |
-| [安装验证](docs/installation-verification.md) | 当前安装验证及其限制 |
+| [安装验证](docs/installation-verification.md) | 带日期的安装与 CI 验证记录及其限制 |
 | [全部文档](docs/README.md) | 索引（含维护记录） |
 
 ## 许可证

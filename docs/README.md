@@ -33,5 +33,5 @@ All of it uses hand-written synthetic data.
 
 | Document | What it records |
 |---|---|
-| [installation-verification.md](installation-verification.md) | The current source-install verification (2026-10-08), its limits, and a short note on the earlier record |
+| [installation-verification.md](installation-verification.md) | Dated source-install and cloud CI verification records (2026-10-08), their limits, and a short note on the earlier record |
 | [test-data-policy.md](test-data-policy.md) | The rule that default tests use only synthetic data, and the private-export boundary |

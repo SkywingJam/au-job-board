@@ -1,10 +1,16 @@
 name: Offline public tests
 
-# Manual dispatch only until a public repository exists. The maintainer
-# development checkout is not a public candidate, so there is deliberately no
-# push or pull_request trigger here. Enable automatic triggers only after the
-# clean public candidate is prepared and reviewed.
+# Runs for pull requests into main, for pushes to main, and on manual dispatch.
+# There is deliberately no path filter and no draft skip, so the check always
+# exists for a pull request. The plain pull_request event is used (never
+# pull_request_target) and the workflow has read-only access and no secrets.
 on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 # Least privilege: this workflow only reads the checkout.

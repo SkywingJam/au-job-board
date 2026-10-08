@@ -60,7 +60,10 @@ nothing in the suite fetches listings.
 | `tools/test_panel_note_separators.mjs` | Panel note separators and default labels (UI-02, UI-03) | all |
 
 The fixture-boundary test also guards that a private label export is not used
-by default; it is part of keeping the public test data synthetic.
+by default; it is part of keeping the public test data synthetic. Its output
+contains one `[FAIL]` line from a deliberate negative control (a wrong expected
+value used to prove the check can fail). Judge a run by the exit status of each
+test and the entry's summary line, not by a single printed line.
 
 ## What is not in the public entry
 
@@ -77,17 +80,19 @@ by default; it is part of keeping the public test data synthetic.
 combination is the only environment with evidence so far; Linux, Windows and
 other Python versions are not verified and are deliberately not configured.
 
-The workflow is `workflow_dispatch` only. It is not triggered by push
-or pull request while the repository is still a private development checkout;
-automatic triggers are enabled only after the clean public candidate is ready.
+The workflow runs automatically for a pull request into `main` and for every
+push to `main`, and it can be started by hand (`workflow_dispatch`). It has no
+path filter and does not skip drafts, so a documentation-only change still
+produces the check. The job is named `macOS 15 / Python 3.12 / Node 24.21.0`;
+that is the check name to look for on a pull request. It uses the ordinary
+`pull_request` event with read-only repository access and no secrets.
 Before the tests it lists the tracked paths and refuses to run if it finds a
 known private path (the private configuration, the vocabulary overlay, the
 corpus, runtime data or the real deployment plists). It reads file names only,
 never file contents.
 
-CI status: the workflow file and the same commands were verified locally. They
-**have not been run on GitHub**, so this page does not claim a cloud CI pass.
-The candidate install check is recorded separately in
+A manual cloud run on macOS 15 / Python 3.12 / Node 24.21.0 passed 16 of 16 on
+2026-10-08; the run and its limits are recorded in
 [installation-verification.md](installation-verification.md).
 
 ## Boundary
