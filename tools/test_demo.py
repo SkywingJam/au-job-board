@@ -770,9 +770,20 @@ def test_link_boundaries(base: Path, guard_factory) -> None:
         ctx = contextlib.redirect_stdout(out)
         ctx.__enter__()
         httpd, _ = demo.make_server(root, "127.0.0.1", 0)
+        request_finished = threading.Event()
+        base_handler = httpd.RequestHandlerClass
+
+        class FinishedHandler(base_handler):
+            def finish(self):
+                try:
+                    super().finish()
+                finally:
+                    request_finished.set()
+
+        httpd.RequestHandlerClass = FinishedHandler
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
-        return httpd, thread, ctx
+        return httpd, thread, ctx, request_finished
 
     runtime_cases = [
         ("skills.local.yaml 换成指向外部文件的符号链接",
@@ -789,10 +800,15 @@ def test_link_boundaries(base: Path, guard_factory) -> None:
     for i, (label, setup) in enumerate(runtime_cases):
         root, ext = _fresh_root(base, f"r{i}", guard_factory)
         with guard_factory([root]) as g:
-            httpd, thread, ctx = served(root)
+            httpd, thread, ctx, request_finished = served(root)
             port = httpd.server_address[1]
             try:
                 s0, _ = http_get(port, "/api/skills")          # 起点正常
+                # Reading the response can precede Handler's conn.close().
+                # Inject between completed requests so SQLite cannot remove
+                # the replacement WAL while closing the warm-up connection.
+                if not request_finished.wait(timeout=5):
+                    raise AssertionError("warm-up request did not finish")
                 with g.pause():
                     for side in ("jobs.db-wal", "jobs.db-shm"):
                         if "wal" not in label:
@@ -823,7 +839,7 @@ def test_link_boundaries(base: Path, guard_factory) -> None:
     # ---- 恢复：移除链接后正常使用，说明预检不是「一次失败永久失败」----
     root, ext = _fresh_root(base, "recover", guard_factory)
     with guard_factory([root]) as g:
-        httpd, thread, ctx = served(root)
+        httpd, thread, ctx, request_finished = served(root)
         port = httpd.server_address[1]
         try:
             with g.pause():
