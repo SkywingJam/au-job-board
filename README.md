@@ -214,3 +214,7 @@ This project is released under the MIT License. See [LICENSE](LICENSE)
 (Copyright (c) 2026 SkywingJam). Third-party dependencies keep their own
 licenses, and job listing text belongs to the platforms and advertisers that
 published it.
+
+## AI Acknowledgements
+
+This project would not have been possible without the help of AI. It was developed with assistance from DeepSeek, ChatGPT, and Claude, with human direction and review.

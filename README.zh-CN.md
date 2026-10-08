@@ -168,3 +168,7 @@ AU Job Board 只以源码形式提供：从 `https://github.com/SkywingJam/au-jo
 
 本项目以 MIT 许可证发布，见 [LICENSE](LICENSE)（Copyright (c) 2026 SkywingJam）。
 第三方依赖保留各自的许可证，岗位原文的权利归发布它的平台和广告主所有。
+
+## AI 致谢
+
+没有 AI 的帮助，这个项目就无法完成。项目由 DeepSeek、ChatGPT 和 Claude 协助开发，并由维护者指导和审阅。
