@@ -57,8 +57,8 @@ desktop and phone-width screens.
 |---|---|
 | ![Recommended view](docs/demo-screenshots/images/A-recommend-en-light-desktop-1440x1000.png) | ![An excluded job with the rule and the original sentence](docs/demo-screenshots/images/C-detail-excluded-en-light-desktop-1440x1000.png) |
 | Recommended view | An excluded job: the rule that matched and the quoted original sentence |
-| ![A labelled job with status and notes](docs/demo-screenshots/images/C-detail-labelled-en-light-desktop-1440x1000.png) | [![Cover of the 30-second video](docs/demo-video/cover.png)](docs/demo-video/product-demo-30s.mp4) |
-| A labelled job with status and notes | 30-second walkthrough ([mp4](docs/demo-video/product-demo-30s.mp4)) |
+| ![A labelled job with status and notes](docs/demo-screenshots/images/C-detail-labelled-en-light-desktop-1440x1000.png) | [![Cover of the 30-second video](docs/demo-video/cover.png)](https://youtu.be/j5ktlVfHU-w) |
+| A labelled job with status and notes | [Watch the 30-second walkthrough on YouTube](https://youtu.be/j5ktlVfHU-w) · [MP4 download](docs/demo-video/product-demo-30s.mp4) |
 
 More images are in the [screenshot library](docs/demo-screenshots/README.md)
 (102 synthetic screenshots; English and Chinese, light and dark, desktop, tablet

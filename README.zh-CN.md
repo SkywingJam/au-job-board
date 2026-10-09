@@ -41,8 +41,8 @@
 |---|---|
 | ![推荐视图](docs/demo-screenshots/images/A-recommend-zh-light-desktop-1440x1000.png) | ![被排除岗位：命中规则与引用的原文](docs/demo-screenshots/images/C-detail-excluded-zh-dark-desktop-1440x1000.png) |
 | 推荐视图 | 被排除岗位：命中的规则和引用的原文句子 |
-| ![已标注岗位：状态与备注](docs/demo-screenshots/images/C-detail-labelled-zh-dark-desktop-1440x1000.png) | [![30 秒视频封面](docs/demo-video/cover.png)](docs/demo-video/product-demo-30s.mp4) |
-| 已标注岗位：状态与备注 | 30 秒演示（[mp4](docs/demo-video/product-demo-30s.mp4)；视频界面为英文） |
+| ![已标注岗位：状态与备注](docs/demo-screenshots/images/C-detail-labelled-zh-dark-desktop-1440x1000.png) | [![30 秒视频封面](docs/demo-video/cover.png)](https://youtu.be/j5ktlVfHU-w) |
+| 已标注岗位：状态与备注 | [在 YouTube 观看 30 秒演示](https://youtu.be/j5ktlVfHU-w) · [MP4 下载](docs/demo-video/product-demo-30s.mp4)（视频界面为英文） |
 
 更多图片见[截图库](docs/demo-screenshots/README.md)（102 张合成数据截图，含中英文、
 浅深色、桌面 / 平板 / 手机）。视频的制作方式见[说明](docs/demo-video/README.md)。
