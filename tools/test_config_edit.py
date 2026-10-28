@@ -387,7 +387,7 @@ class ConfigEditorTest(unittest.TestCase):
         current = self.editor.read()
         self.assertEqual(current["baseline"]["values"], current["values"])
         self.assertEqual(current["applied"]["status"], "unavailable")
-        self.assertEqual(self.path.read_text(), self.original)
+        self.assertEqual(self.path.read_bytes(), before_failure)
 
     def test_baseline_context_invalidates_source_rules_or_new_analysis(self):
         conn = self.seed_analysis()
