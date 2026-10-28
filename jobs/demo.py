@@ -26,7 +26,7 @@ import os
 import shutil
 import stat
 import sys
-from http.server import ThreadingHTTPServer
+from .http_server import ThreadingHTTPServer
 from pathlib import Path
 
 import yaml

@@ -24,7 +24,7 @@ from test_file_security import grant_public_read
 TOKEN = 'synthetic-mcp-token-not-a-real-secret-000000'
 
 
-class MCPIntegration(unittest.IsolatedAsyncioTestCase):
+class MCPFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -87,6 +87,9 @@ class MCPIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result.structured_content, dict)
         return result.structured_content
 
+
+
+class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
     async def test_discovery_and_complete_frozen_read_without_writes(self):
         before = hashlib.sha256(self.path.read_bytes()).hexdigest()
         async with self.client() as client:

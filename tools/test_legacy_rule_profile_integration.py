@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import json
 import sys
 import tempfile
@@ -291,12 +292,14 @@ def test_default_equivalence() -> None:
         finally:
             ca.close(); cb.close(); cc.close()
 
-        info = report.latest_rule_profile(database.connect(fx_default["db"]))
+        with closing(database.connect(fx_default["db"])) as conn:
+            info = report.latest_rule_profile(conn)
         check("缺段 runs.stats：config_source=legacy_default",
               info["status"] == "recorded"
               and info["config_source"] == "legacy_default"
               and info["profile"] is None, str(info))
-        info485 = report.latest_rule_profile(database.connect(fx_485["db"]))
+        with closing(database.connect(fx_485["db"])) as conn:
+            info485 = report.latest_rule_profile(conn)
         check("显式 485 runs.stats：profile=485 且开关全开",
               info485["status"] == "recorded" and info485["profile"] == "485"
               and all(info485["exclude"].values())

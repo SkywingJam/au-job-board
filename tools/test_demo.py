@@ -884,7 +884,11 @@ def test_link_boundaries(base: Path, guard_factory) -> None:
                 before = snapshot_dir(ext)
             bad, _ = http_post(port, "/api/skills", {"token": "Rust", "action": "add"})
             with g.pause():
+                check("拒绝链接请求未触碰外部文件", snapshot_dir(ext) == before)
                 (root / "skills.local.yaml").unlink()
+                # Removing the explicit NTFS hard-link substitute changes the
+                # external inode's link count, but must not change its bytes.
+                before = snapshot_dir(ext)
             ok, body = http_post(port, "/api/skills", {"token": "Rust", "action": "add"})
             lab, _ = http_post(port, "/api/label", {"uid": "seek:DEMO-010", "field": "action", "value": "saved"})
             _, page = http_get(port, "/?view=all", {"Accept-Language": "en"})

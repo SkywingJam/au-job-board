@@ -28,7 +28,7 @@ class ConfigEditorTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.path = self.root / "non-default.yaml"
         self.original = ('# retained header\nqueries: [synthetic] # keyword note\n'
-                         'db_path: "' + str(self.root / 'data/jobs.db') + '"\n'
+                         'db_path: ' + json.dumps(str(self.root / 'data/jobs.db')) + '\n'
                          'private_unknown:\n  password: "synthetic-secret" # private note\n'
                          'seek:\n  enabled: true\n  pages_per_query: 2 # keep note\n'
                          'legacy_rule_profile:\n  profile: "485"\n')

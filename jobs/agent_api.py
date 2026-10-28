@@ -21,7 +21,8 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from .http_server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 from zoneinfo import ZoneInfo

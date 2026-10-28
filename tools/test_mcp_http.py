@@ -3,7 +3,6 @@ import asyncio
 from contextlib import closing
 import errno
 import http.client
-from http.server import ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -23,14 +22,21 @@ from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 import httpx2
 from jobs import agent_api, mcp_http, panel
+from jobs.http_server import ThreadingHTTPServer
 import test_mcp as fixtures
 
 TOKEN = fixtures.TOKEN
 
 
+def bind_conflict(error):
+    # Native Winsock also reports WSAEACCES for an exclusive occupied port.
+    return error.errno == errno.EADDRINUSE or (os.name == 'nt' and getattr(error, 'winerror', None) == 10013)
+
+
+
 class HTTPMCP(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.fixture = fixtures.MCPIntegration()
+        self.fixture = fixtures.MCPFixture()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         self.config = dict(self.fixture.server.api.config)
@@ -53,7 +59,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                     return server
                 except OSError as error:
                     server.server_close()
-                    if error.errno != errno.EADDRINUSE:
+                    if not bind_conflict(error):
                         raise
         self.fail('Could not reserve adjacent synthetic ports')
 
@@ -70,13 +76,13 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
             try:
                 return self.start()
             except OSError as error:
-                if error.errno != errno.EADDRINUSE or attempt == 4:
+                if not bind_conflict(error) or attempt == 4:
                     raise
                 with socket.socket() as probe:
                     try:
                         probe.bind(('0.0.0.0', self.panel.server_port+1))
                     except OSError as conflict:
-                        if conflict.errno != errno.EADDRINUSE:
+                        if not bind_conflict(conflict):
                             raise
                     else:
                         raise error
@@ -171,7 +177,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
             with patch.dict(os.environ, {'JOBS_CONTAINER': '1'}):
                 with self.assertRaises(OSError) as caught:
                     self.start()
-                self.assertEqual(caught.exception.errno, errno.EADDRINUSE)
+                self.assertTrue(bind_conflict(caught.exception), caught.exception)
                 service = self.start_container()
             self.assertNotEqual(service.port, blocked_port)
             self.assertEqual(self.request(headers={'Authorization': ''})[0], 401)
@@ -202,7 +208,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                 patch.object(self, 'start', side_effect=collide) as attempts:
             with self.assertRaises(OSError) as caught:
                 self.start_container()
-        self.assertEqual(caught.exception.errno, errno.EADDRINUSE)
+        self.assertTrue(bind_conflict(caught.exception), caught.exception)
         self.assertEqual(attempts.call_count, 5)
         self.assertEqual(len(occupied), 5)
 
@@ -263,7 +269,9 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
             try:
                 if self.request(headers={'Authorization':''})[0] == 401:
                     break
-            except OSError:
+            except (OSError, http.client.HTTPException):
+                # A Windows client can briefly self-connect if its ephemeral
+                # source port equals the not-yet-listening destination port.
                 pass
             if time.monotonic() > deadline:
                 self.fail('Application MCP startup timed out: '+(root/'app.log').read_text())

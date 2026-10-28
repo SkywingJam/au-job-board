@@ -19,7 +19,8 @@ import json
 import sqlite3
 import os
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from .http_server import ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from . import db as database

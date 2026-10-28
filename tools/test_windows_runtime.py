@@ -85,6 +85,24 @@ class LockTests(unittest.TestCase):
 
 
 
+class ListenerTests(unittest.TestCase):
+    def test_single_listener_owns_port_and_close_releases_it(self):
+        import socket
+        from http.server import BaseHTTPRequestHandler
+        from jobs.http_server import ThreadingHTTPServer, configure_listener
+        server = ThreadingHTTPServer(('127.0.0.1', 0), BaseHTTPRequestHandler)
+        address = server.server_address
+        try:
+            with socket.socket() as competitor:
+                configure_listener(competitor)
+                with self.assertRaises(OSError): competitor.bind(address)
+        finally:
+            server.server_close()
+        with socket.socket() as recovered:
+            configure_listener(recovered)
+            recovered.bind(address)
+
+
 class NativeCreateTests(unittest.TestCase):
     """Native call contracts on a fake kernel; not Windows execution evidence."""
     def test_job_and_handle_attributes_are_present_at_process_creation(self):
