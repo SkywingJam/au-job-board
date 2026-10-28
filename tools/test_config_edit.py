@@ -375,9 +375,12 @@ class ConfigEditorTest(unittest.TestCase):
         self.save({})
         self.save({"seek.pages_per_query": 2})
         self.assertFalse(baseline_path.exists())
+        # A successful semantic no-op may reflow a long quoted Windows path.
+        before_failure = self.path.read_bytes()
+        self.assertEqual(yaml.safe_load(before_failure), yaml.safe_load(self.original))
         with patch("jobs.run_state.atomic_json", side_effect=OSError):
             self.error("write_failed", lambda: self.save({"seek.pages_per_query": 5}))
-        self.assertEqual(self.path.read_text(), self.original)
+        self.assertEqual(self.path.read_bytes(), before_failure)
         self.assertFalse(baseline_path.exists())
         with patch.object(self.editor, "_replace", side_effect=ConfigEditError("write_failed")):
             self.error("write_failed", lambda: self.save({"seek.pages_per_query": 5}))

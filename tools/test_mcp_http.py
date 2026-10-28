@@ -35,6 +35,15 @@ def bind_conflict(error):
 
 
 class HTTPMCP(unittest.IsolatedAsyncioTestCase):
+    def _setupAsyncioRunner(self):
+        if os.name == 'nt':
+            # This HTTP-only client uses no asyncio pipes/subprocesses. The
+            # default Windows Proactor loop crashed during runner shutdown in
+            # native acceptance; the stdio suite retains its required Proactor.
+            self._asyncioRunner = asyncio.Runner(debug=True, loop_factory=asyncio.SelectorEventLoop)
+        else:
+            super()._setupAsyncioRunner()
+
     def setUp(self):
         self.fixture = fixtures.MCPFixture()
         self.fixture.setUp()
@@ -101,11 +110,12 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         connection = http.client.HTTPConnection('127.0.0.1', self.panel.server_port+1, timeout=5)
         value = {'Content-Type': 'application/json', 'Authorization': 'Bearer '+TOKEN}
         value.update(headers or {})
-        connection.request(method, '/mcp', body=body, headers=value)
-        response = connection.getresponse(); response.read()
-        result = response.status, dict(response.getheaders())
-        connection.close()
-        return result
+        try:
+            connection.request(method, '/mcp', body=body, headers=value)
+            response = connection.getresponse(); response.read()
+            return response.status, dict(response.getheaders())
+        finally:
+            connection.close()
 
     async def test_real_http_tools_snapshot_and_full_body(self):
         service = self.start()

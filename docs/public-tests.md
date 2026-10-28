@@ -115,7 +115,10 @@ scope; `test_windows_runtime` covers native Windows inherited handles, atomic Jo
 supervisor exit, process-tree timeout and saved-note/retry behavior. Windows
 in-process pipeline tests inject controlled interruption instead of SIGALRM;
 the real deadline is checked by the supervisor integration. Mode assertions use
-ACL validation on Windows. A symlink test may skip if the account lacks symlink
+ACL validation on Windows. The HTTP-only MCP client tests use a Selector event
+loop on Windows after a native Proactor runner-shutdown crash; the stdio tests
+retain Proactor because they require asyncio subprocesses. This is a test-client
+choice, not an application-wide loop-policy change. A symlink test may skip if the account lacks symlink
 privilege; ordinary regular-file saves remain covered. The runtime supervisor
 also runs on macOS with a POSIX process-tree adapter, which tests the control
 flow but cannot establish native Windows API behavior. Native ACL and forced
