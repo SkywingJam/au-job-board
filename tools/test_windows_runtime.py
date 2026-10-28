@@ -208,17 +208,56 @@ class SupervisorTests(unittest.TestCase):
         # Inject only a handwritten source mock into child interpreters. No
         # recruitment request or private configuration can be made by this test.
         (self.root / 'sitecustomize.py').write_text("""
-import os, socket, subprocess, sys, time
+import atexit, json, os, socket, subprocess, sys, time, traceback
 from pathlib import Path
-from jobs import sources
+from jobs import sources, run_state
 from jobs.sources import blank_job, seek
+root = Path(os.environ['SYNTHETIC_RUNTIME_ROOT'])
+trace_path = root / ('worker-' + str(os.getpid()) + '.jsonl')
+events = 0
+def trace(event, **fields):
+    global events
+    if events >= 64:
+        return
+    events += 1
+    try:
+        with trace_path.open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(dict(event=event, pid=os.getpid(), **fields)) + '\\n')
+    except OSError:
+        pass  # Diagnostic failure must not change the synthetic worker outcome.
+trace('boot')
+atexit.register(lambda: trace('exit'))
+def failed(kind, value, tb):
+    trace('unhandled', exception=kind.__name__, errno=getattr(value, 'errno', None),
+          winerror=getattr(value, 'winerror', None))
+    try:
+        (root / ('worker-' + str(os.getpid()) + '.traceback')).write_bytes(
+            ''.join(traceback.format_exception(kind, value, tb, limit=12)).encode('utf-8')[-16384:]
+            .decode('utf-8', errors='ignore').encode('utf-8'))
+    except OSError:
+        pass
+sys.excepthook = failed
+write_json = run_state.atomic_json
+def observed_write(path, value):
+    fields = dict(file=Path(path).name, state=value.get('state'), stage=value.get('stage'))
+    try:
+        if (os.environ.get('SYNTHETIC_RUNTIME_FAIL_WRITE') and
+                value.get('stage') == 'fetch' and value.get('state') == 'running'):
+            raise PermissionError(13, 'synthetic status replacement denied')
+        write_json(path, value)
+    except OSError as error:
+        trace('write_failed', **fields, exception=type(error).__name__,
+              errno=error.errno, winerror=getattr(error, 'winerror', None))
+        raise
+    trace('write_ok', **fields)
+run_state.atomic_json = observed_write
 seek.fetch_detail = lambda _: 'Synthetic existing Python description'
 def blocked(*a, **kw):
     raise AssertionError('network forbidden')
 socket.create_connection = blocked
 
 def fetch(config, queries):
-    root = Path(os.environ['SYNTHETIC_RUNTIME_ROOT'])
+    trace('fetch_entered')
     (root / 'entered').write_text(str(os.getpid()))
     time.sleep(float(os.environ.get('SYNTHETIC_RUNTIME_BRIEF', '0')))
     if os.environ.get('SYNTHETIC_RUNTIME_SLEEP'):
@@ -230,6 +269,7 @@ def fetch(config, queries):
     job = blank_job('seek', 'synthetic-new')
     job.update(title='Fictional Python engineer', company='Example',
                url='https://example.invalid/new', description='Synthetic Python SQL role.')
+    trace('fetch_returned')
     return [job]
 sources.iter_sources = lambda config: iter([('seek', fetch)])
 """, encoding='utf-8')
@@ -265,20 +305,66 @@ sources.iter_sources = lambda config: iter([('seek', fetch)])
             self.assertEqual(dict(conn.execute('SELECT * FROM labels').fetchone()), self.saved)
         finally: conn.close()
 
+    def panel_diagnostics(self, manager, done):
+        """Bounded synthetic evidence; no production config or data is read."""
+        from jobs import run_state
+        process = manager._process
+        report = {'watcher_done': done.is_set(),
+                  'returncode': getattr(process, 'returncode', None),
+                  'pid': getattr(process, 'pid', None)}
+        for name in ('latest.json', 'state.json', 'result.json', 'generation.json'):
+            report[name] = run_state.read_json(manager.runtime / name)
+        report['workers'] = {p.name: p.read_bytes()[-16384:].decode('utf-8', errors='ignore')
+                             for p in sorted(self.root.glob('worker-*'))[:8]}
+        return report
+
+    @contextlib.contextmanager
+    def panel_run(self, manager):
+        """The watcher owns finalization and its lock, even after child exit."""
+        done = threading.Event()
+        errors = []
+        watch = manager._watch
+        def watched(*args):
+            try:
+                watch(*args)
+            except BaseException as error:
+                errors.append(repr(error))
+                raise
+            finally:
+                done.set()
+        failed = False
+        with patch.object(manager, '_watch', side_effect=watched):
+            try:
+                yield done
+            except BaseException:
+                failed = True
+                raise
+            finally:
+                if manager._process is not None:
+                    if not done.wait(5):
+                        # Wake the watcher; it alone owns process-tree cleanup.
+                        manager._process.kill()
+                    finished = done.wait(5)
+                    if failed or not finished or errors:
+                        print('PANEL_WORKER_DIAGNOSTICS ' + json.dumps(
+                            self.panel_diagnostics(manager, done), ensure_ascii=False), file=sys.stderr)
+                    self.assertTrue(finished, 'panel watcher did not finish cleanup')
+                    self.assertFalse(errors, errors)
+
     def test_real_panel_worker_handoff_and_completion(self):
         from jobs import panel_update, run_state
         manager = panel_update.UpdateManager(self.config, self.path, rules_path=self.rules, skills_path=self.skills)
-        with patch.dict(os.environ, SYNTHETIC_RUNTIME_BRIEF='0.4'):
-            initial = manager.start()
-        self.assertTrue(initial['accepted'], initial)
-        try:
+        with self.panel_run(manager) as done:
+            with patch.dict(os.environ, SYNTHETIC_RUNTIME_BRIEF='0.4'):
+                initial = manager.start()
+            self.assertTrue(initial['accepted'], initial)
             self.assertIsNone(run_state.acquire_lock(self.config))
             restarted = panel_update.UpdateManager(self.config, self.path, rules_path=self.rules, skills_path=self.skills)
             self.assertFalse(restarted.start()['accepted'])
             deadline = time.monotonic() + 15
             while True:
                 final = manager.status()
-                self.assertIn(final['state'], ('running', 'success'))
+                self.assertIn(final['state'], ('running', 'success'), final)
                 if final['state'] == 'success' and final['generation'] == initial['task_id']:
                     break
                 self.assertLess(time.monotonic(), deadline)
@@ -286,16 +372,78 @@ sources.iter_sources = lambda config: iter([('seek', fetch)])
             self.assertEqual(final['state'], 'success', final)
             self.assertEqual(final['task_id'], initial['task_id'])
             self.assertEqual(final['generation'], initial['task_id'])
-            while (manager.runtime / 'config.yaml').exists():
-                self.assertLess(time.monotonic(), deadline)
-                time.sleep(.01)
+            self.assertTrue(done.wait(5), 'terminal status preceded watcher cleanup')
+            self.assertFalse((manager.runtime / 'config.yaml').exists())
             with run_state.acquire_lock(self.config) as owner:
                 self.assertIsNotNone(owner)
             self.assert_saved()
-        finally:
-            process = manager._process
-            if process is not None and process.poll() is None:
-                manager._stop(process)
+
+    def test_panel_worker_write_failure_is_diagnosable_and_releases_lock_for_retry(self):
+        from jobs import panel_update, run_state
+        manager = panel_update.UpdateManager(self.config, self.path, rules_path=self.rules, skills_path=self.skills)
+        with self.panel_run(manager) as done:
+            with patch.dict(os.environ, SYNTHETIC_RUNTIME_FAIL_WRITE='1'):
+                initial = manager.start()
+            self.assertTrue(initial['accepted'], initial)
+            self.assertTrue(done.wait(10))
+            final = manager.status()
+            self.assertEqual(final['state'], 'error', final)
+            self.assertFalse(final['refresh_available'])
+            self.assertEqual(final['generation'], '')
+            evidence = self.panel_diagnostics(manager, done)
+            events = [json.loads(line) for name, body in evidence['workers'].items()
+                      if name.endswith('.jsonl') for line in body.splitlines()]
+            self.assertTrue(any(event['event'] == 'write_failed' and event['stage'] == 'fetch'
+                                and event['exception'] == 'PermissionError' for event in events), evidence)
+            self.assertTrue(any(event['event'] == 'unhandled' for event in events), evidence)
+            self.assertNotEqual(evidence['returncode'], 0, evidence)
+            with run_state.acquire_lock(self.config) as owner:
+                self.assertIsNotNone(owner)
+            self.assert_saved()
+        # A failed attempt must not poison the next run or its result generation.
+        with self.panel_run(manager) as done:
+            retried = manager.start()
+            self.assertTrue(retried['accepted'], retried)
+            self.assertTrue(done.wait(10))
+            final = manager.status()
+            self.assertEqual(final['state'], 'success', final)
+            self.assertEqual(final['generation'], retried['task_id'])
+            self.assert_saved()
+
+    def test_panel_terminal_error_can_precede_watcher_lock_release(self):
+        from jobs import panel_update, run_state
+        manager = panel_update.UpdateManager(self.config, self.path, rules_path=self.rules, skills_path=self.skills)
+        closing, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        watch = manager._watch
+        def delayed_cleanup(process, handle, snapshot, initial):
+            class HeldHandle:
+                def close(inner):
+                    closing.set()
+                    try:
+                        if not release.wait(10):
+                            raise RuntimeError('synthetic cleanup barrier timed out')
+                    finally:
+                        handle.close()
+            watch(process, HeldHandle(), snapshot, initial)
+        with patch.object(manager, '_watch', side_effect=delayed_cleanup), self.panel_run(manager) as done:
+            try:
+                with patch.dict(os.environ, SYNTHETIC_RUNTIME_FAIL_WRITE='1'):
+                    initial = manager.start()
+                self.assertTrue(initial['accepted'], initial)
+                self.assertTrue(closing.wait(10))
+                self.assertEqual(manager.status()['state'], 'error')
+                # The old finally skipped cleanup when poll() was non-None.
+                # Neither child exit nor terminal status proves watcher completion.
+                self.assertIsNotNone(manager._process.poll())
+                self.assertFalse(done.is_set())
+                self.assertIsNone(run_state.acquire_lock(self.config))
+            finally:
+                release.set()
+            self.assertTrue(done.wait(5))
+            with run_state.acquire_lock(self.config) as owner:
+                self.assertIsNotNone(owner)
+            self.assert_saved()
 
     def test_success_is_durable_and_busy_cannot_replace_it(self):
         from jobs import windows_pipeline, run_state
