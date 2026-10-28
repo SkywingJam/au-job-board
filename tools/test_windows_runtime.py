@@ -173,17 +173,22 @@ class SharedStateFileTests(unittest.TestCase):
 
     def test_concurrent_reader_does_not_fail_writer_or_reader(self):
         # Natively reproduced WinError 5 before the fix; POSIX checks the same flow.
-        stop = self.root / 'stop'
+        stop, ready = self.root / 'stop', self.root / 'ready'
         reader = subprocess.Popen([sys.executable, '-B', '-c', (
             'import sys; from pathlib import Path\n'
             'sys.path.insert(0, sys.argv[1]); from jobs import run_state\n'
             'target, stop, reads, missing = Path(sys.argv[2]), Path(sys.argv[3]), 0, 0\n'
+            'missing += run_state.read_json(target) is None; reads += 1; Path(sys.argv[4]).touch()\n'
             'while not stop.exists():\n'
             '    reads += 1; missing += run_state.read_json(target) is None\n'
-            'print(reads, missing)\n'), str(ROOT), str(self.target), str(stop)],
+            'print(reads, missing)\n'), str(ROOT), str(self.target), str(stop), str(ready)],
             stdout=subprocess.PIPE, text=True)
         try:
-            time.sleep(.3)
+            deadline = time.monotonic() + 30
+            while not ready.exists():
+                self.assertIsNone(reader.poll(), 'reader exited before its first read')
+                self.assertLess(time.monotonic(), deadline, 'reader did not start')
+                time.sleep(.01)
             for n in range(1, 301):
                 self.run_state.atomic_json(self.target, {'state': 'running', 'n': n})
         finally:
