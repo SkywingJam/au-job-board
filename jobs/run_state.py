@@ -8,12 +8,40 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import time
 import uuid
 
 from .config import db_path
 from . import db
 from .file_security import set_private
 from .file_lock import acquire_file_lock
+
+# Windows refuses to replace a file that another process (panel status poll,
+# agent API) briefly has open, and a reader can hit the file mid-replace; both
+# surface as PermissionError. POSIX rename is unaffected and is never retried.
+_WINDOWS = os.name == 'nt'
+_REPLACE_RETRY_SECONDS = 2.0
+_READ_RETRY_SECONDS = 0.5
+
+
+def _retry_sharing(operation, budget):
+    if not _WINDOWS:
+        return operation()
+    deadline = time.monotonic() + budget
+    delay = 0.001
+    while True:
+        try:
+            return operation()
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.05)
+
+
+def read_shared_bytes(path):
+    """Read a state file that a concurrent writer may be replacing."""
+    return _retry_sharing(Path(path).read_bytes, _READ_RETRY_SECONDS)
 
 
 def runtime_path(config):
@@ -39,14 +67,14 @@ def atomic_json(path, value):
         with temporary.open('w', encoding='utf-8') as stream:
             set_private(temporary)
             json.dump(value, stream)
-        temporary.replace(path)
+        _retry_sharing(lambda: os.replace(temporary, path), _REPLACE_RETRY_SECONDS)
     finally:
         temporary.unlink(missing_ok=True)
 
 
 def read_json(path):
     try:
-        value = json.loads(Path(path).read_text(encoding='utf-8'))
+        value = json.loads(read_shared_bytes(path).decode('utf-8'))
         return value if isinstance(value, dict) else None
     except (OSError, ValueError, UnicodeError):
         return None

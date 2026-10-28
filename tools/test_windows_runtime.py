@@ -103,6 +103,98 @@ class ListenerTests(unittest.TestCase):
             recovered.bind(address)
 
 
+class SharedStateFileTests(unittest.TestCase):
+    """latest.json is replaced by workers while the panel and agent API read it."""
+    def setUp(self):
+        from jobs import run_state
+        self.run_state = run_state
+        directory = tempfile.TemporaryDirectory(prefix='shared state 中文 ')
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.target = self.root / 'latest.json'
+        run_state.atomic_json(self.target, {'state': 'running', 'n': 0})
+
+    def flaky(self, real, failures):
+        calls = []
+        def operation(*args, **kwargs):
+            calls.append(args)
+            if len(calls) <= failures:
+                raise PermissionError(13, 'synthetic sharing denial')
+            return real(*args, **kwargs)
+        return operation, calls
+
+    def assert_no_temporaries(self):
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ['latest.json'])
+
+    def test_windows_replace_retries_transient_sharing_denial(self):
+        replace, calls = self.flaky(os.replace, 3)
+        with patch.object(self.run_state, '_WINDOWS', True), patch.object(os, 'replace', replace):
+            self.run_state.atomic_json(self.target, {'state': 'running', 'n': 1})
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(self.run_state.read_json(self.target), {'state': 'running', 'n': 1})
+        self.assert_no_temporaries()
+
+    def test_windows_persistent_denial_fails_and_keeps_previous_state(self):
+        replace, calls = self.flaky(os.replace, 10 ** 6)
+        with patch.object(self.run_state, '_WINDOWS', True), \
+                patch.object(self.run_state, '_REPLACE_RETRY_SECONDS', .05), patch.object(os, 'replace', replace):
+            with self.assertRaises(PermissionError):
+                self.run_state.atomic_json(self.target, {'state': 'error', 'n': 1})
+        self.assertGreater(len(calls), 1)
+        self.assertEqual(self.run_state.read_json(self.target), {'state': 'running', 'n': 0})
+        self.assert_no_temporaries()
+
+    def test_posix_replace_and_read_failures_are_not_retried(self):
+        replace, calls = self.flaky(os.replace, 1)
+        with patch.object(self.run_state, '_WINDOWS', False), patch.object(os, 'replace', replace):
+            with self.assertRaises(PermissionError):
+                self.run_state.atomic_json(self.target, {'state': 'error', 'n': 1})
+        self.assertEqual(len(calls), 1)
+        self.assert_no_temporaries()
+        read, reads = self.flaky(Path.read_bytes, 1)
+        with patch.object(self.run_state, '_WINDOWS', False), patch.object(Path, 'read_bytes', read):
+            self.assertIsNone(self.run_state.read_json(self.target))
+        self.assertEqual(len(reads), 1)
+
+    def test_windows_read_retries_denial_but_not_missing_or_persistent(self):
+        read, reads = self.flaky(Path.read_bytes, 2)
+        with patch.object(self.run_state, '_WINDOWS', True), patch.object(Path, 'read_bytes', read):
+            self.assertEqual(self.run_state.read_json(self.target), {'state': 'running', 'n': 0})
+        self.assertEqual(len(reads), 3)
+        read, reads = self.flaky(Path.read_bytes, 0)
+        with patch.object(self.run_state, '_WINDOWS', True), patch.object(Path, 'read_bytes', read):
+            self.assertIsNone(self.run_state.read_json(self.root / 'missing.json'))
+        self.assertEqual(len(reads), 1)
+        read, reads = self.flaky(Path.read_bytes, 10 ** 6)
+        with patch.object(self.run_state, '_WINDOWS', True), \
+                patch.object(self.run_state, '_READ_RETRY_SECONDS', .05), patch.object(Path, 'read_bytes', read):
+            self.assertIsNone(self.run_state.read_json(self.target))
+        self.assertGreater(len(reads), 1)
+
+    def test_concurrent_reader_does_not_fail_writer_or_reader(self):
+        # Natively reproduced WinError 5 before the fix; POSIX checks the same flow.
+        stop = self.root / 'stop'
+        reader = subprocess.Popen([sys.executable, '-B', '-c', (
+            'import sys; from pathlib import Path\n'
+            'sys.path.insert(0, sys.argv[1]); from jobs import run_state\n'
+            'target, stop, reads, missing = Path(sys.argv[2]), Path(sys.argv[3]), 0, 0\n'
+            'while not stop.exists():\n'
+            '    reads += 1; missing += run_state.read_json(target) is None\n'
+            'print(reads, missing)\n'), str(ROOT), str(self.target), str(stop)],
+            stdout=subprocess.PIPE, text=True)
+        try:
+            time.sleep(.3)
+            for n in range(1, 301):
+                self.run_state.atomic_json(self.target, {'state': 'running', 'n': n})
+        finally:
+            stop.touch()
+            output, _ = reader.communicate(timeout=30)
+        reads, missing = map(int, output.split())
+        self.assertGreater(reads, 0)
+        self.assertEqual(missing, 0)
+        self.assertEqual(self.run_state.read_json(self.target), {'state': 'running', 'n': 300})
+
+
 class NativeCreateTests(unittest.TestCase):
     """Native call contracts on a fake kernel; not Windows execution evidence."""
     def test_job_and_handle_attributes_are_present_at_process_creation(self):

@@ -49,7 +49,7 @@ nothing in the suite fetches listings.
 
 | Test | Covers | Platform |
 |---|---|---|
-| `tools/test_windows_runtime.py` | Lock handoff, supervisor success/busy/start failure, process-tree timeout, interruption and retry; native forced-parent-exit check | all; native case on Windows |
+| `tools/test_windows_runtime.py` | Lock handoff, supervisor success/busy/start failure, process-tree timeout, interruption and retry; run-state replace/read under a concurrent reader (Windows sharing retry, POSIX unchanged); native forced-parent-exit check | all; native case on Windows |
 | `tools/test_file_security.py` | POSIX modes, Windows ACL dispatch/failures and native private/public token checks | all; native ACL case on Windows |
 | `tools/test_platform_install.py` | Melbourne DST, Git autocrlf byte stability, Chinese/space paths | all |
 | `tools/test_agent_api.py` | Authenticated read-only HTTP, frozen pagination/detail, scope and external client failures | all |

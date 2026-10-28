@@ -187,7 +187,7 @@ def _pipeline(config, task_id):
         return unknown
     root = run_state.runtime_path(config)
     try:
-        raw = (root / 'latest.json').read_bytes()
+        raw = run_state.read_shared_bytes(root / 'latest.json')
         if len(raw) > 65536:
             return unknown
         value = json.loads(raw)
@@ -201,7 +201,7 @@ def _pipeline(config, task_id):
         return unknown
     if value.get('refresh_available'):
         try:
-            raw = (root / 'generation.json').read_bytes()
+            raw = run_state.read_shared_bytes(root / 'generation.json')
             if len(raw) > 65536:
                 return unknown
             generation = json.loads(raw)
