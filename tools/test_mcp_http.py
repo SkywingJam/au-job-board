@@ -246,10 +246,12 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         proc = subprocess.Popen([sys.executable,'-B','-m','jobs.cli','--config',str(path),
             '--rules',str(root/'rules.yaml'),'--skills',str(root/'skills.yaml'),
             'panel','--host','127.0.0.1','--port',str(port)], cwd=ROOT,
-            stdout=output,stderr=subprocess.STDOUT,env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1',PYTHONUNBUFFERED='1'))
+            stdout=output,stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
+            env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1',PYTHONUNBUFFERED='1'))
         def cleanup():
             if proc.poll() is None:
-                proc.send_signal(signal.SIGINT)
+                proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == 'nt' else signal.SIGINT)
                 try: proc.wait(timeout=12)
                 except subprocess.TimeoutExpired: proc.kill();proc.wait(timeout=5)
         self.addCleanup(cleanup)
@@ -270,7 +272,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         connection.request('GET','/?view=all')
         response = await asyncio.to_thread(connection.getresponse)
         response.read(); self.assertEqual(response.status,200);connection.close()
-        proc.send_signal(signal.SIGINT)
+        proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == 'nt' else signal.SIGINT)
         self.assertEqual(await asyncio.to_thread(proc.wait, timeout=12), 0)
         for value in (port,port+1):
             with socket.socket() as probe:

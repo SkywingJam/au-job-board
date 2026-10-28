@@ -31,6 +31,10 @@ from the project root, without echoing it:
 (umask 077 && .venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(48))' > data/agent.token)
 ```
 
+On Windows, create the token with the ACL-protected command in the
+[PowerShell guide](windows.md#optional-apimcp-token), rather than the POSIX
+`umask` command above.
+
 Then enable MCP in the selected application config:
 
 ```yaml
@@ -215,6 +219,6 @@ python -B tools/test_mcp.py
 python -B tools/run_public_tests.py --with-mcp
 ```
 
-The default public suite runs 38 entries; `--with-mcp` adds two
+The default public suite runs 41 entries; `--with-mcp` adds two
 entries and fails if its SDK is missing. A passing SDK client test proves the
 protocol/HTTP path, not that a particular desktop agent has installed the tools.

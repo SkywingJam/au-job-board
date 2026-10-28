@@ -109,7 +109,11 @@ class SkillEditsTest(unittest.TestCase):
 
         with patch.object(skills.os, "replace", check_publication):
             self.edit("Beta", "add")
-        self.assertEqual(stat.S_IMODE(overlay.stat().st_mode), 0o640)
+        if os.name == "nt":
+            from jobs.file_security import validate_private_file
+            validate_private_file(overlay)
+        else:
+            self.assertEqual(stat.S_IMODE(overlay.stat().st_mode), 0o640)
         before = overlay.read_bytes()
         with patch.object(skills.os, "replace", side_effect=OSError("synthetic failure")):
             with self.assertRaises(OSError):
@@ -117,6 +121,18 @@ class SkillEditsTest(unittest.TestCase):
         self.assertEqual(overlay.read_bytes(), before)
         self.assertEqual(list(self.root.glob("*.tmp")), [])
         self.edit("Gamma", "add")  # Failed publication releases the lock.
+
+    def test_private_temp_setup_failure_preserves_overlay_and_retry(self):
+        self.edit("Alpha", "add")
+        overlay = skills.local_path_for(self.vocab)
+        before = overlay.read_bytes()
+        with patch.object(skills, "apply_file_mode", side_effect=OSError("synthetic ACL failure")):
+            with self.assertRaises(OSError):
+                self.edit("Beta", "add")
+        self.assertEqual(overlay.read_bytes(), before)
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
+        self.edit("Beta", "add")
+        self.assertIn("beta", skills.canonical_tokens(skills.load_skills(self.vocab)))
 
     def test_database_contention_and_sync_failure_are_retryable(self):
         blocker=db.connect(self.database)
@@ -144,17 +160,27 @@ class SkillEditsTest(unittest.TestCase):
         overlay = skills.local_path_for(self.vocab)
         self.assertFalse(overlay.exists())
         self.edit("Alpha", "add")
-        self.assertEqual(stat.S_IMODE(overlay.stat().st_mode), 0o600)
+        if os.name == "nt":
+            from jobs.file_security import validate_private_file
+            validate_private_file(overlay)
+        else:
+            self.assertEqual(stat.S_IMODE(overlay.stat().st_mode), 0o600)
 
     def test_overlay_symlink_keeps_target_and_permissions(self):
         actual = self.root / "actual-overlay.yaml"
         actual.write_text("version: 1\nadd: []\n")
         actual.chmod(0o640)
         overlay = skills.local_path_for(self.vocab)
-        overlay.symlink_to(actual)
+        try:
+            overlay.symlink_to(actual)
+        except OSError as exc:
+            if os.name == "nt":
+                self.skipTest(f"symlink unavailable: {exc}")
+            raise
         self.edit("Alpha", "add")
         self.assertTrue(overlay.is_symlink())
-        self.assertEqual(stat.S_IMODE(actual.stat().st_mode), 0o640)
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE(actual.stat().st_mode), 0o640)
         self.assertIn("alpha", skills.canonical_tokens(skills.load_skills(self.vocab)))
 
     def run_competitors(self, different_database):

@@ -24,6 +24,7 @@ from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 from yaml.constructor import ConstructorError
 
 from .config import ROOT, db_path, load_rules
+from .file_security import apply_file_mode
 from .legacy_rule_profiles import PROFILES, resolve_rule_profile
 
 MAX_BYTES = 1024 * 1024
@@ -398,7 +399,7 @@ class ConfigEditor:
             mode = stat.S_IMODE(self.path.stat().st_mode)
             with tempfile.NamedTemporaryFile(dir=self.path.parent, prefix="." + self.path.name + ".", suffix=".tmp", delete=False) as handle:
                 temporary = Path(handle.name)
-                os.fchmod(handle.fileno(), mode)
+                apply_file_mode(handle, mode)
                 handle.write(encoded)
                 handle.flush()
                 os.fsync(handle.fileno())

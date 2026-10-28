@@ -124,7 +124,11 @@ class ConfigEditorTest(unittest.TestCase):
         self.assertIn("# keyword note", text)
         self.assertIn("# keep note", text)
         self.assertIn('password: "synthetic-secret" # private note', text)
-        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
+        if os.name == "nt":
+            from jobs.file_security import validate_private_file
+            validate_private_file(self.path)
+        else:
+            self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
         self.assertEqual(result, self.editor.read())
         self.assertEqual(yaml.safe_load(text)["queries"], ["synthetic analyst"])
         self.assertEqual(list(self.root.glob("*.tmp")), [])
@@ -179,6 +183,15 @@ class ConfigEditorTest(unittest.TestCase):
         finally:
             handle.close()
         self.save({"seek.pages_per_query": 3})
+
+    def test_private_temp_setup_failure_preserves_original_and_retry(self):
+        before = self.path.read_bytes()
+        with patch("jobs.config_edit.apply_file_mode", side_effect=OSError("synthetic ACL failure")):
+            self.error("write_failed", lambda: self.save({"queries": ["synthetic retry"]}))
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
+        self.save({"queries": ["synthetic retry"]})
+        self.assertEqual(yaml.safe_load(self.path.read_text())["queries"], ["synthetic retry"])
 
     def test_atomic_replace_failure_preserves_original_and_cleans_temp(self):
         with patch("jobs.config_edit.os.replace", side_effect=PermissionError):
@@ -284,7 +297,7 @@ class ConfigEditorTest(unittest.TestCase):
         applied = self.editor.read()["applied"]
         self.save({"seek.pages_per_query": 9, "legacy_rule_profile.profile": "whv"})
         args = argparse.Namespace(config=str(self.path), rules=str(ROOT / "rules.yaml"),
-                                  skills=str(self.skills_path), timeout=0)
+                                  skills=str(self.skills_path), timeout=0, windows_worker=True)
         # Real pipeline orchestration and analyze; only network/report stages mocked.
         with patch("jobs.cli.cmd_fetch", return_value=1), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli.cmd_run(args), 1)

@@ -5,7 +5,6 @@ also preserves the cross-process lock, latest attempt and result generation.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -13,6 +12,8 @@ import uuid
 
 from .config import db_path
 from . import db
+from .file_security import set_private
+from .file_lock import acquire_file_lock
 
 
 def runtime_path(config):
@@ -27,13 +28,7 @@ def lock_path(config):
 def acquire_lock(config):
     target = lock_path(config)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    handle = target.open('a+')
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        handle.close()
-        return None
-    return handle
+    return acquire_file_lock(target)
 
 
 def atomic_json(path, value):
@@ -42,7 +37,7 @@ def atomic_json(path, value):
     temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
         with temporary.open('w', encoding='utf-8') as stream:
-            os.chmod(temporary, 0o600)
+            set_private(temporary)
             json.dump(value, stream)
         temporary.replace(path)
     finally:

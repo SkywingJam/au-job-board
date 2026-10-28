@@ -21,7 +21,6 @@ r"""技能词表（skills.yaml）的加载、抽取、落库与编辑。
 
 from __future__ import annotations
 
-import fcntl
 import os
 import re
 import stat
@@ -31,6 +30,8 @@ from pathlib import Path
 import yaml
 
 from .config import ROOT
+from .file_lock import acquire_file_lock
+from .file_security import apply_file_mode
 
 DEFAULT_PATH = ROOT / "skills.yaml"
 LOCAL_PATH = ROOT / "skills.local.yaml"
@@ -171,7 +172,7 @@ def save_local(local: dict, path: str | Path | None = None) -> Path:
         with tempfile.NamedTemporaryFile(dir=target.parent, prefix="." + target.name + ".",
                                          suffix=".tmp", delete=False) as handle:
             temporary = Path(handle.name)
-            os.fchmod(handle.fileno(), mode)
+            apply_file_mode(handle, mode)
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
@@ -530,9 +531,7 @@ def edit_and_sync(conn, path, token, action, target=None) -> dict:
     """
     overlay = local_path_for(path).resolve()
     lock_path = overlay.with_name("." + overlay.name + ".lock")
-    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-    with os.fdopen(descriptor, "a+") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+    with acquire_file_lock(lock_path, blocking=True, mode=0o600) as handle:
         base = load_base(path)
         local = load_local(path)
         merged = merge(base, local)
@@ -573,7 +572,7 @@ def edit_and_sync(conn, path, token, action, target=None) -> dict:
                         with tempfile.NamedTemporaryFile(dir=overlay.parent, prefix="." + overlay.name + ".",
                                                          suffix=".tmp", delete=False) as stream:
                             temporary = Path(stream.name)
-                            os.fchmod(stream.fileno(), previous_mode)
+                            apply_file_mode(stream, previous_mode)
                             stream.write(previous)
                             stream.flush()
                             os.fsync(stream.fileno())

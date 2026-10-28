@@ -5,6 +5,8 @@ DB first. This process only opens existing databases with mode=ro/query_only.
 """
 from __future__ import annotations
 
+from .file_security import validate_private_file
+
 import argparse
 import base64
 import copy
@@ -16,7 +18,6 @@ import json
 import os
 import secrets
 import sqlite3
-import stat
 import threading
 import time
 from dataclasses import dataclass
@@ -535,9 +536,10 @@ def make_server(config, token, *, host='127.0.0.1', port=8091, panel_url='http:/
 
 def read_token(path):
     target = Path(path)
-    info = target.stat()
-    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_size > 4097:
-        raise ValueError('token file must be a small regular file accessible only to its owner')
+    try:
+        validate_private_file(target)
+    except ValueError as exc:
+        raise ValueError('token file must be a small regular file accessible only to its owner') from exc
     return target.read_text(encoding='ascii').strip()
 
 

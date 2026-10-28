@@ -22,6 +22,7 @@ import yaml
 from .config import ROOT, db_path, read_config_root, resolve_filtering
 from .db import utcnow
 from . import run_state, db as database
+from .file_security import set_private
 
 TIMEOUT_SECONDS = 1800
 TERMINAL_STATES = {"success", "partial", "error", "busy", "timeout", "interrupted"}
@@ -42,7 +43,7 @@ def _atomic_json(path, value):
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     try:
         with temporary.open("w", encoding="utf-8") as handle:
-            os.chmod(temporary, 0o600)
+            set_private(temporary)
             json.dump(value, handle)
         temporary.replace(path)
     finally:
@@ -263,7 +264,7 @@ class UpdateManager:
             process = None
             try:
                 with snapshot.open("w", encoding="utf-8") as stream:
-                    os.chmod(snapshot, 0o600)
+                    set_private(snapshot)
                     yaml.safe_dump(config, stream, allow_unicode=True)
                 self.result_path.unlink(missing_ok=True)
                 state = _empty("running")
@@ -275,10 +276,17 @@ class UpdateManager:
                            "--rules", str(self.rules_path), "--skills", str(self.skills_path),
                            "run", "--timeout", str(TIMEOUT_SECONDS), "--result-file", str(self.result_path),
                            "--result-started-at", state["started_at"], "--task-id", state["task_id"],
-                           "--trigger", "manual", "--run-lock-fd", str(handle.fileno())]
-                process = subprocess.Popen(command, cwd=ROOT, stdin=subprocess.DEVNULL,
-                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                           start_new_session=True, pass_fds=(handle.fileno(),))
+                           "--trigger", "manual"]
+                if os.name == 'nt':
+                    from .windows_process import spawn_python
+                    process, job = spawn_python(command[3:], handle, cwd=ROOT,
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    process._jobs_job = job
+                else:
+                    command += ['--run-lock-fd', str(handle.fileno())]
+                    process = subprocess.Popen(command, cwd=ROOT, stdin=subprocess.DEVNULL,
+                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                               start_new_session=True, pass_fds=(handle.fileno(),))
                 self._process = process
                 # The child uses the same started timestamp; stale results were
                 # removed while holding the exclusive lock.
@@ -304,6 +312,15 @@ class UpdateManager:
 
     @staticmethod
     def _stop(process):
+        job = getattr(process, '_jobs_job', None)
+        if job is not None:
+            try:
+                job.stop(process)
+            finally:
+                job.close()
+                process.close()
+                process._jobs_job = None
+            return
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -327,6 +344,8 @@ class UpdateManager:
                         (code != 0 and result["state"] in ("success", "partial"))):
                     result = result or dict(initial)
                     result.update(state="error", error="run_failed", finished_at=utcnow(), refresh_available=False)
+            if getattr(process, '_jobs_job', None) is not None:
+                self._stop(process)
             with self._mutex:
                 _atomic_json(self.state_path, result)
                 run_state.publish(self.config, result)

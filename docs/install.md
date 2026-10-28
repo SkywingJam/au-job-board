@@ -7,6 +7,9 @@ database. **Source installation is recommended on macOS.**
 [Docker / Compose](docker.md) is an optional alternative that keeps configuration
 and data in persistent volumes; it does not change this source workflow.
 
+For the native Windows compatibility candidate, use the separate
+[PowerShell guide](windows.md). Windows runtime acceptance is still pending.
+
 ## Tested environment
 
 - **Python 3.12** (3.12.4 in the 2026-10-08 verification).

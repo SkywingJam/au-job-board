@@ -10,7 +10,7 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 38 checks: 33 Python tests
+be collected by accident. The entry currently has 41 checks: 36 Python tests
 plus five Node behavior tests.
 
 Run it from the project root with the project interpreter:
@@ -21,10 +21,10 @@ Run it from the project root with the project interpreter:
 ```
 
 The optional MCP adapter has two opt-in integration entries:
-`python tools/run_public_tests.py --with-mcp` (40 entries on macOS).
+`python tools/run_public_tests.py --with-mcp` (43 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default local command keeps
-38 entries. Release CI installs the optional SDK and runs all 40 entries.
+41 entries. Release CI installs the optional SDK and runs all 43 entries.
 See [MCP](mcp.md).
 
 It prints one line per test with the command, the exit status and the elapsed
@@ -49,6 +49,9 @@ nothing in the suite fetches listings.
 
 | Test | Covers | Platform |
 |---|---|---|
+| `tools/test_windows_runtime.py` | Lock handoff, supervisor success/busy/start failure, process-tree timeout, interruption and retry; native forced-parent-exit check | all; native case on Windows |
+| `tools/test_file_security.py` | POSIX modes, Windows ACL dispatch/failures and native private/public token checks | all; native ACL case on Windows |
+| `tools/test_platform_install.py` | Melbourne DST, Git autocrlf byte stability, Chinese/space paths | all |
 | `tools/test_agent_api.py` | Authenticated read-only HTTP, frozen pagination/detail, scope and external client failures | all |
 | `tools/test_batches.py` | Exact fetch membership, source transactions and schema 3 recovery | all |
 | `tools/test_location_http.py` | Group-level writes, location query guidance and same-origin protection | all |
@@ -99,6 +102,24 @@ requires an active Docker Engine and may download packages during the build.
 Runtime sources are mocked; pipeline containers have no network, while
 published API/MCP port checks use a temporary bridge without fetching. See
 [docker.md](docker.md) for its checks and actual tested architecture.
+
+## Windows candidate coverage
+
+The same entry is intended for native Windows x64 / Python 3.12. It does not
+require any public CI change. On Windows there are 40 default entries or 42
+with MCP; only the macOS LaunchAgent entry is inapplicable. A native run remains
+pending; see [Windows setup](windows.md).
+
+Within the tests, the detached POSIX file-descriptor test keeps its POSIX-only
+scope; `test_windows_runtime` covers native Windows inherited handles, atomic Job association (including venv launchers), forced
+supervisor exit, process-tree timeout and saved-note/retry behavior. Windows
+in-process pipeline tests inject controlled interruption instead of SIGALRM;
+the real deadline is checked by the supervisor integration. Mode assertions use
+ACL validation on Windows. A symlink test may skip if the account lacks symlink
+privilege; ordinary regular-file saves remain covered. The runtime supervisor
+also runs on macOS with a POSIX process-tree adapter, which tests the control
+flow but cannot establish native Windows API behavior. Native ACL and forced
+Windows-exit cases are explicitly skipped on macOS.
 
 ## What is not in the public entry
 

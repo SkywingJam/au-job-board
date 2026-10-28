@@ -791,7 +791,16 @@ def cmd_panel(args) -> int:
         # Panel edits and the worker must target the same vocabulary even when
         # launched outside the repository (skills paths use launch cwd).
         config["skills_path"] = str(Path(panel_skills).resolve())
-    serve(config, config_path=args.config, rules_path=args.rules, skills_path=args.skills)
+    previous_break = None
+    if os.name == 'nt' and hasattr(signal, 'SIGBREAK'):
+        def on_break(_signum, _frame):
+            raise KeyboardInterrupt
+        previous_break = signal.signal(signal.SIGBREAK, on_break)
+    try:
+        serve(config, config_path=args.config, rules_path=args.rules, skills_path=args.skills)
+    finally:
+        if previous_break is not None:
+            signal.signal(signal.SIGBREAK, previous_break)
     return 0
 
 
@@ -832,8 +841,17 @@ def _write_run_result(args, state, stage=None, error=None, *, persist=True):
 
 def _execute_pipeline(args, *, fetch_only=False):
     initial = load_config(getattr(args, "config", None))
+    if os.name == 'nt' and not getattr(args, 'windows_worker', False):
+        from .windows_pipeline import execute
+        return execute(args, fetch_only=fetch_only)
     inherited = getattr(args, "run_lock_fd", None)
-    lock = os.fdopen(os.dup(inherited), "a+") if inherited is not None else _acquire_run_lock(initial)
+    raw_handle = getattr(args, 'run_lock_handle', None)
+    if os.name == 'nt' and raw_handle is not None:
+        from .windows_process import inherited_lock
+        lock = inherited_lock(raw_handle)
+        inherited = raw_handle
+    else:
+        lock = os.fdopen(os.dup(inherited), "a+") if inherited is not None else _acquire_run_lock(initial)
     previous_snapshot = getattr(args, "_config_snapshot", None)
     args._run_started = getattr(args, "result_started_at", None) or database.utcnow()
     args._run_counts = {"seen": 0, "inserted": 0, "updated": 0, "details_fetched": 0}
@@ -860,7 +878,7 @@ def _execute_pipeline(args, *, fetch_only=False):
         args._config_snapshot = fresh_config
         if threading.current_thread() is threading.main_thread():
             previous_term = signal.signal(signal.SIGTERM, lambda signum, _frame: (_ for _ in ()).throw(SystemExit(128 + signum)))
-        if limit:
+        if limit and os.name != 'nt':
             previous_alarm = signal.signal(signal.SIGALRM, _on_alarm)
             signal.setitimer(signal.ITIMER_REAL, limit)
         steps = (("fetch", _cmd_fetch),) if fetch_only else (("fetch", cmd_fetch), ("details", cmd_details), ("analyze", cmd_analyze), ("report", cmd_report))
@@ -884,7 +902,7 @@ def _execute_pipeline(args, *, fetch_only=False):
         state, error = "interrupted", "run_interrupted"
         raise
     finally:
-        if limit:
+        if limit and os.name != 'nt':
             signal.setitimer(signal.ITIMER_REAL, 0)
             if previous_alarm is not None:
                 signal.signal(signal.SIGALRM, previous_alarm)
@@ -1022,6 +1040,13 @@ def main(argv=None) -> int:
     p_panel.add_argument("--port", type=int, help="覆盖 config.yaml 的 panel.port")
     p_panel.set_defaults(func=cmd_panel)
 
+    for pipeline_parser in (p_fetch, p_run):
+        pipeline_parser.add_argument('--run-lock-handle', type=int, help=argparse.SUPPRESS)
+        pipeline_parser.add_argument('--windows-worker', action='store_true', help=argparse.SUPPRESS)
+    for option in ('result-file', 'result-started-at', 'task-id'):
+        p_fetch.add_argument('--' + option, help=argparse.SUPPRESS)
+    p_fetch.add_argument('--trigger', choices=('manual', 'scheduled', 'cli', 'unknown'),
+                         default='cli', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     return args.func(args)
 

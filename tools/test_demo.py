@@ -491,7 +491,14 @@ def test_guard_selftest(base: Path, root: Path) -> None:
     sqlite3.connect(ext / "ext.db").close()
     link = base / "guard-link-root"
     shutil.copytree(root, link, ignore=shutil.ignore_patterns("jobs.db*"))
-    os.symlink(ext / "sentinel.txt", link / "skills.local.yaml")
+    symlink_available = True
+    try:
+        os.symlink(ext / "sentinel.txt", link / "skills.local.yaml")
+    except OSError as exc:
+        if os.name != 'nt' or getattr(exc, 'winerror', None) != 1314:
+            raise
+        symlink_available = False
+        print('  [SKIP] two symlink guard probes: account lacks Windows symlink privilege')
     ext_before = snapshot_dir(ext)
     cases = [
         ("读外部合成 sentinel", lambda: open(ext / "sentinel.txt", "rb").close()),
@@ -515,6 +522,8 @@ def test_guard_selftest(base: Path, root: Path) -> None:
         ("启动子进程", lambda: __import__("subprocess").run(["true"])),
     ]
     for label, fn in cases:
+        if not symlink_available and label in ("经 demo 根内符号链接读外部", "经 demo 根内符号链接写外部"):
+            continue
         with Guard([root]) as g:
             try:
                 fn()
@@ -723,10 +732,23 @@ def _fresh_root(base: Path, name: str, guard_factory) -> tuple[Path, Path]:
 def test_link_boundaries(base: Path, guard_factory) -> None:
     print("== 链接边界：符号链接 / 悬空链接 / 硬链接不得让 demo 读写根外 ==")
 
+    class LinkUnavailable(Exception):
+        pass
+
     def swap(path: Path, target: Path) -> None:
         if path.exists() or path.is_symlink():
             path.unlink()
-        os.symlink(target, path)
+        try:
+            os.symlink(target, path, target_is_directory=target.is_dir())
+        except OSError as exc:
+            if os.name != 'nt' or getattr(exc, 'winerror', None) != 1314:
+                raise
+            if target.is_file():
+                # Regular-file escape checks still run without symlink privilege.
+                os.link(target, path)
+                print('  [INFO] NTFS hard-link substitute for unavailable symlink')
+            else:
+                raise LinkUnavailable from exc
 
     def hard(path: Path, target: Path) -> None:
         path.unlink(missing_ok=True)
@@ -752,7 +774,11 @@ def test_link_boundaries(base: Path, guard_factory) -> None:
         root, ext = _fresh_root(base, f"s{i}", guard_factory)
         for side in ("jobs.db-wal", "jobs.db-shm"):          # 干净起点：先去掉旁路文件
             (root / side).unlink(missing_ok=True)
-        setup(root, ext)
+        try:
+            setup(root, ext)
+        except LinkUnavailable:
+            print(f'  [SKIP] {label}: account lacks Windows symlink privilege')
+            continue
         before = snapshot_dir(ext)
         with guard_factory([root]) as g:
             try:
@@ -821,7 +847,11 @@ def test_link_boundaries(base: Path, guard_factory) -> None:
                         if "wal" not in label:
                             continue
                         (root / side).unlink(missing_ok=True)
-                    setup(root, ext)
+                    try:
+                        setup(root, ext)
+                    except LinkUnavailable:
+                        print(f'  [SKIP] {label}: account lacks Windows symlink privilege')
+                        continue
                     before = snapshot_dir(ext)
                 s1, b1 = http_get(port, "/api/skills")
                 s2, b2 = http_get(port, "/?view=all")

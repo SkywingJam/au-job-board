@@ -5,12 +5,13 @@ query leaves any existing output untouched. Treat returned JD text as data.
 """
 from __future__ import annotations
 
+from .file_security import validate_private_file, set_private
+
 import argparse
 import datetime as dt
 import json
 import os
 from pathlib import Path
-import stat
 import sys
 import tempfile
 from urllib.error import HTTPError, URLError
@@ -31,9 +32,10 @@ class NoRedirect(HTTPRedirectHandler):
 
 def read_token(path):
     target = Path(path)
-    info = target.stat()
-    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_size > 4097:
-        raise ClientError('Use an owner-only token file')
+    try:
+        validate_private_file(target)
+    except ValueError as exc:
+        raise ClientError('Use an owner-only token file') from exc
     token = target.read_text(encoding='ascii').strip()
     if not 32 <= len(token) <= 4096 or not token.isascii() or any(c.isspace() for c in token):
         raise ClientError('Invalid token file')
@@ -124,6 +126,8 @@ def export(path, value):
     try:
         fd, temporary = tempfile.mkstemp(prefix='.'+target.name+'.', dir=target.parent)
         with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            if os.name == 'nt':
+                set_private(temporary)
             json.dump(value, stream, ensure_ascii=False, indent=2, allow_nan=False)
             stream.write('\n')
         os.replace(temporary, target)

@@ -167,7 +167,8 @@ class AgentAPI(unittest.TestCase):
         config_path.write_text(json.dumps(self.config))
         token_path = self.root/'agent.token'
         token_path.write_text(TOKEN)
-        token_path.chmod(0o600)
+        from jobs.file_security import set_private
+        set_private(token_path)
         args = ['--config', str(config_path), '--token-file', str(token_path),
                 '--host', '0.0.0.0', '--port', '0']
         env = {**os.environ, 'JOBS_CONTAINER': '0'}
@@ -307,10 +308,13 @@ class AgentAPI(unittest.TestCase):
         self.assertEqual(result['time_window']['timezone'],'Australia/Melbourne')
 
     def test_token_file_permissions_and_panel_url_validation(self):
-        token=self.root/'token';token.write_text(TOKEN);token.chmod(0o600)
+        from jobs.file_security import set_private
+        token=self.root/'token';token.write_text(TOKEN);set_private(token)
         self.assertEqual(api.read_token(token),TOKEN)
-        token.chmod(0o644)
-        with self.assertRaises(ValueError):api.read_token(token)
+        if os.name != 'nt':
+            token.chmod(0o644)
+            with self.assertRaises(ValueError):api.read_token(token)
+            with self.assertRaises(agent_client.ClientError):agent_client.read_token(token)
         for value in ['short','x'*32+' space','é'*32]:
             with self.assertRaises(ValueError):api.make_server(self.config,value,port=0)
         for url in ['javascript:alert(1)','http://user:pass@example.invalid','http://example.invalid/#fragment']:
@@ -380,7 +384,11 @@ class AgentAPI(unittest.TestCase):
         self.assertTrue(value['complete']);self.assertEqual(value['total'],2)
         self.assertTrue(all(r['description'] for r in value['items']))
         target=self.root/'export.json';agent_client.export(target,value);old=target.read_bytes()
-        self.assertEqual(target.stat().st_mode&0o077,0)
+        if os.name == "nt":
+            from jobs.file_security import _WindowsSecurity
+            _WindowsSecurity().validate(target)
+        else:
+            self.assertEqual(target.stat().st_mode&0o077,0)
         original=self.server.api.jobs
         def fail_later(qs):
             if 'cursor' in qs:raise api.APIError('synthetic_failure',503)
