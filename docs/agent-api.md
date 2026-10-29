@@ -36,6 +36,9 @@ python -m jobs.agent_api --config config.yaml --rules rules.yaml \
   --port 8091 --panel-url http://127.0.0.1:8090/
 ```
 
+Windows users should create their ACL-protected token with the
+[PowerShell instructions](windows.md#optional-apimcp-token).
+
 Source launches bind only `127.0.0.1`. Docker explicitly uses `--host 0.0.0.0`
 with `JOBS_CONTAINER=1` inside its namespace and publishes only host loopback;
 Host validation still requires `127.0.0.1:<listener port>`. Every mounted route requires

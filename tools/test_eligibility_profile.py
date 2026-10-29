@@ -260,7 +260,7 @@ def test_config_module() -> None:
               load_config(write_cfg(tmp, "list.yaml", "[]\n")) == {})
         check("db_path 默认不变", db_path({}).name == "jobs.db")
         check("db_path 绝对路径不变",
-              db_path({"db_path": "/tmp/abs.db"}) == Path("/tmp/abs.db"))
+              db_path({"db_path": str(tmp.resolve() / "abs.db")}) == tmp.resolve() / "abs.db")
 
 
 def test_cli_readonly() -> None:

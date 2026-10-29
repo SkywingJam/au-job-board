@@ -42,6 +42,9 @@ ROOT = Path(__file__).resolve().parent.parent
 # (relative path, one-line description, applicable sys.platform values)
 # platforms=None means every platform; a tuple restricts the entry.
 PYTHON_TESTS = (
+    ("tools/test_windows_runtime.py", "cross-platform lock ownership and Windows pipeline supervisor", None),
+    ("tools/test_file_security.py", "private save permissions and shared token ACL validation", None),
+    ("tools/test_platform_install.py", "timezone data, LF resources and Unicode source paths", None),
     ("tools/test_agent_api.py", "authenticated read-only snapshots and external agent client", None),
     ("tools/test_batches.py", "exact fetch membership and schema 3 recovery", None),
     ("tools/test_location_http.py", "location HTTP scope and same-origin protection", None),
@@ -123,6 +126,7 @@ MCP_TESTS = (
 def build_env() -> dict:
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONUTF8"] = "1"
     return env
 
 

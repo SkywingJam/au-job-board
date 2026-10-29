@@ -18,9 +18,6 @@ panel:
   host: "127.0.0.1"
   port: 8091
   page_size: 10             # small on purpose, so paging is visible with ~16 postings
-  recommend:
-    low_ratio: 0.1
-    low_max_score: 0
 
 # Presence of this section turns on the "Demo · Synthetic data" banner.
 demo:

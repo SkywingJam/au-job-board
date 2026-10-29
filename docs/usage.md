@@ -60,7 +60,7 @@ or rerun the update after analysis finishes.
 
 | View | What it shows |
 |---|---|
-| Recommended | Unprocessed jobs that passed the hard filters, best score first, with a small share of low-score jobs mixed in. Jobs listed for more than 30 days are not recommended. Notes, stars and qualification corrections alone do not count as processed. |
+| Recommended | Unprocessed jobs that passed the hard filters, best score first. Jobs listed for more than 30 days are not recommended. Notes, stars and qualification corrections alone do not count as processed. |
 | All | Everything, including excluded jobs, with the full set of filters. |
 | New | Jobs first seen in the most recent fetch batch, excluded ones included and marked as excluded. |
 | Excluded | Jobs removed by a hard filter, with the rule id and the matched text. |

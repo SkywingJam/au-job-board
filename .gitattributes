@@ -1,0 +1,2 @@
+# These bundled reference bytes are verified by SHA-256 at runtime.
+jobs/data/*.tsv text eol=lf

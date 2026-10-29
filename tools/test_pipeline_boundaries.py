@@ -54,7 +54,7 @@ class PipelineBoundaries(unittest.TestCase):
 
     def args(self):
         return argparse.Namespace(config=str(self.path), rules=str(self.rules),
-                                  skills=str(self.skills), timeout=0)
+                                  skills=str(self.skills), timeout=0, windows_worker=True)
 
     def child(self, body, *arguments):
         # Independent process, same source, temporary cwd and no real sockets.
@@ -88,15 +88,18 @@ socket.create_connection = blocked
 
     def test_detail_alarm_after_uncommitted_write_records_timeout(self):
         result = self.child("""
-import argparse, signal
+import argparse, os, signal
 from jobs import cli, sources
-args = argparse.Namespace(config=sys.argv[2], rules=sys.argv[3], skills=sys.argv[4], timeout=10)
+args = argparse.Namespace(config=sys.argv[2], rules=sys.argv[3], skills=sys.argv[4], timeout=10, windows_worker=True)
 calls = 0
 def detail(_source_id):
     global calls
     calls += 1
     if calls == 1:
         return 'Synthetic pending description'
+    if os.name == 'nt':
+        from jobs import RunTimeout
+        raise RunTimeout()  # Real Windows deadline is in test_windows_runtime.
     signal.raise_signal(signal.SIGALRM)
 with patch.object(sources, 'iter_sources', return_value=[('seek', lambda *_: [])]), patch.object(cli, '_resolve', return_value=detail):
     code = cli.cmd_run(args)

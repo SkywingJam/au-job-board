@@ -10,6 +10,7 @@ import time
 from . import agent_api, config as config_mod
 from .agent_client import APIClient
 from .mcp_server import make_server
+from .http_server import configure_listener
 
 
 class BearerGuard:
@@ -87,7 +88,7 @@ class MCPHTTPService:
             # Reserve the public derived port before an ephemeral internal listener
             # can be assigned that same port by the kernel.
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            configure_listener(self.socket)
             self.socket.bind((host, self.port))
             self.socket.listen(128)
             self.socket.setblocking(False)

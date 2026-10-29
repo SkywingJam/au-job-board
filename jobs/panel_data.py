@@ -15,7 +15,7 @@ from . import report as report_mod
 from . import skills as skills_mod
 from .render import tags_for
 
-# 「推荐」是默认入口：未处理 + 分数优先 + 混 10% 低分岗（校准）。
+# 「推荐」是默认入口：未处理 + 分数优先。
 # 「全部」是全库（含被规则排除的），完整筛选都在那里。
 VIEWS = {"recommend": "推荐", "all": "全部", "new": "新增",
          "excluded": "被排除", "labelled": "已标注"}
@@ -186,12 +186,11 @@ def age_tag(row: dict) -> tuple[str, str] | None:
     return ("age", f"挂出 {age} 天")
 
 
-def _ordered(rows: list[dict], view: str, filters: dict, config: dict) -> list[dict]:
+def _ordered(rows: list[dict], view: str, filters: dict) -> list[dict]:
     """排序。
 
     默认口径：**分数优先、时间次优先**。
     被排除视图保留 rule_id 顺序 —— 那是审计时要的（同一条规则的误杀连在一起看）。
-    推荐视图在分数序列里再插低分岗（校准样本，见 _mix_low_scores）。
     """
     sort = filters.get("sort")
     if view == "excluded" and not sort:
@@ -200,41 +199,8 @@ def _ordered(rows: list[dict], view: str, filters: dict, config: dict) -> list[d
         return sorted(rows, key=lambda r: (_date_key(r),
                                            -report_mod.score_value(r),
                                            r.get("uid") or ""))
-    rows = sorted(rows, key=lambda r: (-report_mod.score_value(r),
+    return sorted(rows, key=lambda r: (-report_mod.score_value(r),
                                        _date_key(r), r.get("uid") or ""))
-    if view == "recommend":
-        cfg = (config.get("panel") or {}).get("recommend") or {}
-        rows = _mix_low_scores(rows, float(cfg.get("low_ratio", 0.1)),
-                               int(cfg.get("low_max_score", 0)))
-    return rows
-
-
-def _mix_low_scores(rows: list[dict], low_ratio: float, low_max_score: int) -> list[dict]:
-    """在推荐列表里按比例插入低分岗，作为**校准样本**。
-
-    为什么需要：低分区如果一直不进列表，就永远拿不到标注，权重也调不出来。
-    所以每 10 条里硬插 1 条低分的。
-
-    **必须作用在整池上、再切片**：如果按页插，插入点会随页码漂移，
-    翻页时同一岗位可能重复或消失。整池插完再切片，分页才是连续的。
-    """
-    if low_ratio <= 0:
-        return rows
-    step = max(2, round(1.0 / low_ratio))
-    high = [r for r in rows if report_mod.score_value(r) > low_max_score]
-    low = [r for r in rows if report_mod.score_value(r) <= low_max_score]
-    if not low or not high:
-        return rows
-    out: list[dict] = []
-    i = j = 0
-    while i < len(high) or j < len(low):
-        if j < len(low) and (len(out) + 1) % step == 0:
-            out.append(low[j]); j += 1
-        elif i < len(high):
-            out.append(high[i]); i += 1
-        else:
-            out.append(low[j]); j += 1
-    return out
 
 
 def _label_time(row: dict, labels: dict, index: dict) -> str:
@@ -356,7 +322,7 @@ def _query(conn, config, view, offset, limit, filters=None, since=None,
     if scope_groups is not None:
         rows = [r for r in rows if (r.get("dedupe_group") or r["uid"]) in scope_groups]
 
-    rows = _ordered(rows, view, filters, config)
+    rows = _ordered(rows, view, filters)
 
     if filters.get(QUERY_KEY):
         rows = _search(rows, filters[QUERY_KEY], labels, index, skills_cfg or {})

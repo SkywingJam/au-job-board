@@ -28,7 +28,7 @@ class ConfigEditorTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.path = self.root / "non-default.yaml"
         self.original = ('# retained header\nqueries: [synthetic] # keyword note\n'
-                         'db_path: "' + str(self.root / 'data/jobs.db') + '"\n'
+                         'db_path: ' + json.dumps(str(self.root / 'data/jobs.db')) + '\n'
                          'private_unknown:\n  password: "synthetic-secret" # private note\n'
                          'seek:\n  enabled: true\n  pages_per_query: 2 # keep note\n'
                          'legacy_rule_profile:\n  profile: "485"\n')
@@ -124,7 +124,11 @@ class ConfigEditorTest(unittest.TestCase):
         self.assertIn("# keyword note", text)
         self.assertIn("# keep note", text)
         self.assertIn('password: "synthetic-secret" # private note', text)
-        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
+        if os.name == "nt":
+            from jobs.file_security import validate_private_file
+            validate_private_file(self.path)
+        else:
+            self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
         self.assertEqual(result, self.editor.read())
         self.assertEqual(yaml.safe_load(text)["queries"], ["synthetic analyst"])
         self.assertEqual(list(self.root.glob("*.tmp")), [])
@@ -179,6 +183,15 @@ class ConfigEditorTest(unittest.TestCase):
         finally:
             handle.close()
         self.save({"seek.pages_per_query": 3})
+
+    def test_private_temp_setup_failure_preserves_original_and_retry(self):
+        before = self.path.read_bytes()
+        with patch("jobs.config_edit.apply_file_mode", side_effect=OSError("synthetic ACL failure")):
+            self.error("write_failed", lambda: self.save({"queries": ["synthetic retry"]}))
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
+        self.save({"queries": ["synthetic retry"]})
+        self.assertEqual(yaml.safe_load(self.path.read_text())["queries"], ["synthetic retry"])
 
     def test_atomic_replace_failure_preserves_original_and_cleans_temp(self):
         with patch("jobs.config_edit.os.replace", side_effect=PermissionError):
@@ -284,7 +297,7 @@ class ConfigEditorTest(unittest.TestCase):
         applied = self.editor.read()["applied"]
         self.save({"seek.pages_per_query": 9, "legacy_rule_profile.profile": "whv"})
         args = argparse.Namespace(config=str(self.path), rules=str(ROOT / "rules.yaml"),
-                                  skills=str(self.skills_path), timeout=0)
+                                  skills=str(self.skills_path), timeout=0, windows_worker=True)
         # Real pipeline orchestration and analyze; only network/report stages mocked.
         with patch("jobs.cli.cmd_fetch", return_value=1), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli.cmd_run(args), 1)
@@ -362,16 +375,19 @@ class ConfigEditorTest(unittest.TestCase):
         self.save({})
         self.save({"seek.pages_per_query": 2})
         self.assertFalse(baseline_path.exists())
+        # A successful semantic no-op may reflow a long quoted Windows path.
+        before_failure = self.path.read_bytes()
+        self.assertEqual(yaml.safe_load(before_failure), yaml.safe_load(self.original))
         with patch("jobs.run_state.atomic_json", side_effect=OSError):
             self.error("write_failed", lambda: self.save({"seek.pages_per_query": 5}))
-        self.assertEqual(self.path.read_text(), self.original)
+        self.assertEqual(self.path.read_bytes(), before_failure)
         self.assertFalse(baseline_path.exists())
         with patch.object(self.editor, "_replace", side_effect=ConfigEditError("write_failed")):
             self.error("write_failed", lambda: self.save({"seek.pages_per_query": 5}))
         current = self.editor.read()
         self.assertEqual(current["baseline"]["values"], current["values"])
         self.assertEqual(current["applied"]["status"], "unavailable")
-        self.assertEqual(self.path.read_text(), self.original)
+        self.assertEqual(self.path.read_bytes(), before_failure)
 
     def test_baseline_context_invalidates_source_rules_or_new_analysis(self):
         conn = self.seed_analysis()

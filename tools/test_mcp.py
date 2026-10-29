@@ -18,11 +18,13 @@ sys.path.insert(0, str(ROOT))
 
 from mcp import Client, StdioServerParameters
 from jobs import agent_api, agent_client, batches, db, labels
+from jobs.file_security import set_private
+from test_file_security import grant_public_read
 
 TOKEN = 'synthetic-mcp-token-not-a-real-secret-000000'
 
 
-class MCPIntegration(unittest.IsolatedAsyncioTestCase):
+class MCPFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -34,7 +36,7 @@ class MCPIntegration(unittest.IsolatedAsyncioTestCase):
         rules.write_text('location: {local: [Melbourne, VIC]}\n')
         self.token_file = self.root / 'agent.token'
         self.token_file.write_text(TOKEN)
-        self.token_file.chmod(0o600)
+        set_private(self.token_file)
         config = {'db_path': str(self.path), 'skills_path': str(skills), 'rules_path': str(rules)}
         with closing(db.connect(self.path)) as conn:
             for ident, loc, score in [('a', 'Melbourne VIC', 9), ('b', 'Sydney NSW', 20),
@@ -85,6 +87,9 @@ class MCPIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result.structured_content, dict)
         return result.structured_content
 
+
+
+class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
     async def test_discovery_and_complete_frozen_read_without_writes(self):
         before = hashlib.sha256(self.path.read_bytes()).hexdigest()
         async with self.client() as client:
@@ -231,7 +236,7 @@ class MCPIntegration(unittest.IsolatedAsyncioTestCase):
     def test_startup_rejects_unsafe_url_and_public_token_file(self):
         for url, public_token in [('http://example.invalid', False), (self.base, True)]:
             if public_token:
-                self.token_file.chmod(0o644)
+                grant_public_read(self.token_file)
             proc = subprocess.run([sys.executable, '-B', '-m', 'jobs.mcp_server',
                 '--api-url', url, '--token-file', str(self.token_file)], cwd=ROOT,
                 input='', capture_output=True, text=True, timeout=10)

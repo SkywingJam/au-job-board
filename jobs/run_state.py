@@ -5,14 +5,43 @@ also preserves the cross-process lock, latest attempt and result generation.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from pathlib import Path
+import time
 import uuid
 
 from .config import db_path
 from . import db
+from .file_security import set_private
+from .file_lock import acquire_file_lock
+
+# Windows refuses to replace a file that another process (panel status poll,
+# agent API) briefly has open, and a reader can hit the file mid-replace; both
+# surface as PermissionError. POSIX rename is unaffected and is never retried.
+_WINDOWS = os.name == 'nt'
+_REPLACE_RETRY_SECONDS = 2.0
+_READ_RETRY_SECONDS = 0.5
+
+
+def _retry_sharing(operation, budget):
+    if not _WINDOWS:
+        return operation()
+    deadline = time.monotonic() + budget
+    delay = 0.001
+    while True:
+        try:
+            return operation()
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.05)
+
+
+def read_shared_bytes(path):
+    """Read a state file that a concurrent writer may be replacing."""
+    return _retry_sharing(Path(path).read_bytes, _READ_RETRY_SECONDS)
 
 
 def runtime_path(config):
@@ -27,13 +56,7 @@ def lock_path(config):
 def acquire_lock(config):
     target = lock_path(config)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    handle = target.open('a+')
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        handle.close()
-        return None
-    return handle
+    return acquire_file_lock(target)
 
 
 def atomic_json(path, value):
@@ -42,16 +65,16 @@ def atomic_json(path, value):
     temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
         with temporary.open('w', encoding='utf-8') as stream:
-            os.chmod(temporary, 0o600)
+            set_private(temporary)
             json.dump(value, stream)
-        temporary.replace(path)
+        _retry_sharing(lambda: os.replace(temporary, path), _REPLACE_RETRY_SECONDS)
     finally:
         temporary.unlink(missing_ok=True)
 
 
 def read_json(path):
     try:
-        value = json.loads(Path(path).read_text(encoding='utf-8'))
+        value = json.loads(read_shared_bytes(path).decode('utf-8'))
         return value if isinstance(value, dict) else None
     except (OSError, ValueError, UnicodeError):
         return None

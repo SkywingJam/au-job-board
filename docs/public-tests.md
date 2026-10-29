@@ -10,7 +10,7 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 38 checks: 33 Python tests
+be collected by accident. The entry currently has 41 checks: 36 Python tests
 plus five Node behavior tests.
 
 Run it from the project root with the project interpreter:
@@ -21,10 +21,10 @@ Run it from the project root with the project interpreter:
 ```
 
 The optional MCP adapter has two opt-in integration entries:
-`python tools/run_public_tests.py --with-mcp` (40 entries on macOS).
+`python tools/run_public_tests.py --with-mcp` (43 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default local command keeps
-38 entries. Release CI installs the optional SDK and runs all 40 entries.
+41 entries. Release CI installs the optional SDK and runs all 43 entries.
 See [MCP](mcp.md).
 
 It prints one line per test with the command, the exit status and the elapsed
@@ -49,6 +49,9 @@ nothing in the suite fetches listings.
 
 | Test | Covers | Platform |
 |---|---|---|
+| `tools/test_windows_runtime.py` | Listener ownership and bind without reverse DNS, lock handoff, supervisor success/busy/start failure, process-tree timeout, interruption and retry; run-state replace/read under a concurrent reader (Windows sharing retry, POSIX unchanged); `platform` skips WMI on CPython < 3.13.4 (gh-130727); native forced-parent-exit and platform lookup checks | all; native case on Windows |
+| `tools/test_file_security.py` | POSIX modes, Windows ACL dispatch/failures and native private/public token checks | all; native ACL case on Windows |
+| `tools/test_platform_install.py` | Melbourne DST, Git autocrlf byte stability, Chinese/space paths | all |
 | `tools/test_agent_api.py` | Authenticated read-only HTTP, frozen pagination/detail, scope and external client failures | all |
 | `tools/test_batches.py` | Exact fetch membership, source transactions and schema 3 recovery | all |
 | `tools/test_location_http.py` | Group-level writes, location query guidance and same-origin protection | all |
@@ -99,6 +102,31 @@ requires an active Docker Engine and may download packages during the build.
 Runtime sources are mocked; pipeline containers have no network, while
 published API/MCP port checks use a temporary bridge without fetching. See
 [docker.md](docker.md) for its checks and actual tested architecture.
+
+## Windows coverage
+
+The same entry runs on native Windows x64 / Python 3.12. On Windows there are
+40 default entries or 42 with MCP; only the macOS LaunchAgent entry is
+inapplicable. CI also runs it on GitHub-hosted `windows-2022` from the documented `.venv`,
+with `PYTHONUTF8=1` and Git for Windows' openssl; that job uses the runner's
+administrator account, so ordinary-account acceptance stays a separate native
+check, and it is not a required check yet. See [Windows setup](windows.md)
+for the supported environments.
+
+Within the tests, the detached POSIX file-descriptor test keeps its POSIX-only
+scope; `test_windows_runtime` covers native Windows inherited handles, atomic Job association (including venv launchers), forced
+supervisor exit, process-tree timeout and saved-note/retry behavior. Windows
+in-process pipeline tests inject controlled interruption instead of SIGALRM;
+the real deadline is checked by the supervisor integration. Mode assertions use
+ACL validation on Windows. The Windows HTTP MCP entry runs all cases in one
+process, so a native crash in a later server lifecycle fails the entry. An earlier
+access violation came from CPython's `_wmi` query thread (gh-130727), reached
+through `platform.uname()`; `jobs` disables that WMI path on CPython < 3.13.4.
+A symlink test may skip if the account lacks symlink
+privilege; ordinary regular-file saves remain covered. The runtime supervisor
+also runs on macOS with a POSIX process-tree adapter, which tests the control
+flow but cannot establish native Windows API behavior. Native ACL and forced
+Windows-exit cases are explicitly skipped on macOS.
 
 ## What is not in the public entry
 

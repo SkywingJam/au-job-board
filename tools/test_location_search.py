@@ -192,7 +192,7 @@ class LocationSearchQuery(unittest.TestCase):
         }
         args = SimpleNamespace(config="synthetic-config.yaml", rules=None, skills=None)
         with patch("jobs.cli.__file__", str(package_root / "jobs" / "cli.py")), \
-             patch.object(cli, "_open", return_value=(config, self.conn)), \
+             patch.object(cli, "_open", side_effect=lambda _args: (config, db.connect(self.path))), \
              redirect_stdout(StringIO()):
             self.assertEqual(cli.cmd_report(args), 0)
         self.assertEqual(Path(config["rules_path"]), default_rules.resolve())

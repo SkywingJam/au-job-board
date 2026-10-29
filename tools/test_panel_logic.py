@@ -1,4 +1,4 @@
-"""面板纯逻辑回归：翻页连续性、校准混样、每视图筛选。
+"""面板纯逻辑回归：翻页连续性、推荐顺序、每视图筛选。
 
 这三件事都是「看一眼代码觉得对、用起来才发现不对」的类型：
 
@@ -6,8 +6,7 @@
             第二页的切片起点前移 N 格 —— 正好跳过 N 条没看过的岗位。
             修法是按 `since`（进入视图的时刻）筛，池子在翻页期间冻结。
             这个脚本用临时合成数据库断言 action 事件冻结语义。
-  校准混样  低分区一直没有标注样本，所以要按比例插低分岗；
-            但插样必须作用在**整池**上再切片，按页插会让插入点随页码漂移。
+  推荐顺序  推荐视图与其他视图同为分数优先；旧配置里的低分混样键被忽略。
   每视图筛选  推荐视图只给搜索 + 薪资，全部视图给全套。
 
 固定时间使用明确标注的**合成测试时间**（2000 年的一组 before/since/after），
@@ -110,22 +109,32 @@ def test_freeze() -> None:
         conn.close()
 
 
-def test_mix() -> None:
-    print("\n== 校准混样 ==")
-    rows = ([{"uid": f"h{i}", "total_score": 5} for i in range(45)]
-            + [{"uid": f"l{i}", "total_score": -1} for i in range(20)])
-    mixed = panel._mix_low_scores(rows, 0.1, 0)
-    check("一条不丢", len(mixed) == len(rows), f"{len(mixed)}/{len(rows)}")
-    check("顺序稳定（同样的输入给同样的输出）",
-          [r["uid"] for r in mixed] == [r["uid"] for r in panel._mix_low_scores(rows, 0.1, 0)])
-    head = [r["total_score"] for r in mixed[:40]]
-    lows = sum(1 for s in head if s <= 0)
-    check("前 40 条里低分占比接近 10%", 3 <= lows <= 5, f"{lows}/40")
-    check("ratio=0 时不插样，回到纯分数序",
-          [r["uid"] for r in panel._mix_low_scores(rows, 0, 0)] == [r["uid"] for r in rows])
-    only_low = [{"uid": u, "total_score": -2} for u in "ab"]
-    check("没有高分岗时整池原样返回",
-          [r["uid"] for r in panel._mix_low_scores(only_low, 0.1, 0)] == ["a", "b"])
+def test_recommend_order() -> None:
+    """推荐视图按分数排序，不再混入低分岗；旧配置里的混样键被忽略。"""
+    print("\n== 推荐顺序（不混低分）==")
+    old_keys = {"panel": {"recommend": {"low_ratio": 0.1, "low_max_score": 0}}}
+    with tempfile.TemporaryDirectory() as directory:
+        conn = database.connect(Path(directory) / "synthetic.db")
+        scores = [5 + i % 7 for i in range(45)] + [-1 - i % 3 for i in range(20)]
+        for i, score in enumerate(scores):
+            name = f"job{i:02d}"
+            database.upsert_job(conn, {"source": "synthetic", "source_id": name,
+                                       "title": name, "company": "Synthetic Example"})
+            database.replace_decision(conn, f"synthetic:{name}", 0)
+            database.replace_score(conn, f"synthetic:{name}", "T1", 3, 0, 0, score, "[]", score)
+        conn.commit()
+        whole, total = panel._query(conn, old_keys, "recommend", 0, 100, {}, SINCE)
+        values = [row["total_score"] for row in whole]
+        check("推荐整池即分数降序", total == 65 and values == sorted(values, reverse=True),
+              f"{total} {values[:12]}")
+        check("第 10、20 条不是低分岗", values[9] > 0 and values[19] > 0)
+        check("旧混样键与无配置结果相同",
+              [r["uid"] for r in whole] ==
+              [r["uid"] for r in panel._query(conn, {}, "recommend", 0, 100, {}, SINCE)[0]])
+        pages = [row["uid"] for offset in range(0, 65, 10)
+                 for row in panel._query(conn, old_keys, "recommend", offset, 10, {}, SINCE)[0]]
+        check("分页连续：无重复、无遗漏", pages == [r["uid"] for r in whole])
+        conn.close()
 
 
 def test_filters() -> None:
@@ -262,7 +271,7 @@ def test_stale() -> None:
 
 def main() -> int:
     test_freeze()
-    test_mix()
+    test_recommend_order()
     test_filters()
     test_cli()
     test_stale()

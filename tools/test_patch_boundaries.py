@@ -241,7 +241,7 @@ class PatchBoundaries(unittest.TestCase):
         rows = [dict(uid="synthetic:zero", source="synthetic", title="Zero", total_score=0, dedupe_group="g"),
                 dict(uid="synthetic:negative", source="synthetic", title="Negative", total_score=-1, dedupe_group="g")]
         self.assertEqual(sorted(rows, key=report._sort_key)[0]["uid"], "synthetic:zero")
-        self.assertEqual(panel_data._ordered(rows, "all", {}, {})[0]["uid"], "synthetic:zero")
+        self.assertEqual(panel_data._ordered(rows, "all", {})[0]["uid"], "synthetic:zero")
         self.assertEqual(report.best_per_group(rows)[0]["uid"], "synthetic:zero")
 
     def test_csv_scores_preserve_positive_zero_and_negative(self):

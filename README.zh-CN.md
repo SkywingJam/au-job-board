@@ -73,7 +73,8 @@
 ## 安装
 
 **macOS 优先推荐源码部署**：安装到独立虚拟环境中，步骤见[安装指南](docs/install.md)（英文），
-已验证 Python 3.12 + macOS 15。另提供可选的 [Docker / Compose 部署](docs/docker.md)（英文），
+已验证 Python 3.12 + macOS 15。Windows x64 见 [Windows 指南](docs/windows.md)（英文；
+已验证 Windows Server 2022，Windows 11 为尽力支持）。另提供可选的 [Docker / Compose 部署](docs/docker.md)（英文），
 持久化配置、数据库、个人词表与报告；保留源码部署，不新增调度器。实际验证的平台和容器架构见
 [验证记录](docs/installation-verification.md)，不将容器验证当作其他平台源码安装的证明。
 获取源码、构建镜像和安装依赖可能联网；离线检查与合成演示不联网。

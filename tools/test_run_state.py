@@ -26,7 +26,7 @@ class SharedFacts(TemporaryTest):
 
     def args(self, **extra):
         return argparse.Namespace(config=str(self.path), rules=str(self.path.parent / 'rules.yaml'),
-                                  skills=str(self.path.parent / 'skills.yaml'), timeout=0, **extra)
+                                  skills=str(self.path.parent / 'skills.yaml'), timeout=0, windows_worker=True, **extra)
 
     def test_scheduled_then_manual_latest_and_failed_attempt_visible(self):
         with patch.object(sources, 'iter_sources', return_value=[('seek', lambda *_: [])]), contextlib.redirect_stdout(io.StringIO()):
@@ -90,7 +90,7 @@ class SharedFacts(TemporaryTest):
 import argparse, os
 from unittest.mock import patch
 from jobs import cli, db, sources
-args = argparse.Namespace(config=CONFIG, rules=RULES, skills=SKILLS, timeout=0)
+args = argparse.Namespace(config=CONFIG, rules=RULES, skills=SKILLS, timeout=0, windows_worker=True)
 original = db.log_run
 def kill_before_summary(conn, kind, started, stats):
     if kind == 'run':
@@ -159,6 +159,7 @@ with patch.object(sources, 'iter_sources', return_value=[('seek', lambda *_: [])
         self.assertIn('view=all', html)
         conn.close()
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX FD handoff; native handles covered by test_windows_runtime')
     def test_detached_inherited_worker_recovers_generation_after_panel_restart(self):
         for code in (0, 9):
             with self.subTest(exit_code=code):
@@ -220,6 +221,8 @@ with patch.object(sources, 'iter_sources', return_value=[('seek', lambda *_: [])
 
     def test_termination_records_interruption_and_releases_shared_lock(self):
         def terminate(_args):
+            if os.name == 'nt':
+                raise SystemExit(143)  # Windows TerminateProcess has no Python signal handler.
             os.kill(os.getpid(), signal.SIGTERM)
         with patch.object(cli, 'cmd_fetch', terminate), self.assertRaises(SystemExit):
             cli.cmd_run(self.args(trigger='scheduled'))

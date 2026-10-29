@@ -48,7 +48,7 @@ class BatchTests(unittest.TestCase):
 
     def args(self, **extra):
         return argparse.Namespace(config=str(self.config_path), rules=str(self.rules),
-                                  skills=str(self.skills), timeout=0, **extra)
+                                  skills=str(self.skills), timeout=0, windows_worker=True, **extra)
 
     def fetch(self, entries, args=None):
         with patch.object(sources, "iter_sources", return_value=entries):

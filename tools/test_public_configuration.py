@@ -163,12 +163,8 @@ def test_example_schema() -> None:
         check("panel.port is 8090", panel_cfg.get("port") == 8090)
         check("panel.page_size is a positive int",
               is_int(panel_cfg.get("page_size")) and panel_cfg["page_size"] > 0)
-        recommend = panel_cfg.get("recommend") or {}
-        check("panel.recommend.low_ratio is a number in [0, 1]",
-              is_number(recommend.get("low_ratio"))
-              and 0 <= recommend["low_ratio"] <= 1)
-        check("panel.recommend.low_max_score is an int",
-              is_int(recommend.get("low_max_score")))
+        check("panel.recommend sampling is not configured",
+              "recommend" not in panel_cfg, repr(panel_cfg.get("recommend")))
 
         eligibility = cfg.get("eligibility")
         check("eligibility is a mapping with a documented preset",
