@@ -6,7 +6,7 @@ directory**, installed from source in an ordinary user account.
 | Environment | Coverage |
 |---|---|
 | Windows Server 2022 x64 | Every change: CI runs the full public test entry. Releases are also checked natively in an ordinary account. |
-| Windows 11 x64 | Best effort. WIN11_RESULT Later releases are not necessarily re-tested on Windows 11; please report problems. |
+| Windows 11 x64 | Best effort. v1.3.0.2 was checked once on Windows 11 Pro 26H2 (build 26300, Chinese locale) in an ordinary account: the documented install from `py -3.12`, the full test entry, panel, update, Ctrl+C and MCP. Later releases are not necessarily re-tested on Windows 11; please report problems. |
 | Windows on ARM64, WSL | Not tested. |
 
 On Python 3.12 (before 3.13.4) the application stops `platform` from querying
