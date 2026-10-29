@@ -428,20 +428,23 @@ def cmd_report(args) -> int:
     from .report import write_audit_summary, write_report
 
     config, conn = _open(args)
-    # CLI analysis uses --skills (or the default vocabulary), so report labels
-    # must use that same vocabulary rather than a panel-only config path.
-    config["skills_path"] = args.skills
-    config["rules_path"] = (
-        getattr(args, "rules", None)
-        or str(Path(__file__).resolve().parent.parent / "rules.yaml"))
-    if not (config.get("report")):
-        config["report"] = {}
-    info = write_report(conn, config)
-    summary = write_audit_summary(conn, Path(info["out_dir"]))
-    print(f"[report] 精选 {info['top']} 条 / 通过过滤 {info['kept']} 条 / 排除 {info['excluded']} 条")
-    print(f"         输出目录 {info['out_dir']}")
-    print(f"         排除汇总 {summary}")
-    return 0
+    try:
+        # CLI analysis uses --skills (or the default vocabulary), so report labels
+        # must use that same vocabulary rather than a panel-only config path.
+        config["skills_path"] = args.skills
+        config["rules_path"] = (
+            getattr(args, "rules", None)
+            or str(Path(__file__).resolve().parent.parent / "rules.yaml"))
+        if not (config.get("report")):
+            config["report"] = {}
+        info = write_report(conn, config)
+        summary = write_audit_summary(conn, Path(info["out_dir"]))
+        print(f"[report] 精选 {info['top']} 条 / 通过过滤 {info['kept']} 条 / 排除 {info['excluded']} 条")
+        print(f"         输出目录 {info['out_dir']}")
+        print(f"         排除汇总 {summary}")
+        return 0
+    finally:
+        conn.close()
 
 
 def cmd_audit(args) -> int:

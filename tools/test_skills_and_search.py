@@ -559,7 +559,7 @@ def test_cli_report_vocabulary() -> None:
         config = {"skills_path": str(configured), "report": {"out_dir": str(root / "out")}}
         for path, label in ((str(selected), "CLI label"), (None, "Default label")):
             skills.sync(conn, skills.load_skills(path or default))
-            with patch.object(cli, "_open", return_value=(dict(config), conn)), \
+            with patch.object(cli, "_open", side_effect=lambda _args: (dict(config), database.connect(root / "test.db"))), \
                  patch.object(skills, "DEFAULT_PATH", default), \
                  patch.object(skills, "LOCAL_PATH", root / "skills.local.yaml"):
                 result = cli.cmd_report(SimpleNamespace(skills=path))

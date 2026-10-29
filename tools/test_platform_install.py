@@ -26,7 +26,8 @@ class InstallTests(unittest.TestCase):
     def test_reference_hash_and_autocrlf_checkout(self):
         metadata = json.loads((ROOT / 'jobs/data/location-reference.json').read_text(encoding='utf-8'))
         source = ROOT / 'jobs/data/au-postcodes.tsv'
-        data = source.read_bytes()
+        # This checkout itself may predate the LF attribute and still hold CRLF.
+        data = source.read_bytes().replace(b'\r\n', b'\n')
         self.assertEqual(hashlib.sha256(data).hexdigest(), metadata['seed']['sha256'])
         locations._reference()
         # A tiny isolated repo exercises real Git conversion without touching
@@ -48,7 +49,7 @@ class InstallTests(unittest.TestCase):
 
     def test_reference_accepts_crlf_left_by_an_older_windows_checkout(self):
         # Clone before the LF attribute, then update: Git keeps the CRLF working file.
-        data = (ROOT / 'jobs/data/au-postcodes.tsv').read_bytes()
+        data = (ROOT / 'jobs/data/au-postcodes.tsv').read_bytes().replace(b'\r\n', b'\n')
         crlf = data.replace(b'\n', b'\r\n')
         with tempfile.TemporaryDirectory(prefix='crlf-reference-') as temp:
             folder = Path(temp)
