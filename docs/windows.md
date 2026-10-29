@@ -99,11 +99,11 @@ tests, not normal use. With those development tools installed:
 & $python tools/run_public_tests.py --with-mcp
 ```
 
-The same entry is intended for local Windows and a future Windows CI job.
+The same entry runs locally on Windows and in the `Windows 2022` CI job.
 [Public tests](public-tests.md) documents platform-specific cases. The native
 Windows runtime checks cover inherited lock handles, real process-tree timeout,
 forced supervisor exit, recovery and saved synthetic notes. POSIX-only signals
 and file-descriptor assertions retain their POSIX coverage. Record native ACL,
 ordinary-account install, panel update/save/restart and Ctrl+C results on the
-exact candidate before treating Windows compatibility as accepted. No Windows
-CI job, scheduled task or production service is installed by these instructions.
+exact candidate before treating Windows compatibility as accepted. No scheduled
+task or production service is installed by these instructions.

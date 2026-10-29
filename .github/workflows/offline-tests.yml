@@ -1,6 +1,8 @@
 name: Offline public tests
 
 # Runs for pull requests into main/dev, for pushes to main/dev, and on manual dispatch.
+# The macOS job is the required check; the Windows job is a regression signal and
+# is not required until it has a record of stable pull-request runs.
 # There is deliberately no path filter and no draft skip, so the check always
 # exists for a pull request. The plain pull_request event is used (never
 # pull_request_target) and the workflow has read-only access and no secrets.
@@ -74,3 +76,45 @@ jobs:
 
       - name: Run the public offline test entry
         run: python tools/run_public_tests.py --with-mcp
+
+  windows-tests:
+    name: Windows 2022 / Python 3.12 / Node 24.21.0
+    runs-on: windows-2022
+    timeout-minutes: 30
+    # Hosted runners use an administrator account; ordinary-account acceptance
+    # remains a separate native check (docs/windows.md).
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      # Default hosted-runner Git settings (core.autocrlf=true) are kept on
+      # purpose: byte-checked resources must survive a normal Windows checkout.
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node 24.21.0
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "24.21.0"
+
+      - name: Install the runtime dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check -r requirements-mcp.txt
+
+      # The optional TLS case needs openssl on PATH; Git for Windows ships one.
+      - name: Make openssl available
+        shell: pwsh
+        run: |
+          if (-not (Get-Command openssl -ErrorAction SilentlyContinue)) {
+            "C:\Program Files\Git\usr\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          }
+
+      - name: Run the public offline test entry
+        run: |
+          openssl version
+          python tools/run_public_tests.py --with-mcp

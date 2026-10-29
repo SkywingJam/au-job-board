@@ -74,8 +74,8 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python tools/test_legacy_rule_profiles.py
 
 `tools/regression_corpus.py` needs a private corpus and is not a public test.
 The entry is a fixed list, so a maintainer-only test is never collected by
-accident. A GitHub Actions workflow for macOS 15 and Python 3.12 runs the same
-entry; see [public-tests.md](public-tests.md). The source install and what it
+accident. A GitHub Actions workflow runs the same entry on macOS 15 and on Windows
+Server 2022, both with Python 3.12; see [public-tests.md](public-tests.md). The source install and what it
 checks are in [install.md](install.md) and
 [installation-verification.md](installation-verification.md).
 
@@ -87,7 +87,9 @@ untouched and all private-derived results stay local.
 
 Development starts from `dev`; stable changes to `main` are made through a pull request. The workflow check named
 `macOS 15 / Python 3.12 / Node 24.21.0` (the public offline suite) runs
-automatically on the pull request and should pass, and review discussions should
+automatically on the pull request and should pass; the Windows job
+`Windows 2022 / Python 3.12 / Node 24.21.0` runs alongside it and its failures
+should be investigated, although it is not yet required, and review discussions should
 be resolved, before merging. No second person's approval is required. The
 maintainer may use an emergency exception, and only through a pull request.
 Force-pushing to `main` or deleting it is not part of the process.
