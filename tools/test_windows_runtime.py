@@ -200,6 +200,51 @@ class SharedStateFileTests(unittest.TestCase):
         self.assertEqual(self.run_state.read_json(self.target), {'state': 'running', 'n': 300})
 
 
+class PlatformWMITests(unittest.TestCase):
+    """CPython < 3.13.4 _wmi reads a freed caller stack after its query timeout."""
+    def test_guard_applies_only_to_affected_windows_versions(self):
+        import platform
+        import jobs
+        original = object()
+        cases = [(True, (3, 12, 10), True), (True, (3, 13, 3), True),
+                 (True, (3, 13, 4), False), (True, (3, 14, 0), False),
+                 (False, (3, 12, 10), False)]
+        for nt, version, expected in cases:
+            with self.subTest(nt=nt, version=version), \
+                 patch.object(platform, '_wmi_query', original, create=True):
+                self.assertEqual(jobs._disable_platform_wmi(nt, version), expected)
+                if expected:
+                    with self.assertRaises(OSError):
+                        platform._wmi_query('OS', 'Version')
+                else:
+                    self.assertIs(platform._wmi_query, original)
+        with patch.object(platform, '_wmi_query', original, create=True):
+            del platform._wmi_query
+            self.assertFalse(jobs._disable_platform_wmi(True, (3, 12, 10)))
+            self.assertFalse(hasattr(platform, '_wmi_query'))
+
+    @unittest.skipUnless(os.name == 'nt', 'native Windows platform lookup')
+    def test_native_platform_lookup_skips_wmi_on_affected_versions(self):
+        script = ('import json,sys\n'
+                  'try:\n import _wmi\nexcept ImportError:\n _wmi=None\n'
+                  'calls=[]\n'
+                  'def query(text):\n calls.append(text)\n raise OSError("synthetic WMI denial")\n'
+                  'if _wmi: _wmi.exec_query=query\n'
+                  'sys.path.insert(0,sys.argv[1])\n'
+                  'import jobs,platform\n'
+                  'u=platform.uname()\n'
+                  'print(json.dumps({"calls":calls,"system":u.system,"release":u.release,'
+                  '"version":u.version,"machine":u.machine,"processor":platform.processor()}))\n')
+        result = subprocess.run([sys.executable, '-I', '-c', script, str(ROOT)], capture_output=True,
+                                text=True, encoding='utf-8', timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        info = json.loads(result.stdout)
+        self.assertEqual(info['system'], 'Windows')
+        self.assertTrue(info['release'] and info['version'] and info['machine'], info)
+        if sys.version_info < (3, 13, 4):
+            self.assertEqual(info['calls'], [])
+
+
 class NativeCreateTests(unittest.TestCase):
     """Native call contracts on a fake kernel; not Windows execution evidence."""
     def test_job_and_handle_attributes_are_present_at_process_creation(self):
