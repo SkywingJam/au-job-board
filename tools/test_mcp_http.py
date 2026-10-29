@@ -306,25 +306,4 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__ == '__main__':
-    if os.name == 'nt' and len(sys.argv) == 1:
-        # Native acceptance hit an access violation when one Windows process
-        # repeatedly rebuilt asyncio/SDK environments. Each production app has
-        # one lifecycle; isolate cases without skipping any HTTP/TLS contract or
-        # changing the application's event-loop policy. A child crash still fails.
-        names = unittest.defaultTestLoader.getTestCaseNames(HTTPMCP)
-        failures = []
-        for name in names:
-            print('Windows isolated HTTP case: ' + name, flush=True)
-            try:
-                result = subprocess.run([sys.executable, '-X', 'faulthandler', '-B',
-                    str(Path(__file__).resolve()), 'HTTPMCP.' + name], timeout=180)
-                code = result.returncode
-            except subprocess.TimeoutExpired:
-                code = -1
-            if code:
-                failures.append((name, code))
-        print('Windows HTTP cases: %d passed, %d failed' % (len(names)-len(failures), len(failures)), flush=True)
-        for name, code in failures:
-            print('FAIL %s (exit %s)' % (name, code), flush=True)
-        raise SystemExit(1 if failures else 0)
     unittest.main(verbosity=2)

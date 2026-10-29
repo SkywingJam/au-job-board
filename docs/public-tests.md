@@ -115,11 +115,11 @@ scope; `test_windows_runtime` covers native Windows inherited handles, atomic Jo
 supervisor exit, process-tree timeout and saved-note/retry behavior. Windows
 in-process pipeline tests inject controlled interruption instead of SIGALRM;
 the real deadline is checked by the supervisor integration. Mode assertions use
-ACL validation on Windows. The Windows HTTP MCP entry runs every case in a separate child process after
-native access violations during repeated asyncio/SDK teardown in one process.
-All HTTP/TLS, authentication, lifecycle and tool checks remain required; a child
-crash or failure fails the entry. No application event-loop policy is changed.
-The underlying multi-lifecycle crash has not been diagnosed. A symlink test may skip if the account lacks symlink
+ACL validation on Windows. The Windows HTTP MCP entry runs all cases in one
+process, so a native crash in a later server lifecycle fails the entry. An earlier
+access violation came from CPython's `_wmi` query thread (gh-130727), reached
+through `platform.uname()`; `jobs` disables that WMI path on CPython < 3.13.4.
+A symlink test may skip if the account lacks symlink
 privilege; ordinary regular-file saves remain covered. The runtime supervisor
 also runs on macOS with a POSIX process-tree adapter, which tests the control
 flow but cannot establish native Windows API behavior. Native ACL and forced
