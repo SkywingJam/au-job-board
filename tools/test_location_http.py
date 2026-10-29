@@ -6,7 +6,6 @@ import sys
 import tempfile
 import threading
 import unittest
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -38,7 +37,7 @@ class LocationHTTP(unittest.TestCase):
                 "location": {"local": [r"\bVIC\b", "melbourne"]},
             },
         })
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = panel.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_port
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()

@@ -103,6 +103,21 @@ class ListenerTests(unittest.TestCase):
             recovered.bind(address)
 
 
+    def test_bind_records_address_without_reverse_dns(self):
+        import socket
+        from http.server import BaseHTTPRequestHandler
+        from jobs.http_server import ThreadingHTTPServer
+        with patch.object(socket, 'getfqdn', side_effect=AssertionError('reverse DNS lookup')):
+            for host in ('127.0.0.1', '0.0.0.0'):
+                server = ThreadingHTTPServer((host, 0), BaseHTTPRequestHandler)
+                try:
+                    self.assertEqual(server.server_name, host)
+                    self.assertEqual(server.server_port, server.server_address[1])
+                    self.assertEqual(server.allow_reuse_address, os.name != 'nt')
+                finally:
+                    server.server_close()
+
+
 class SharedStateFileTests(unittest.TestCase):
     """latest.json is replaced by workers while the panel and agent API read it."""
     def setUp(self):
