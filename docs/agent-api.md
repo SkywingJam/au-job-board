@@ -87,6 +87,17 @@ supported postcodes and locality names, including ambiguous names such as
 Carlton; see [location data](location-data.md). It is not accepted for the
 `recommend` view.
 
+`ineligible_last=1` is the same optional ordering as the panel's **Ineligible
+last** control. It is valid for `all`, `labelled` and `new` (the `legacy_new`
+scope) and rejected for `recommend` and `excluded`; only the value `1` is
+accepted. Omit it to keep the previous order exactly. It filters nothing and
+changes no score or rule: the whole result is first divided by effective
+qualification (the machine rule result, replaced by a human eligible/ineligible
+correction; unknown never counts as ineligible), then each part keeps the
+location blocks and the chosen score/date order, and only then is paged. A
+snapshot keeps its order after later corrections; a new query uses the new
+qualification.
+
 `scope` determines the source candidate pool **before** display grouping:
 
 | Scope | Meaning |

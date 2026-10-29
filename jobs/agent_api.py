@@ -94,7 +94,7 @@ def _integer(value, low, high):
 
 
 def normalize_query(qs):
-    allowed = set(panel_data.ALL_FILTER_KEYS) | {'priority', 'view', 'scope', 'day', 'batch_id', 'limit'}
+    allowed = set(panel_data.ALL_FILTER_KEYS) | {'priority', panel_data.INELIGIBLE_LAST_KEY, 'view', 'scope', 'day', 'batch_id', 'limit'}
     if set(qs) - allowed or any(len(v) != 1 for k, v in qs.items() if k != 'skill'):
         raise APIError('invalid_query')
     one = lambda key, default='': (qs.get(key) or [default])[0]
@@ -117,7 +117,7 @@ def normalize_query(qs):
     if one('batch_id') == '' and 'batch_id' in qs:
         raise APIError('invalid_batch')
     limit = _integer(one('limit', '100'), 1, 200)
-    for key in ('salary', 'fresh', 'priority'):
+    for key in ('salary', 'fresh', 'priority', panel_data.INELIGIBLE_LAST_KEY):
         if key in qs and one(key) != '1':
             raise APIError('invalid_filter')
     if len(qs.get('skill', [])) > 20 or any(not s for s in qs.get('skill', [])):

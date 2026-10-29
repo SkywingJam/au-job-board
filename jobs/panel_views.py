@@ -29,7 +29,7 @@ from . import i18n
 from . import labels as labels_mod
 from . import skills as skills_mod
 from .panel_data import (
-    FILTER_KEYS, FRESH_KEY, NONE_TOKEN, PRIORITY_KEY,
+    FILTER_KEYS, FRESH_KEY, INELIGIBLE_LAST_KEY, NONE_TOKEN, PRIORITY_KEY,
     QUERY_KEY, SINCE_KEY, SKILL_KEY, SKILL_PICK_TOP, SORT_KEYS, TIER_KEY, TIER_LABELS,
     ALL_FILTER_KEYS, VIEW_FILTER_KEYS, VIEWS,
     _link, _query, _resolve_since, age_days, AGE_WARN_DAYS, skill_tree,
@@ -711,9 +711,11 @@ def _select(key: str, label: str, options: list[tuple[str, str]], current: str, 
     )
 
 
-def _toggle(key: str, label: str, checked: bool) -> str:
+def _toggle(key: str, label: str, checked: bool, value: str | None = None) -> str:
+    # 无 value 的复选框会以 "on" 进 URL；严格取值的开关（如资格不符置后）显式给 "1"。
+    value_attr = f' value="{_e(value)}"' if value is not None else ""
     return (f'<label class="ctl tog{" on" if checked else ""}">'
-            f'<input type="checkbox" data-fkey="{key}"{" checked" if checked else ""} '
+            f'<input type="checkbox" data-fkey="{key}"{value_attr}{" checked" if checked else ""} '
             f'onchange="filterChanged()"> {_e(label)}</label>')
 
 
@@ -781,6 +783,9 @@ def _control(key: str, filters: dict, skill_counts: dict, lang: str, skill_label
         return _toggle(FRESH_KEY, T("filter.fresh"), bool(filters.get(FRESH_KEY)))
     if key == PRIORITY_KEY:
         return _toggle(PRIORITY_KEY, T("filter.priority"), bool(filters.get(PRIORITY_KEY)))
+    if key == INELIGIBLE_LAST_KEY:
+        return _toggle(INELIGIBLE_LAST_KEY, T("filter.ineligible_last"),
+                       bool(filters.get(INELIGIBLE_LAST_KEY)), "1")
     if key == SKILL_KEY:
         return _skill_picker(filters, skill_counts, lang, skill_labels)
     if key == TIER_KEY:
@@ -809,6 +814,8 @@ def _chip_text(key: str, filters: dict, lang: str, skill_labels=None) -> str:
         return T("filter.fresh")
     if key == PRIORITY_KEY:
         return T("filter.priority")
+    if key == INELIGIBLE_LAST_KEY:
+        return T("filter.ineligible_last")
     if key == TIER_KEY:
         return T("filter.tier") + colon + str(value)
     if key == SKILL_KEY:
@@ -1120,17 +1127,17 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
                  f'<button type="button" class="btn" onclick="removeFilter(\'geo\')">'
                  f'{_e(T("location.clear_geo"))}</button></div>')
     elif page:
-        if filters.get("geo"):
-            parts, previous = [], None
-            for row in page:
-                tier = row.get("_geo_match") or "unknown"
-                if previous is not None and tier != previous:
-                    parts.append('<hr class="geo-divider" aria-hidden="true">')
-                parts.append(_card(row, since, lang))
-                previous = tier
-            cards = "".join(parts)
-        else:
-            cards = "".join(_card(r, since, lang) for r in page)
+        # One divider wherever the displayed block changes: the location tier
+        # and/or the "ineligible last" zone. Neither option: no dividers.
+        parts, previous = [], None
+        for row in page:
+            block = (row.get("_ineligible_last"),
+                     (row.get("_geo_match") or "unknown") if filters.get("geo") else None)
+            if previous is not None and block != previous:
+                parts.append('<hr class="geo-divider" aria-hidden="true">')
+            parts.append(_card(row, since, lang))
+            previous = block
+        cards = "".join(parts)
     elif has_filters:
         cards = (f'<div class="empty"><b>{_e(T("list.empty_filtered"))}</b>'
                  f'<span>{_e(T("list.empty_hint"))}</span>'

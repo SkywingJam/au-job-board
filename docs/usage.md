@@ -72,9 +72,22 @@ status (including "not processed"), the ★ priority queue, eligibility
 correction and label status. Legacy interest records are kept in the database
 and API but no longer shown in the panel; old `interest=` links still work.
 All, New, Excluded and Labelled also provide one location box for an Australian
-postcode, suburb, capital city, state or `Australia`. Results are grouped in
-exact, same-state coarse and unknown blocks with dividers; the recommended view
+postcode, suburb, capital city, state or `Australia`. A capital or its CBD
+postcode lists the CBD, then the rest of that city's metropolitan area, then
+places that cannot be placed; other places in the state outside the area are
+hidden. Results are grouped in blocks with dividers; the recommended view
 does not offer location search. See [Locations and records](location-workflow.md).
+
+**More filters → Job details → Ineligible last** (All, New and Labelled; off by
+default and remembered per view in this browser) moves jobs whose effective
+qualification is ineligible after the rest of the whole result. It uses the same
+qualification shown on the card: the rule result, replaced by your
+Eligible/Ineligible correction; unknown is not ineligible. It filters nothing
+and changes no score or rule. Inside each part the location blocks and your
+score/date sort stay in order, and paging runs over the complete ordering.
+A correction saved in the detail pane shows at once and keeps the open job and
+its previous/next targets; the list re-sorts on the next refresh or when the
+query is applied again. Recommended and Excluded keep their own order.
 The detail pane shows the original description, the extracted evidence sentence
 for eligibility-related requirements, and a link to the original posting.
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -87,6 +88,101 @@ class LocationSearch(unittest.TestCase):
             for listing, tier in expected:
                 with self.subTest(query=query, listing=listing):
                     self.assertEqual(self.tier(listing, query), tier)
+
+    def test_metro_reference_is_verified_abs_derived_data(self):
+        manifest, shares = locations._metro()
+        self.assertEqual(manifest["publisher"], "Australian Bureau of Statistics")
+        self.assertEqual(manifest["license"], "CC BY 4.0")
+        self.assertEqual(len(shares), manifest["tsv"]["rows"])
+        self.assertEqual(set(manifest["resources"]), {
+            "MB_2021_AUST.xlsx", "POA_2021_AUST.xlsx", "Mesh Block Counts, 2021.xlsx"})
+        for resource in manifest["resources"].values():
+            self.assertRegex(resource["sha256"], r"^[0-9a-f]{64}$")
+            self.assertTrue(resource["url"].startswith("https://www.abs.gov.au/"))
+        self.assertEqual({city: item["name"] for city, item in manifest["capitals"].items()}, {
+            "Adelaide": "Greater Adelaide", "Brisbane": "Greater Brisbane",
+            "Canberra": "Australian Capital Territory", "Darwin": "Greater Darwin",
+            "Hobart": "Greater Hobart", "Melbourne": "Greater Melbourne",
+            "Perth": "Greater Perth", "Sydney": "Greater Sydney"})
+        self.assertEqual(set(manifest["capitals"]), set(locations._reference()[0]["cities"]))
+        # Each CBD postcode lies wholly in its own capital area.
+        for city, (postcode, _) in ((c.title(), v) for c, v in locations._CBD_POSTCODES.items()):
+            self.assertEqual(shares[postcode], (manifest["capitals"][city]["gccsa"], 1000))
+        self.assertEqual(shares["3220"][0], "2RVIC")               # Geelong: not Greater Melbourne
+        self.assertLess(shares["3644"][1], manifest["min_share_permille"])   # split between areas
+        self.assertNotIn("3001", shares)                             # PO-box code has no postal area
+
+    def test_metro_reference_tampering_fails_visibly(self):
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp:
+            copy = Path(temp)
+            for name in ("metro-reference.json", "au-postcode-metro.tsv"):
+                shutil.copy(locations._DATA / name, copy / name)
+            # LF-normalised content with CRLF is accepted, like the seed.
+            data = (copy / "au-postcode-metro.tsv").read_bytes()
+            (copy / "au-postcode-metro.tsv").write_bytes(data.replace(b"\n", b"\r\n"))
+            locations._metro.cache_clear()
+            try:
+                with patch.object(locations, "_DATA", copy):
+                    self.assertEqual(len(locations._metro()[1]), locations._metro()[0]["tsv"]["rows"])
+                    locations._metro.cache_clear()
+                    (copy / "au-postcode-metro.tsv").write_bytes(data + b"3000\t2GMEL\t1000\tpersons\n")
+                    with self.assertRaises(ValueError):
+                        locations._metro()
+            finally:
+                locations._metro.cache_clear()
+
+    def test_every_capital_has_cbd_then_metro_then_fallback_and_hides_outside(self):
+        cases = {
+            "Sydney": ("Sydney City Centre NSW", "Parramatta NSW", "Newcastle NSW", "NSW"),
+            "Melbourne": ("Melbourne City Centre VIC", "Carlton VIC", "Geelong VIC", "VIC"),
+            "Brisbane": ("Brisbane City Centre QLD", "Ipswich QLD", "Toowoomba QLD", "QLD"),
+            "Adelaide": ("Adelaide City Centre SA", "Elizabeth SA", "Mount Gambier SA", "SA"),
+            "Perth": ("Perth City Centre WA", "Fremantle WA", "Bunbury WA", "WA"),
+            "Hobart": ("Hobart City Centre TAS", "Kingston TAS", "Launceston TAS", "TAS"),
+            "Darwin": ("Darwin City Centre NT", "Palmerston NT", "Katherine NT", "NT"),
+            "Canberra": ("Canberra City Centre ACT", "Belconnen ACT", None, "ACT"),
+        }
+        for city, (cbd, metro, outside, state) in cases.items():
+            postcode = locations._CBD_POSTCODES[city.casefold()][0]
+            for query in (city, postcode):
+                with self.subTest(city=city, query=query):
+                    self.assertEqual(self.tier(cbd, query), "exact")
+                    self.assertEqual(self.tier(f"{city} {state}", query), "near")   # name is not the CBD
+                    self.assertEqual(self.tier(metro, query), "near")
+                    if outside:
+                        self.assertEqual(self.tier(outside, query), "hidden")
+                    self.assertEqual(self.tier(state, query), "unknown")             # state-only
+                    self.assertEqual(self.tier("Australia", query), "unknown")
+                    self.assertEqual(self.tier("Undisclosed", query), "unknown")
+                    self.assertEqual(self.tier("Sydney NSW" if city != "Sydney"
+                                               else "Melbourne VIC", query), "hidden")
+
+    def test_metro_boundaries_are_conservative(self):
+        self.assertEqual(self.tier("Melbourne VIC 3001", "Melbourne"), "unknown")   # no postal area
+        self.assertEqual(self.tier("Melbourne VIC", "Melbourne"), "near")
+        self.assertNotEqual(self.tier("Melbourne VIC", "Melbourne"), "exact")
+        self.assertEqual(self.tier("Hume ACT 2620", "Canberra"), "unknown")          # shared by two states
+        self.assertEqual(self.tier("Queanbeyan NSW", "Canberra"), "hidden")
+        self.assertEqual(self.tier("Alice Springs NT", "Darwin"), "unknown")         # postcode shared by NT/SA/WA
+        self.assertEqual(self.tier("Gold Coast QLD", "Brisbane"), "unknown")         # state precision only
+        self.assertEqual(self.tier("Parramatta NSW", "Sydney"), "near")              # PO-box codes ignored
+        self.assertEqual(self.tier("3004", "Melbourne"), "near")
+        self.assertEqual(self.tier("3220", "3000"), "hidden")
+        self.assertEqual(self.tier("Docklands 3008", "3000"), "near")
+
+    def test_non_capital_searches_keep_their_meaning(self):
+        expected = {
+            ("Melbourne VIC", "3053"): "near", ("Geelong VIC", "3053"): "hidden",
+            ("Carlton VIC", "Carlton"): "exact", ("Melbourne VIC", "Carlton"): "near",
+            ("VIC", "3053"): "near", ("Frankston VIC", "VIC"): "exact",
+            ("Geelong VIC", "VIC"): "exact", ("Sydney NSW", "VIC"): "hidden",
+            ("VIC", "Australia"): "exact", ("Undisclosed", "3053"): "unknown",
+        }
+        for (listing, query), tier in expected.items():
+            with self.subTest(listing=listing, query=query):
+                self.assertEqual(self.tier(listing, query), tier)
 
     def test_state_country_and_first_location_only(self):
         self.assertEqual(self.tier("Carlton VIC", "VIC"), "exact")

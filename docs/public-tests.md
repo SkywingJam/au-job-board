@@ -10,7 +10,7 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 41 checks: 36 Python tests
+be collected by accident. The entry currently has 42 checks: 37 Python tests
 plus five Node behavior tests.
 
 Run it from the project root with the project interpreter:
@@ -21,10 +21,10 @@ Run it from the project root with the project interpreter:
 ```
 
 The optional MCP adapter has two opt-in integration entries:
-`python tools/run_public_tests.py --with-mcp` (43 entries on macOS).
+`python tools/run_public_tests.py --with-mcp` (44 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default local command keeps
-41 entries. Release CI installs the optional SDK and runs all 43 entries.
+42 entries. Release CI installs the optional SDK and runs all 44 entries.
 See [MCP](mcp.md).
 
 It prints one line per test with the command, the exit status and the elapsed
@@ -55,9 +55,10 @@ nothing in the suite fetches listings.
 | `tools/test_agent_api.py` | Authenticated read-only HTTP, frozen pagination/detail, scope and external client failures | all |
 | `tools/test_batches.py` | Exact fetch membership, source transactions and schema 3 recovery | all |
 | `tools/test_location_http.py` | Group-level writes, location query guidance and same-origin protection | all |
-| `tools/test_locations.py` | Offline Australian geography, ambiguity and three-tier matching | all |
-| `tools/test_location_search.py` | Representative selection, block ordering and pagination | all |
+| `tools/test_locations.py` | Offline Australian geography, ambiguity, three-tier matching and the ABS metropolitan-area reference | all |
+| `tools/test_location_search.py` | Representative selection, CBD / metropolitan / fallback block ordering and pagination | all |
 | `tools/test_panel_location_views.py` | One location box, dividers and simplified group detail | all |
+| `tools/test_ineligible_last.py` | Ineligible-last zones over effective qualification (machine rule categories, human overrides, unknown): panel/API/MCP parameter, whole-result paging, location blocks, frozen snapshots, control placement | all |
 | `tools/test_panel_locations.mjs` | Group save identity, location search drafts and navigation guards | all |
 | `tools/test_panel_shortcuts.mjs` | Keyboard profiles, cookie persistence, native text selection and input/overlay guards | all |
 | `tools/test_panel_copy.mjs` | Complete JD copy, clipboard fallbacks, safe text and restored focus/selection | all |
@@ -89,7 +90,7 @@ nothing in the suite fetches listings.
 | `tools/test_fixture_boundary.py` | Test-data boundary and export contract | all |
 | `tools/test_launchd_examples.py` | macOS LaunchAgent templates and renderer | macOS |
 | `tools/test_panel_note_separators.mjs` | Panel note separators, default labels (UI-02, UI-03) and generation-based refresh, draft protection and destination navigation, update confirmation, card progress text and the unknown-outcome status line | all |
-| `tools/test_panel_navigation.mjs` | Detail previous/next and profile keys over the frozen list (save/draft gate, pending result version, repeated keys, ignored keys), mobile label sheet, header-count refresh, mobile filter drawer apply/discard and skill candidates writing canonical names | all |
+| `tools/test_panel_navigation.mjs` | Detail previous/next and profile keys over the frozen list (save/draft gate, pending result version, repeated keys, ignored keys), mobile label sheet, header-count refresh, mobile filter drawer apply/discard, per-view memory of the ineligible-last option, unchanged list/detail targets after a qualification correction, and skill candidates writing canonical names | all |
 
 The fixture-boundary test also guards that a private label export is not used
 by default; it is part of keeping the public test data synthetic. Its output
@@ -106,7 +107,7 @@ published API/MCP port checks use a temporary bridge without fetching. See
 ## Windows coverage
 
 The same entry runs on native Windows x64 / Python 3.12. On Windows there are
-40 default entries or 42 with MCP; only the macOS LaunchAgent entry is
+41 default entries or 43 with MCP; only the macOS LaunchAgent entry is
 inapplicable. CI also runs it on GitHub-hosted `windows-2022` from the documented `.venv`,
 with `PYTHONUTF8=1` and Git for Windows' openssl; that job uses the runner's
 administrator account, so ordinary-account acceptance stays a separate native
@@ -134,6 +135,7 @@ Windows-exit cases are explicitly skipped on macOS.
 |---|---|
 | `tools/test_public_snapshot.py` | It tests the maintainer public-snapshot planner, not the installed product. It is internal release tooling, so it does not belong in a user-facing public suite. |
 | `tools/regression_corpus.py` | It needs a private job corpus. |
+| `tools/build_metro_reference.py` | Maintainer tool that rebuilds the bundled metropolitan-area reference from three large official ABS downloads; it needs the network or a local copy of those files and is not used at runtime. |
 | `tools/capture_demo_screenshots.py`, `tools/capture_demo_screenshots.sheets.py`, `tools/capture_demo_video.py`, `tools/prepare_screenshot_mock.py` | Media and presentation tooling, not product tests; it also needs browser or video tools that a CI test job should not install. |
 
 ## Continuous integration

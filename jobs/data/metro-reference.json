@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "reference_version": "abs-asgs3-poa-gccsa-c4f90e42db36c8ab",
+  "publisher": "Australian Bureau of Statistics",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "license_source": "https://www.abs.gov.au/website-privacy-copyright-and-disclaimer",
+  "attribution": "Based on Australian Bureau of Statistics data, ASGS Edition 3 (2021) allocation files and 2021 Census mesh block counts, CC BY 4.0. Reduced to postal area, dominant GCCSA and its person share; derived by tools/build_metro_reference.py.",
+  "generated_at": "2026-10-29T16:02:39+00:00",
+  "resources": {
+    "MB_2021_AUST.xlsx": {
+      "url": "https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs/edition-3-july-2021-june-2026/access-and-downloads/allocation-files/MB_2021_AUST.xlsx",
+      "sha256": "cbfe8b98ed17c3be994f5635bd5fd4cc721b6f798d14f583c41a32c6b6973884",
+      "bytes": 35322985,
+      "last_modified": "Thu, 24 Jun 2021 06:42:52 GMT"
+    },
+    "POA_2021_AUST.xlsx": {
+      "url": "https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs/edition-3-july-2021-june-2026/access-and-downloads/allocation-files/POA_2021_AUST.xlsx",
+      "sha256": "e1b82115e4cb46691924f6aa996f928d3771596e1d015acc17efdd807bb12c2e",
+      "bytes": 18584662,
+      "last_modified": "Wed, 15 Sep 2021 03:05:19 GMT"
+    },
+    "Mesh Block Counts, 2021.xlsx": {
+      "url": "https://www.abs.gov.au/census/guide-census-data/mesh-block-counts/2021/Mesh%20Block%20Counts%2C%202021.xlsx",
+      "sha256": "1ab520c2ff0e07ca88729258c30ee9f7a7133df113a81bac94812582f3b540a3",
+      "bytes": 15147466,
+      "last_modified": "Mon, 20 Jun 2022 06:11:23 GMT"
+    }
+  },
+  "method": "Each 2021 mesh block belongs to one POA and one GCCSA. For every four-digit POA the 2021 Census usual-resident persons of its mesh blocks are summed per GCCSA (mesh-block area if the POA has no persons); the GCCSA with the largest weight and its floor-rounded permille share are kept.",
+  "min_share_permille": 900,
+  "tsv": {
+    "file": "au-postcode-metro.tsv",
+    "sha256": "c4f90e42db36c8ab41eecbb7eee8f01622eddcc360a12435e85b227b532b9f3b",
+    "rows": 2643,
+    "columns": [
+      "postcode",
+      "gccsa",
+      "share_permille",
+      "basis"
+    ]
+  },
+  "capitals": {
+    "Adelaide": {
+      "gccsa": "4GADE",
+      "name": "Greater Adelaide"
+    },
+    "Brisbane": {
+      "gccsa": "3GBRI",
+      "name": "Greater Brisbane"
+    },
+    "Canberra": {
+      "gccsa": "8ACTE",
+      "name": "Australian Capital Territory"
+    },
+    "Darwin": {
+      "gccsa": "7GDAR",
+      "name": "Greater Darwin"
+    },
+    "Hobart": {
+      "gccsa": "6GHOB",
+      "name": "Greater Hobart"
+    },
+    "Melbourne": {
+      "gccsa": "2GMEL",
+      "name": "Greater Melbourne"
+    },
+    "Perth": {
+      "gccsa": "5GPER",
+      "name": "Greater Perth"
+    },
+    "Sydney": {
+      "gccsa": "1GSYD",
+      "name": "Greater Sydney"
+    }
+  },
+  "regions": {
+    "19499": "No usual address (NSW)",
+    "19799": "Migratory - Offshore - Shipping (NSW)",
+    "1GSYD": "Greater Sydney",
+    "1RNSW": "Rest of NSW",
+    "29499": "No usual address (Vic.)",
+    "29799": "Migratory - Offshore - Shipping (Vic.)",
+    "2GMEL": "Greater Melbourne",
+    "2RVIC": "Rest of Vic.",
+    "39499": "No usual address (Qld)",
+    "39799": "Migratory - Offshore - Shipping (Qld)",
+    "3GBRI": "Greater Brisbane",
+    "3RQLD": "Rest of Qld",
+    "49499": "No usual address (SA)",
+    "49799": "Migratory - Offshore - Shipping (SA)",
+    "4GADE": "Greater Adelaide",
+    "4RSAU": "Rest of SA",
+    "59499": "No usual address (WA)",
+    "59799": "Migratory - Offshore - Shipping (WA)",
+    "5GPER": "Greater Perth",
+    "5RWAU": "Rest of WA",
+    "69499": "No usual address (Tas.)",
+    "69799": "Migratory - Offshore - Shipping (Tas.)",
+    "6GHOB": "Greater Hobart",
+    "6RTAS": "Rest of Tas.",
+    "79499": "No usual address (NT)",
+    "79799": "Migratory - Offshore - Shipping (NT)",
+    "7GDAR": "Greater Darwin",
+    "7RNTE": "Rest of NT",
+    "89499": "No usual address (ACT)",
+    "89799": "Migratory - Offshore - Shipping (ACT)",
+    "8ACTE": "Australian Capital Territory",
+    "99499": "No usual address (OT)",
+    "99799": "Migratory - Offshore - Shipping (OT)",
+    "9OTER": "Other Territories",
+    "ZZZZZ": "Outside Australia"
+  },
+  "limits": "Postal areas approximate postcodes; PO-box and large-volume postcodes have no POA and stay undetermined. ASGS Edition 4 (July 2026) boundaries and 2026 Census counts are not used. A postcode below the minimum share is undetermined."
+}

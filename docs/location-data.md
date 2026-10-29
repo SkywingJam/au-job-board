@@ -53,6 +53,49 @@ The mapping is explicit because postal-box and other special postcodes in the
 seed cannot be used to infer a CBD. Other supported place names use GeoNames
 locality precision.
 
+## Metropolitan-area reference (ABS)
+
+A capital or CBD-postcode search also needs to know which other places belong to
+that city. This is not a hand-written list of suburbs or a distance guess: it is
+the Australian Bureau of Statistics' Greater Capital City Statistical Area
+(GCCSA, ASGS Edition 3, 2021) applied to postcodes.
+
+- Sources (CC BY 4.0, [ABS copyright](https://www.abs.gov.au/website-privacy-copyright-and-disclaimer)):
+  the ASGS Edition 3 allocation files
+  [`MB_2021_AUST.xlsx`](https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs/edition-3-july-2021-june-2026/access-and-downloads/allocation-files/MB_2021_AUST.xlsx)
+  (mesh block to GCCSA) and
+  [`POA_2021_AUST.xlsx`](https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs/edition-3-july-2021-june-2026/access-and-downloads/allocation-files/POA_2021_AUST.xlsx)
+  (mesh block to postal area), and the 2021 Census
+  [Mesh Block counts](https://www.abs.gov.au/census/guide-census-data/mesh-block-counts/2021/Mesh%20Block%20Counts%2C%202021.xlsx).
+  URLs, byte counts, SHA-256 and `Last-Modified` values are in
+  [`metro-reference.json`](../jobs/data/metro-reference.json).
+- Transformation: for each four-digit postal area (POA) the usual-resident
+  persons of its mesh blocks are summed per GCCSA (mesh-block area if a POA has
+  no persons). The GCCSA with the largest weight and its share are written to
+  [`au-postcode-metro.tsv`](../jobs/data/au-postcode-metro.tsv)
+  (`postcode`, `gccsa`, `share_permille`, `basis`; 2,643 rows, verified by
+  SHA-256 at runtime like the seed). `tools/build_metro_reference.py` rebuilds
+  both files from the ABS downloads (standard library only; it is a maintainer
+  tool and nothing downloads at runtime).
+- Capitals map to ABS names: Greater Sydney, Greater Melbourne, Greater
+  Brisbane, Greater Adelaide, Greater Perth, Greater Hobart, Greater Darwin and,
+  for Canberra, the Australian Capital Territory (one GCCSA).
+- Decision: a postcode is *inside* a capital's area when its dominant GCCSA is
+  that capital and holds at least 90% of its persons; *outside* when the
+  dominant GCCSA is another and holds at least 90%; otherwise it is
+  *undetermined*. 25 of 2,643 postal areas fall below 90%.
+
+Known limits, none of which is silently guessed: PO-box and large-volume
+postcodes have no POA (they are ignored when another postcode of the same place
+decides, otherwise the place is undetermined); a postcode shared by several
+states (for example 2620, 0872) is undetermined; places missing from the
+GeoNames seed (for example Gold Coast) have only state precision; 2021
+boundaries and 2021 population are used, while ASGS Edition 4 (July 2026) has
+published allocation files but its 2026 Census counts are not available. A
+cross-check with the Edition 4 allocation by area changed the verdict of 36
+postcodes, always to or from *undetermined*; none moved between inside and
+outside. A POA is an approximation of a postcode, not a delivery boundary.
+
 ## Search contract
 
 ```python
@@ -78,12 +121,18 @@ Required mapping:
 
 | Search | `exact` | `near` | `unknown` |
 |---|---|---|---|
-| Capital / CBD postcode | the CBD postcode | any other recognised place in that state | no recognised place |
+| Capital / CBD postcode | the CBD postcode | the rest of that capital's metropolitan area (below) | places that cannot be placed |
 | Suburb / non-CBD postcode | the selected locality/postcode | city- or state-level precision in a matching state | no recognised place |
 | State | that state | — | no recognised place |
 | Australia | any recognised state | — | no recognised place |
 
-An established place in another state is `hidden`. Clearing the search passes
+For a capital or CBD postcode, `near` is a city-level listing of that capital
+(`Melbourne VIC` never becomes `3000`) or a place whose postcodes are inside the
+ABS metropolitan area. A clearly outside place in the same state (`Geelong VIC`)
+is `hidden`, like a place in another state. `unknown` here also holds state-only
+(`VIC`), country-only and undisclosed listings, and places that are undetermined
+under the rules above. Suburb, non-CBD postcode, state and national searches keep
+their meaning. Clearing the search passes
 `target=None`; a blank target is an input error rather than silently clearing
 the box.
 
@@ -106,11 +155,13 @@ Supporting examples:
   `Melbourne Airport VIC` and `Sydney Olympic Park NSW` remain locality searches.
 - `Sydney NSW Hybrid / Melbourne VIC Remote` is parsed as Sydney for search.
   The raw string remains available for display.
-- `Geelong VIC` has locality postcode evidence and is not a coarse fallback for
-  a `Melbourne` capital search.
+- `Geelong VIC` has locality postcode evidence and lies outside Greater
+  Melbourne, so a `Melbourne` or `3000` search hides it; `Frankston VIC` and
+  `Carlton VIC` are metropolitan (`near`).
 
 The parser handles common listing location/spelling forms, not arbitrary prose,
-street addresses, real office locations, metro boundaries or distance.
+street addresses, real office locations or distance. Metropolitan membership is
+only the postcode-level ABS reference above.
 
 ## Reproducing the seed
 
@@ -148,7 +199,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python tools/test_locations.py
 ```
 
 The coverage includes capital/CBD behavior, postcode order, ambiguous locality
-names, same-state fallback, state and country searches, unknown rows, first
+names, metropolitan-area tiers for all eight capitals, state and country searches, unknown rows, first
 location only, seed integrity, malformed input and local-preference patterns.
 It does not establish accuracy for arbitrary source prose, production-office
 coverage or places absent from the public reference.

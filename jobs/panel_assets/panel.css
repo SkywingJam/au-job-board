@@ -253,8 +253,12 @@ a.apply{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0
 .d-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .copy-btn{min-height:40px;font-size:var(--fs-sm);font-weight:600;color:var(--ink);white-space:nowrap}
 .copy-btn.copied{color:var(--good-ink);border-color:currentColor}
-body.portrait .d-head{gap:10px}
-body.portrait .copy-btn{min-height:44px}
+body.portrait .d-head{gap:12px}
+body.portrait .d-title{flex:1 1 100%}
+body.portrait .detail h2{overflow-wrap:anywhere}
+body.portrait .d-actions{flex:1 1 100%}
+body.portrait .copy-btn{flex:1 1 0;min-width:0;min-height:44px;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;
+ background:var(--surface2)}
 .modal.copy-modal{align-items:center}
 .copy-modal .dialog{max-width:640px}
 .copy-modal .dialog-body{gap:12px}

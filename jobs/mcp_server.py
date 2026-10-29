@@ -4,6 +4,7 @@ No database, application configuration or write routes are accessed here.
 Install requirements-mcp.txt separately; the normal panel needs no MCP SDK.
 """
 import argparse
+import json
 import sys
 from urllib.parse import quote
 
@@ -15,7 +16,7 @@ def make_server(client):
 
     from mcp.server import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
-    from mcp.types import ToolAnnotations
+    from mcp.types import CallToolResult, TextContent, ToolAnnotations
     from pydantic import Field
 
     server = MCPServer(
@@ -33,10 +34,13 @@ def make_server(client):
 
     def get(path, params):
         try:
-            return client.get(path, params)
+            value = client.get(path, params)
         except ClientError as exc:
             # The shared transport supplies bounded errors without tokens/URLs/JDs.
             raise ToolError(str(exc)) from None
+        # Same JSON value in both channels; only the text rendering is compact.
+        text = json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+        return CallToolResult(content=[TextContent(type='text', text=text)], structured_content=value)
 
     @server.tool(annotations=readonly)
     def list_jobs(query: dict[str, str | int | list[str]] | None = None) -> dict[str, Any]:
@@ -46,7 +50,9 @@ def make_server(client):
         scope (all/legacy_new/first_seen_day/batch_new/batch_seen), day (YYYY-MM-DD),
         batch_id, q, geo (e.g. Sydney/NSW/2000; unavailable in recommend),
         sort (score/date), limit (1..200), skill (string or list, OR), tier,
-        action, eligibility, interest, priority, salary, fresh and labeled.
+        action, eligibility, interest, priority, salary, fresh, labeled and
+        ineligible_last ("1": effective-ineligible jobs after the rest, in
+        all/new/labelled only; omit to keep the default order).
         Filters must be valid for the selected view; invalid queries are errors.
         For subsequent pages pass ONLY {"cursor": previous next_cursor}.
         Read full JDs with get_job(uid, snapshot_id) from this result.

@@ -128,6 +128,35 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(TOKEN, log)
         self.assertNotIn('Handwritten synthetic complete JD', log)
 
+    async def test_text_is_compact_and_equals_structured_for_every_tool(self):
+        body = 'Caf\u00e9 \u65e5\u672c "quoted" back\\slash\nline two\ttab  spaced'
+        with closing(db.connect(self.path)) as conn:
+            conn.execute('UPDATE jobs SET description=? WHERE uid=?', (body, 'synthetic:a'))
+            conn.commit()
+        async with self.client() as client:
+            published = {t.name: t.output_schema for t in (await client.list_tools()).tools}
+            self.assertTrue(all(isinstance(schema, dict) for schema in published.values()), published)
+            page = await client.call_tool('list_jobs', {'query': {'limit': 1}})
+            sid = page.structured_content['snapshot_id']
+            results = {'list_jobs': page}
+            results['get_job'] = await client.call_tool(
+                'get_job', {'uid': 'synthetic:a', 'snapshot_id': sid})
+            results['list_batches'] = await client.call_tool('list_batches', {'limit': 1})
+            results['get_batch'] = await client.call_tool('get_batch', {'batch_id': self.batch_id})
+            self.assertEqual(set(results), set(published))
+            for name, result in results.items():
+                with self.subTest(name=name):
+                    self.assertFalse(result.is_error)
+                    self.assertEqual(len(result.content), 1)
+                    text = result.content[0].text
+                    self.assertEqual(json.loads(text), result.structured_content)
+                    self.assertEqual(text, json.dumps(result.structured_content, ensure_ascii=False,
+                                                      separators=(',', ':')))
+                    self.assertNotIn('\n', text)      # newlines inside the JD stay escaped
+                    self.assertNotIn(': ', text.replace('"description":"' + body, ''))
+            self.assertEqual(results['get_job'].structured_content['item']['description'], body)
+            self.assertIn('Caf\u00e9 \u65e5\u672c', results['get_job'].content[0].text)
+
     async def test_snapshot_keeps_body_and_human_state_after_live_edit(self):
         async with self.client() as client:
             first = await self.call(client, 'list_jobs')
@@ -168,6 +197,27 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
             with patch.object(self.server.api, 'jobs', side_effect=capture):
                 await self.call(client, 'list_jobs', {'query': {'skill': ['python', 'rust']}})
             self.assertEqual(captured[0]['skill'], ['python', 'rust'])
+
+    async def test_ineligible_last_matches_http_and_invalid_values_are_tool_errors(self):
+        with closing(db.connect(self.path)) as conn:
+            db.replace_decision(conn, 'synthetic:d', True, rule_id='R-synthetic', rule_kind='synthetic')
+            conn.commit()
+        async with self.client() as client:
+            default = await self.call(client, 'list_jobs', {'query': {'limit': 10}})
+            query = {'ineligible_last': '1', 'limit': 10}
+            sunk = await self.call(client, 'list_jobs', {'query': query})
+            direct = agent_client.APIClient(self.base, TOKEN).get('/api/v1/jobs', query)
+            for key in ('total', 'items', 'query', 'membership'):
+                self.assertEqual(sunk[key], direct[key])
+            self.assertNotIn('ineligible_last', default['query']['filters'])
+            self.assertEqual(sunk['query']['filters']['ineligible_last'], '1')
+            self.assertEqual(sunk['items'][-1]['uid'], 'synthetic:d')   # machine-excluded sinks
+            self.assertNotEqual([i['uid'] for i in default['items']][-1], 'synthetic:d')
+            for arguments in ({'query': {'ineligible_last': '0'}},
+                              {'query': {'ineligible_last': '1', 'view': 'recommend'}},
+                              {'query': {'ineligible_last': ['1']}}):
+                result = await client.call_tool('list_jobs', arguments)
+                self.assertTrue(result.is_error, arguments)
 
     async def test_batch_membership_and_legacy_facts(self):
         async with self.client() as client:

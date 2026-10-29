@@ -24,10 +24,21 @@ Location results are arranged in three ordered blocks before pagination:
 
 | Search | First block | Second block | Third block |
 |---|---|---|---|
-| Capital or its CBD postcode, e.g. Melbourne / 3000 | listings in the CBD postcode | other listings in that state | unknown |
+| Capital or its CBD postcode, e.g. Melbourne / 3000 | listings in the CBD postcode | other places in that capital's metropolitan area (ABS Greater Capital City area) | unknown or undeterminable |
 | Suburb or postcode, e.g. Carlton / 3053 | listings in the selected postcode/locality | listings at state or capital-city precision in the same state | unknown |
 | State, e.g. VIC / Victoria | listings in that state | — | unknown |
 | Australia | any recognised Australian state | — | unknown |
+
+For a capital, a listing that only says `Melbourne` is metropolitan, not the CBD;
+state-only (`VIC`), `Australia` and undisclosed listings are in the last block;
+a place clearly outside the metropolitan area, such as `Geelong VIC`, or in
+another state is hidden. A place whose area cannot be determined stays in the
+last block rather than being hidden. See [location data](location-data.md) for
+the source and limits.
+
+With **Ineligible last** on (All, New, Labelled), the whole result is first
+divided by effective qualification, and these blocks apply inside each part;
+a divider also marks that boundary.
 
 Each block uses the view's normal score/date sort and pagination continues
 across the concatenated blocks. The list renders one divider between adjacent

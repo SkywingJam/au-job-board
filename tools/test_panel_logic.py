@@ -143,10 +143,13 @@ def test_filters() -> None:
     # 不是可投性/意向/进度那种会让人误解的口径。
     check("推荐 = 搜索 + 薪资 + 技能 + 层级，不含地点搜索",
           set(panel.VIEW_FILTER_KEYS["recommend"]) == {"q", "salary", "skill", "tier"})
-    check("全部给全套",
+    check("全部给全套（含资格不符置后）",
           set(panel.VIEW_FILTER_KEYS["all"]) ==
           {"q", "eligibility", "interest", "action", "salary", "fresh", "skill",
-           "tier", "sort", "labeled", "geo"})
+           "tier", "sort", "labeled", "geo", "ineligible_last"})
+    check("资格不符置后只在全部/新增/已标注，不进推荐/已排除",
+          [v for v in panel.VIEWS if "ineligible_last" in panel.VIEW_FILTER_KEYS[v]]
+          == ["all", "new", "labelled"])
     parsed = panel.parse_filters({"q": ["python"], "offset": ["40"], "view": ["all"]})
     check("offset / view 不进筛选条件", parsed == {"q": "python"}, str(parsed))
     check("since 单独带着走",

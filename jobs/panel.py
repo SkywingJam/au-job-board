@@ -34,7 +34,7 @@ from .panel_data import (  # noqa: F401
     VIEWS, VIEW_ALIASES, FILTER_KEYS, NONE_TOKEN, LABELED_ANY, SORT_KEYS, LABELED_LABELS,
     QUERY_KEY, FRESH_KEY, AGE_WARN_DAYS, PRIORITY_KEY, PRIORITY_TAG, SKILL_KEY, TIER_KEY,
     TIER_LABELS, SKILL_PICK_TOP, SINCE_KEY, ALL_FILTER_KEYS, LABELLED_FILTER_KEYS,
-    VIEW_FILTER_KEYS, parse_filters, passes_filters, _date_key, age_days, is_stale,
+    VIEW_FILTER_KEYS, INELIGIBLE_LAST_KEY, INELIGIBLE_LAST_VIEWS, parse_filters, passes_filters, _date_key, age_days, is_stale,
     age_tag, _ordered, _label_time, _unlabelled_at, _search_text,
     _search, _resolve_since, _query, _link, skill_tree,
 )
@@ -160,6 +160,8 @@ class Handler(BaseHTTPRequestHandler):
             if view == "recommend":
                 filters.pop("geo", None)
                 filters.pop("mode", None)
+            if view not in INELIGIBLE_LAST_VIEWS:
+                filters.pop(INELIGIBLE_LAST_KEY, None)
             page = render_page(conn, self.config, view, offset, limit, started, filters,
                                lang, theme, i18n.lang_pref(self.headers.get("Cookie")))
             self._send(page.encode("utf-8"), 200, "text/html; charset=utf-8", started)

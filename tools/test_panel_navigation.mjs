@@ -130,11 +130,12 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   };
   ACTIVE.doc = document;
   const session = new Map();
+  const local = new Map();
   const sandbox = {
     console, setTimeout, clearTimeout, setInterval, clearInterval, Promise, Date, Math, JSON, String,
     Number, Object, Array, RegExp, Error, Map, Set, WeakMap, URLSearchParams, URL,
     Node: El,
-    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    localStorage: { getItem: (k) => (local.has(k) ? local.get(k) : null), setItem: (k, v) => local.set(k, String(v)), removeItem: (k) => local.delete(k) },
     sessionStorage: { getItem: (k) => (session.has(k) ? session.get(k) : null), setItem: (k, v) => session.set(k, String(v)), removeItem: (k) => session.delete(k) },
     history: { replaceState() {} },
     location: { href: "", pathname: "/", search: "", hash: "", reload() {} },
@@ -181,6 +182,7 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   const src = fs.readFileSync(PANEL_JS, "utf8") + `
 ;globalThis.__T__ = { stepDetail, syncDetailNav, openJob, closeDetail, setLabel, setNote, noteAdopt, noteBlur,
   refreshStats, renderUpdateState, toggleLabelSheet, toggleMore, filterChanged, moreDone, clearHidden, clearFilter,
+  commitFilter, gotoView, removeFilter,
   applyFilter, searchTyping, filterDraftCount, skillRows, skillRender,
   skillKeys, skillClean, skillOwner, choiceToggle, choicePick, choicePanelClose, choiceSetValue,
   choiceTriggerKeys, choiceOptionKeys, geoSuggest, geoFocus, geoInput, geoPanelClose, geoOptionPick,
@@ -192,7 +194,7 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   vm.runInContext(src, sandbox, { filename: "panel.js" });
   const t = {
     api: sandbox.__T__, sandbox, document, ids, reg, pane, prev, next, pos, cards: cardEls,
-    reloads: () => reloads,
+    reloads: () => reloads, local,
     key: (ev) => (docListeners.get("keydown") || []).forEach((fn) => fn({ target: body, preventDefault() { this.prevented = true; }, ...ev })),
     calls: [],
     docEvent: (type, ev) => (docListeners.get(type) || []).forEach(fn => fn(ev)),
@@ -1027,6 +1029,58 @@ async function testSkillCandidates() {
   }
 }
 
+async function testIneligibleLast() {
+  console.log("\n-- v1.3.1：资格不符置后的按视图记忆与纠正后的列表连续性 --");
+  const t = loadPanel();
+  t.sandbox.__VIEW__ = "all";
+  const toggle = new El("input"); toggle.type = "checkbox"; toggle.dataset.fkey = "ineligible_last";
+  toggle.value = "1"; toggle.checked = true;
+  t.reg["[data-fkey]"] = [toggle];
+  t.api.commitFilter(); await tick();
+  eq("开启：只写入严格取值 1，跳转保留当前视图", t.sandbox.location.href, "/?ineligible_last=1&view=all");
+  eq("开启：只为这个视图记忆", JSON.parse(t.local.get("jobs.panel.filters")), { all: "ineligible_last=1" });
+  t.sandbox.location.href = "";
+  t.api.gotoView("new", null); await tick();
+  eq("其他视图没有记忆，保持默认关闭", t.sandbox.location.href, "/?view=new");
+  t.api.gotoView("all", null); await tick();
+  eq("切回该视图恢复开启", t.sandbox.location.href, "/?view=all&ineligible_last=1");
+  toggle.checked = false;
+  t.api.commitFilter(); await tick();
+  eq("关闭：URL 与记忆都回到默认", [t.sandbox.location.href, JSON.parse(t.local.get("jobs.panel.filters"))], ["/?view=all", {}]);
+
+  // 抽屉内的草稿：改动只进草稿，丢弃即还原，应用一次才提交。
+  const f = filterFixture(true);
+  const draft = new El("input"); draft.type = "checkbox"; draft.dataset.fkey = "ineligible_last"; draft.value = "1";
+  const box = new El("label"); box.className = "ctl tog"; draft.closestMap[".ctl"] = box;
+  f.t.reg["[data-fkey]"] = [...f.t.reg["[data-fkey]"], draft];
+  const start = f.t.sandbox.location.href;
+  f.t.api.toggleMore(true);
+  draft.checked = true; f.t.api.filterChanged(); await tick();
+  eq("手机抽屉：勾选只进草稿，不跳转", [f.t.sandbox.location.href, f.t.api.filterDraftCount()], [start, 1]);
+  f.t.api.toggleMore(false); await tick();
+  eq("手机抽屉：收起时按快照还原未应用的选择", draft.checked, false);
+
+  // 纠正当前岗位资格：保存结果立即显示，列表与上一条/下一条目标不因新排序跳走。
+  const c = loadPanel({ cards: ["A", "B", "C", "D"] });
+  c.sandbox.__VIEW__ = "all";
+  await c.api.openJob("B");
+  const order = c.reg[".list .card"].slice();
+  const ineligible = new El("button"); ineligible.dataset.uid = "B"; ineligible.dataset.field = "eligibility"; ineligible.dataset.value = "ineligible";
+  c.reg['[data-uid="B"][data-field]'] = [ineligible];
+  c.routes.label = (body) => ({ ok: true, json: async () => ({ ok: true, field: body.field, value: body.value, label: { eligibility: body.value },
+    qualification: { analysis: "eligible", effective: "ineligible", corrected: true } }), text: async () => "" });
+  const href = c.sandbox.location.href;
+  await c.api.setLabel("B", "eligibility", "ineligible", ineligible); await tick();
+  eq("纠正已保存并立即显示在按钮上", ineligible.classList.contains("on"), true);
+  eq("纠正后不重载、不导航", [c.reloads(), c.sandbox.location.href], [0, href]);
+  eq("纠正后当前详情不变", c.api.state().uid, "B");
+  eq("纠正后左栏顺序保持到下次刷新", c.reg[".list .card"].map((e) => e.dataset.uid), order.map((e) => e.dataset.uid));
+  await c.api.stepDetail(1);
+  eq("纠正后下一条仍是原来的 C", c.api.state().uid, "C");
+  await c.api.stepDetail(-1);
+  eq("纠正后上一条仍回到 B", c.api.state().uid, "B");
+}
+
 async function main() {
   console.log("== v1.2.2 PR-B 面板导航与异步（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
@@ -1043,6 +1097,7 @@ async function main() {
   await testDetailOpenRefreshesLabel();
   await testFilterDrawer();
   await testSkillCandidates();
+  await testIneligibleLast();
   console.log();
   if (failures.length) {
     console.log(`失败 ${failures.length} 项：\n  - ${failures.join("\n  - ")}`);

@@ -51,6 +51,8 @@ PYTHON_TESTS = (
     ("tools/test_locations.py", "offline Australian location reference and matching", None),
     ("tools/test_location_search.py", "group representative selection and three-block location search", None),
     ("tools/test_panel_location_views.py", "location UI rendering and provenance", None),
+    ("tools/test_ineligible_last.py",
+     "ineligible-last qualification zones across panel, API snapshots and pages", None),
     ("tools/test_label_migration.py",
      "label migration, priority, correction provenance and frozen action state", None),
     ("tools/test_patch_boundaries.py",
@@ -178,6 +180,7 @@ def print_inventory() -> None:
     print("Excluded from the public entry (see docs/public-tests.md):")
     print("  tools/test_public_snapshot.py      maintainer snapshot planner")
     print("  tools/regression_corpus.py         needs a private corpus")
+    print("  tools/build_metro_reference.py     maintainer rebuild of the ABS metropolitan reference")
     print("  Optional --with-mcp: tools/test_mcp.py and tools/test_mcp_http.py (requirements-mcp.txt)")
 
 

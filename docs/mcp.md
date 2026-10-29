@@ -162,6 +162,12 @@ the Streamable HTTP mode above.
 
 All four tools declare themselves read-only. Successful calls return the HTTP
 JSON object as structured content, with text content for compatible clients.
+The text copy is the same JSON value rendered compactly (no indentation or extra
+whitespace; Unicode and escaped newlines inside job text are preserved), and
+`outputSchema` stays published. No field, page size or `get_job` shape changes;
+errors remain tool errors. How much a client shows the model from the two
+channels differs by client, so this reduces text size but does not by itself
+establish a lower billed-token count.
 
 | Tool | Arguments | Result |
 |---|---|---|
@@ -184,6 +190,8 @@ Example tool calls:
 date or batch, search, location, filters and sorting are validated there. A list
 value is accepted only for `skill` and means OR; other values are scalar.
 Use `batch_new` or `batch_seen` with an exact batch ID for batch reads.
+`ineligible_last: "1"` requests the panel's optional "ineligible last" ordering
+for `all`, `labelled` or `new`; omit it for the default order.
 For subsequent job pages pass only `cursor`; follow it until `next_cursor=null`.
 Use the same snapshot ID for every full JD in that query. There is no implicit
 fallback to a fresh detail if a snapshot expires. Batch pagination uses offsets
@@ -219,6 +227,6 @@ python -B tools/test_mcp.py
 python -B tools/run_public_tests.py --with-mcp
 ```
 
-The default public suite runs 41 entries; `--with-mcp` adds two
+The default public suite runs 42 entries; `--with-mcp` adds two
 entries and fails if its SDK is missing. A passing SDK client test proves the
 protocol/HTTP path, not that a particular desktop agent has installed the tools.

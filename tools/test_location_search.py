@@ -93,20 +93,42 @@ class LocationSearchQuery(unittest.TestCase):
                          [(unknown, "unknown")])
         self.assertNotIn(hidden, {r["uid"] for r in rows + page2})
 
-    def test_capital_postcode_uses_cbd_then_other_state_then_unknown(self):
+    def test_capital_postcode_uses_cbd_then_metro_then_fallback_and_hides_outside(self):
         cbd = self.add("cbd", "Melbourne City Centre VIC", 1, group="cbd")
         suburb = self.add("suburb", "Carlton VIC", 20, group="suburb")
         city = self.add("city", "Melbourne VIC", 10, group="city")
         interstate = self.add("interstate", "Sydney NSW", 99, group="interstate")
+        regional = self.add("regional", "Geelong VIC", 97, group="regional")
+        state_only = self.add("state-only", "VIC", 96, group="state-only")
         unknown = self.add("unknown", "Undisclosed", 98, group="unknown")
+        country = self.add("country", "Australia", 95, group="country")
         for query in ("Melbourne", "3000"):
             rows, total = self.query(query)
-            self.assertEqual(total, 4)
+            self.assertEqual(total, 6)
             self.assertEqual([r["uid"] for r in rows],
-                             [cbd, suburb, city, unknown])
+                             [cbd, suburb, city, unknown, state_only, country])
             self.assertEqual([r["_geo_match"] for r in rows],
-                             ["exact", "near", "near", "unknown"])
+                             ["exact", "near", "near", "unknown", "unknown", "unknown"])
             self.assertNotIn(interstate, {r["uid"] for r in rows})
+            self.assertNotIn(regional, {r["uid"] for r in rows})   # outside Greater Melbourne
+        # A suburb search keeps its old meaning: same-state coarse places stay near.
+        rows, _ = self.query("3053")
+        self.assertEqual([r["uid"] for r in rows], [suburb, state_only, city, unknown, country])
+        self.assertEqual([r["_geo_match"] for r in rows],
+                         ["exact", "near", "near", "unknown", "unknown"])
+
+    def test_metro_blocks_page_across_the_whole_result(self):
+        uids = [self.add(f"m{i}", "Carlton VIC", 50 - i, group=f"m{i}") for i in range(5)]
+        cbd = self.add("cbd", "Melbourne City Centre VIC", 1, group="cbd")
+        unknown = self.add("unknown", "VIC", 90, group="unknown")
+        full, total = self.query("Melbourne", limit=100)
+        self.assertEqual([r["uid"] for r in full], [cbd, *uids, unknown])
+        paged = []
+        for offset in range(0, total, 2):
+            page, again = self.query("Melbourne", offset=offset, limit=2)
+            self.assertEqual(again, total)
+            paged += [r["uid"] for r in page]
+        self.assertEqual(paged, [r["uid"] for r in full])
 
     def test_state_country_and_ambiguous_locality(self):
         vic = self.add("vic", "Carlton VIC", 3)
