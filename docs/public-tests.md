@@ -107,8 +107,8 @@ published API/MCP port checks use a temporary bridge without fetching. See
 
 The same entry runs on native Windows x64 / Python 3.12. On Windows there are
 40 default entries or 42 with MCP; only the macOS LaunchAgent entry is
-inapplicable. CI also runs it on GitHub-hosted `windows-2022` with
-`PYTHONUTF8=1` and Git for Windows' openssl; that job uses the runner's
+inapplicable. CI also runs it on GitHub-hosted `windows-2022` from the documented `.venv`,
+with `PYTHONUTF8=1` and Git for Windows' openssl; that job uses the runner's
 administrator account, so ordinary-account acceptance stays a separate native
 check, and it is not a required check yet. A native run remains
 pending; see [Windows setup](windows.md).
