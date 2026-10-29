@@ -1,9 +1,18 @@
-# Windows source installation (candidate)
+# Windows source installation
 
-The native Windows compatibility candidate targets **Windows x64, Python 3.12
-and a local NTFS directory**. Windows runtime acceptance is pending. A successful
-macOS test or simulated Windows branch does not establish Windows support.
-Windows Server 2022 and Windows 11 acceptance must be recorded separately.
+Native Windows support covers **Windows x64, Python 3.12 and a local NTFS
+directory**, installed from source in an ordinary user account.
+
+| Environment | Coverage |
+|---|---|
+| Windows Server 2022 x64 | Every change: CI runs the full public test entry. Releases are also checked natively in an ordinary account. |
+| Windows 11 x64 | Best effort. WIN11_RESULT Later releases are not necessarily re-tested on Windows 11; please report problems. |
+| Windows on ARM64, WSL | Not tested. |
+
+On Python 3.12 (before 3.13.4) the application stops `platform` from querying
+WMI, because CPython's WMI helper could crash a long-running process
+([gh-130727](https://github.com/python/cpython/issues/130727)). Nothing needs to
+be configured.
 
 Use an ordinary user account. Normal use needs no administrator rights, Docker,
 WSL, Node, OpenSSL, service installation or PowerShell execution-policy change.
@@ -12,14 +21,14 @@ platforms and their access policies; compatibility does not guarantee scraping.
 
 ## Install in PowerShell
 
-Run from the repository root. If obtaining a fresh copy, clone the repository
-and select the candidate revision supplied for testing. Do not replace another
-installation or its private files.
+Install Python 3.12 from [python.org](https://www.python.org/downloads/windows/)
+with the `py` launcher, and Git for Windows. Use `py -3.12` rather than `python`:
+on Windows 11, `python` may open the Microsoft Store alias instead. Do not
+replace another installation or its private files.
 
 ```powershell
 git clone https://github.com/SkywingJam/au-job-board au-job-board
 Set-Location au-job-board
-# For a development test, select the exact supplied candidate before proceeding.
 py -3.12 -m venv .venv
 $python = (Resolve-Path .venv\Scripts\python.exe).Path
 $env:PYTHONUTF8 = '1'
@@ -103,7 +112,7 @@ The same entry runs locally on Windows and in the `Windows 2022` CI job.
 [Public tests](public-tests.md) documents platform-specific cases. The native
 Windows runtime checks cover inherited lock handles, real process-tree timeout,
 forced supervisor exit, recovery and saved synthetic notes. POSIX-only signals
-and file-descriptor assertions retain their POSIX coverage. Record native ACL,
-ordinary-account install, panel update/save/restart and Ctrl+C results on the
-exact candidate before treating Windows compatibility as accepted. No scheduled
-task or production service is installed by these instructions.
+and file-descriptor assertions retain their POSIX coverage. The CI runner uses
+an administrator account, so release checks repeat the install, ACL, panel
+update/save/restart and Ctrl+C steps natively in an ordinary account. No
+scheduled task or production service is installed by these instructions.

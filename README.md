@@ -100,7 +100,9 @@ its own directory and serves on `127.0.0.1:8091`. The steps are in the
 
 **On macOS, source installation is recommended.** Install into its own virtual
 environment following the [installation guide](docs/install.md). Python 3.12 on
-macOS 15 has been checked. [Docker with Compose](docs/docker.md) is an optional
+macOS 15 has been checked. On Windows x64, follow the
+[Windows guide](docs/windows.md) (Windows Server 2022 checked; Windows 11 best
+effort). [Docker with Compose](docs/docker.md) is an optional
 alternative with persistent configuration, data and reports; it does not replace
 the source workflow or add a scheduler. See the dated
 [verification record](docs/installation-verification.md) for tested platforms

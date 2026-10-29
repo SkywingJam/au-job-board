@@ -7,15 +7,17 @@ database. **Source installation is recommended on macOS.**
 [Docker / Compose](docker.md) is an optional alternative that keeps configuration
 and data in persistent volumes; it does not change this source workflow.
 
-For the native Windows compatibility candidate, use the separate
-[PowerShell guide](windows.md). Windows runtime acceptance is still pending.
+On Windows x64, use the separate [PowerShell guide](windows.md); it lists the
+Windows versions covered and how they were checked.
 
 ## Tested environment
 
 - **Python 3.12** (3.12.4 in the 2026-10-08 verification).
 - **macOS 15** (15.8, arm64, in the 2026-10-08 local verification; the GitHub
   Actions runner was macOS 15.7.9 with Python 3.12.10 and Node 24.21.0).
-- Native Linux/Windows source installs, other macOS versions, other Python
+- **Windows Server 2022 x64** with Python 3.12, and Windows 11 x64 on a best
+  effort basis; see [Windows](windows.md).
+- Native Linux source installs, other macOS versions, other Python
   versions and other machines are **not** verified. Optional Linux-container
   verification is recorded separately in [docker.md](docker.md). See [installation-verification.md](installation-verification.md).
 
