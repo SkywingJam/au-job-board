@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -44,6 +45,26 @@ class InstallTests(unittest.TestCase):
             target.unlink()
             git('checkout-index', '-f', '--', 'jobs/data/au-postcodes.tsv')
             self.assertEqual(target.read_bytes(), data)
+
+    def test_reference_accepts_crlf_left_by_an_older_windows_checkout(self):
+        # Clone before the LF attribute, then update: Git keeps the CRLF working file.
+        data = (ROOT / 'jobs/data/au-postcodes.tsv').read_bytes()
+        crlf = data.replace(b'\n', b'\r\n')
+        with tempfile.TemporaryDirectory(prefix='crlf-reference-') as temp:
+            folder = Path(temp)
+            (folder / 'location-reference.json').write_bytes(
+                (ROOT / 'jobs/data/location-reference.json').read_bytes())
+            for name, payload, valid in (('crlf', crlf, True), ('changed', crlf.replace(b'3053', b'3054', 1), False)):
+                with self.subTest(name):
+                    (folder / 'au-postcodes.tsv').write_bytes(payload)
+                    locations._reference.cache_clear()
+                    with unittest.mock.patch.object(locations, '_DATA', folder):
+                        if valid:
+                            self.assertIn('3053', locations._reference()[2])
+                        else:
+                            with self.assertRaises(ValueError):
+                                locations._reference()
+        locations._reference.cache_clear()
 
     def test_readonly_cli_from_unicode_space_directory(self):
         with tempfile.TemporaryDirectory(prefix='jobs 中文 path ') as temp:

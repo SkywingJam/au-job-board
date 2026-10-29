@@ -40,7 +40,10 @@ def _norm(text: str) -> str:
 def _reference():
     """Fail visibly on a broken installation, rather than hiding all results."""
     metadata = json.loads((_DATA / "location-reference.json").read_text(encoding="utf-8"))
-    data = (_DATA / "au-postcodes.tsv").read_bytes()
+    # A Windows checkout made before .gitattributes pinned LF keeps CRLF after
+    # later updates (Git does not rewrite an unchanged blob). Verify the content,
+    # not the line-ending choice of the checkout.
+    data = (_DATA / "au-postcodes.tsv").read_bytes().replace(b"\r\n", b"\n")
     if (metadata["schema_version"] != 1 or
             hashlib.sha256(data).hexdigest() != metadata["seed"]["sha256"]):
         raise ValueError("Australian location reference is invalid; restore the bundled data files.")
