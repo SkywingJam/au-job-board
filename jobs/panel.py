@@ -35,7 +35,7 @@ from .panel_data import (  # noqa: F401
     QUERY_KEY, FRESH_KEY, AGE_WARN_DAYS, PRIORITY_KEY, PRIORITY_TAG, SKILL_KEY, TIER_KEY,
     TIER_LABELS, SKILL_PICK_TOP, SINCE_KEY, ALL_FILTER_KEYS, LABELLED_FILTER_KEYS,
     VIEW_FILTER_KEYS, parse_filters, passes_filters, _date_key, age_days, is_stale,
-    age_tag, _ordered, _mix_low_scores, _label_time, _unlabelled_at, _search_text,
+    age_tag, _ordered, _label_time, _unlabelled_at, _search_text,
     _search, _resolve_since, _query, _link, skill_tree,
 )
 from .panel_views import (  # noqa: F401

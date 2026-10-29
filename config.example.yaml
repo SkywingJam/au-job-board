@@ -61,12 +61,6 @@ panel:
   host: "127.0.0.1"
   port: 8090
   page_size: 40
-  # Calibration sampling for the "recommend" view: every N-th card is a
-  # low-score job so that low-scoring jobs still receive labelling samples.
-  # Set low_ratio to 0 to disable sampling.
-  recommend:
-    low_ratio: 0.1
-    low_max_score: 0
 
 # Optional read-only MCP, started and stopped with `panel`. Install
 # requirements-mcp.txt before enabling. Address follows panel.host and the

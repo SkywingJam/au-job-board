@@ -112,7 +112,7 @@ def query(conn, config, view, offset, limit, filters, since, skills_cfg, *,
     sort_view = "all" if view == "excluded" and not filters.get("sort") else view
     for tier in TIER_ORDER:
         members = [row for row in rows if row["_geo_match"] == tier]
-        ordered.extend(panel_data._ordered(members, sort_view, filters, config))
+        ordered.extend(panel_data._ordered(members, sort_view, filters))
 
     total = len(ordered)
     page = [
