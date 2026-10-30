@@ -91,8 +91,8 @@ header.main-header{flex:0 0 auto;z-index:20;background:var(--surface);border-bot
 .selbar{position:absolute;left:0;right:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 20px;min-width:0;
  background:var(--accent-tint);border-top:1px solid var(--accent-line);color:var(--accent-ink)}
 .selbar-count{order:1;font-size:var(--fs-md);font-weight:700;white-space:nowrap}
-.selbar-marks{order:2;display:flex;align-items:center;gap:6px}
-.selbar-lbl{font-size:var(--fs-sm);margin:0 2px 0 8px}
+.selpick{order:2;max-width:100%}
+.selmark{display:inline-flex;align-items:center;justify-content:space-between;gap:10px}
 .selbtn{min-height:36px;padding:0 14px;border:1px solid var(--accent-line);border-radius:var(--r-ctl);background:var(--surface);
  color:var(--accent-ink);font-size:var(--fs-sm);font-weight:600;cursor:pointer;white-space:nowrap}
 @media (hover:hover){.selbtn:hover{border-color:var(--accent)}}
@@ -100,7 +100,8 @@ header.main-header{flex:0 0 auto;z-index:20;background:var(--surface);border-bot
 .selcancel{order:4;margin-left:auto;background:transparent;border-color:transparent}
 .selbar-msg{order:5;flex:1 1 100%;font-size:var(--fs-sm);line-height:1.4;overflow-wrap:anywhere}
 .selbar-msg.err{color:var(--bad-ink);font-weight:600}
-.selbar.busy .selbtn:not(.selcancel){opacity:.55;cursor:progress}
+.selbtn:disabled{opacity:.5;cursor:default}
+.selbar.busy .selbtn:disabled{cursor:progress}
 .search{display:flex;align-items:center;gap:8px;flex:1 1 300px;max-width:440px;min-height:36px;padding:0 10px;
  border:1px solid var(--line3);border-radius:var(--r-ctl);background:var(--surface);color:var(--ink3)}
 .search:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-tint)}
@@ -200,30 +201,35 @@ body.resizing *{user-select:none!important}
 /* 两栏各自滚动。min-height:0 是关键 —— 没有它 overflow:auto 失效 */
 /* 给选中外描边及首张卡片的悬停上移留出绘制空间，避免滚动容器裁切。 */
 .list{overflow-y:auto;min-height:0;padding:2px 2px 16px;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px}
-.card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-box);padding:12px 14px 12px 46px;cursor:pointer;flex:0 0 auto;scroll-margin-block:56px}
+.card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-box);padding:12px 14px;cursor:pointer;flex:0 0 auto;scroll-margin-block:56px}
+body.selecting .card{padding-left:46px}
 .card:hover{border-color:var(--line3)}
 .card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .card.sel:focus-visible{outline:none}
 .card:focus-visible:not(.sel){outline-offset:-2px}
 .card.hidden{display:none}
 /* ---- 多选 -----------------------------------------------------------------
-   圆框始终可见、可直接点（真按钮，44px 命中区，画出来的圆是 20px）。选中 = 实心
-   accent 圆 + 对勾，整张卡片着底色。.msel 是“被多选”，.sel 是“当前打开的 JD”
-   （描边 + 外圈）：两者各有各的视觉，同时存在时叠加。 */
+   圆框只在多选模式里出现（body.selecting）：平时 visibility:hidden，不可见、不可点、不在
+   Tab 顺序里，卡片也不留左侧空间。真按钮，44px 命中区，画出来的圆是 20px；对勾是同一
+   20px 方框内的 SVG（24 格坐标里路径中心就在 12,12），与圆同心。选中 = 实心 accent 圆
+   + 对勾，整张卡片着底色。.msel 是“被多选”，.sel 是“当前打开的 JD”（描边 + 外圈）：
+   两者各有各的视觉，同时存在时叠加。 */
 .card-check{position:absolute;left:0;top:0;width:44px;height:44px;margin:0;padding:0;border:0;border-radius:var(--r-box);
- background:transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}
+ background:transparent;cursor:pointer;-webkit-tap-highlight-color:transparent;
+ visibility:hidden;opacity:0;transform:scale(.7);pointer-events:none}
+body.selecting .card-check{visibility:visible;opacity:1;transform:none;pointer-events:auto}
 .card-check::before{content:"";position:absolute;left:12px;top:12px;width:20px;height:20px;box-sizing:border-box;
  border-radius:50%;border:1.5px solid var(--line3);background:var(--surface)}
-.card-check::after{content:"";position:absolute;left:18px;top:15px;width:5px;height:10px;box-sizing:border-box;
- border:solid var(--on-fill);border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);opacity:0}
+.card-tick{position:absolute;left:12px;top:12px;width:20px;height:20px;display:block;pointer-events:none;
+ fill:none;stroke:var(--on-fill);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;transform:scale(.5);opacity:0}
 .card-check[aria-checked="true"]::before{background:var(--accent);border-color:var(--accent)}
-.card-check[aria-checked="true"]::after{transform:rotate(45deg) scale(1);opacity:1}
+.card-check[aria-checked="true"] .card-tick{transform:none;opacity:1}
 .card-check:focus-visible{outline:none}
 .card-check:focus-visible::before{outline:2px solid var(--accent);outline-offset:2px}
 @media (hover:hover){.card-check:hover::before{border-color:var(--accent)}}
 .card.msel{background:var(--accent-tint);border-color:var(--accent)}
 .card.msel.done{opacity:.85}
-body.sel-busy .card-check{cursor:progress;opacity:.6}
+body.selecting.sel-busy .card-check{cursor:progress;opacity:.6}
 /* 触屏：长按用于多选，不要让系统弹出文字选择/拷贝菜单 */
 @media (pointer:coarse){.card{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}}
 /* 推荐视图里，本次会话（since 之后）标过的卡片仍留在列表中 —— 那是保证
@@ -461,11 +467,12 @@ body.portrait .selbar{padding:6px 14px 10px;gap:0 6px;border-top:0}
 body.portrait .selbtn{min-height:44px;padding:0 12px}
 body.portrait .selbar-count{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 body.portrait .selcancel{order:2;margin-left:0;flex:0 0 auto}
-/* 第一行数量与取消；第二行三种进度等分剩余空间，星标保留自然宽度。 */
+/* 第一行数量与取消；第二行“标记为…”下拉占剩余空间，星标保留自然宽度。 */
 body.portrait .selbar::after{content:"";order:3;flex:1 0 100%;height:0}
-body.portrait .selbar-marks{order:4;flex:1 1 0;min-width:0;margin-top:6px}
-body.portrait .selbar-marks .selbtn{flex:1 1 0;min-width:0;padding:0 6px}
-body.portrait .selbar-lbl{display:none}
+body.portrait .selpick{order:4;flex:1 1 0;min-width:0;margin-top:6px}
+body.portrait .selmark{width:100%;padding:0 10px}
+body.portrait .selpick .choiceopt{min-height:44px}
+body.portrait .selpick .choicepanel{width:100%;max-width:none}
 body.portrait .selstar{order:5;flex:0 0 auto;padding:0 6px;margin-top:6px}
 body.portrait .selbar-msg{margin-top:6px}
 body.portrait .search{flex:1 1 100%;max-width:none;min-height:44px}
@@ -813,8 +820,10 @@ body.selecting .selbar{position:relative;opacity:1;visibility:visible;transform:
 .selbtn{transition:background-color var(--t) var(--ease),border-color var(--t) var(--ease),opacity var(--t) var(--ease),
  transform var(--t-fast) var(--ease)}
 .selbtn:active{transform:scale(.96)}
+.card-check{transition:opacity var(--t-fast) var(--ease),transform var(--t) var(--ease),visibility 0s linear var(--t)}
+body.selecting .card-check{transition-delay:0s}
 .card-check::before{transition:background-color var(--t) var(--ease),border-color var(--t) var(--ease)}
-.card-check::after{transition:transform var(--t-slow) var(--ease),opacity var(--t-fast) var(--ease)}
+.card-tick{transition:transform var(--t-slow) var(--ease),opacity var(--t-fast) var(--ease)}
 
 /* 尊重系统「减少动态效果」：保留状态变化，去掉位移与过渡 */
 @media (prefers-reduced-motion:reduce){

@@ -154,7 +154,7 @@ async function openJob(uid){
       if(OPEN_UID)history.replaceState(null,"",location.pathname+location.search+detailHash(OPEN_UID));
       return false;
     }
-    if(UPDATE_PENDING){applyLatestResults(detailHash(uid));return false;}
+    if(UPDATE_PENDING){selClear({keepUpdate:true});applyLatestResults(detailHash(uid));return false;}
   }
   selClear({keepUpdate:true});                       // 查看新 JD 才退出多选；被门拦下时选择保留
   OPEN_UID=uid;
@@ -232,7 +232,7 @@ async function closeDetail(expect){
   if(expect && (OPEN_UID!==expect.uid || OPEN_SEQ!==expect.seq)) return;
   OPEN_UID=null;
   history.replaceState(null,"",location.pathname+location.search);
-  if(UPDATE_PENDING){applyLatestResults("");return;}
+  if(UPDATE_PENDING && !SEL_MODE){applyLatestResults("");return;}
   OPEN_SEQ+=1; // Ignore pending responses and skeleton timers after closing.
   const pane=document.getElementById('detail');
   pane.classList.remove('label-open');
@@ -496,23 +496,31 @@ document.addEventListener('click',ev=>{
   ev.preventDefault(); ev.stopPropagation();
 },true);
 /* ---- 卡片多选与批量标注 -------------------------------------------------
-   进入：电脑 Cmd/Ctrl+左键点卡片，或点卡片左侧圆框；手机长按卡片（约 500ms）。
-   圆框是真按钮，任何时候都能直接点；有选择时搜索筛选行被操作栏取代（CSS 叠在同一格
-   里切换，筛选行的 DOM 与草稿值不动，取消即恢复）。
-   操作：想投 / 已投 / 跳过 / 设为星标都是对所选卡片的“绝对赋值”，一次 POST
+   多选“模式”(SEL_MODE) 与所选集合 SEL 分开：模式里可以暂时一张都没选。
+   进入：电脑 Cmd/Ctrl+左键点卡片（键盘：卡片上 Cmd/Ctrl+Enter）；手机长按卡片（约 500ms）。
+   平时看不到圆框；进入模式后每张卡片左侧出现圆框（真按钮，可直接点），搜索筛选行被
+   操作栏取代（CSS 叠在同一格里切换，筛选行的 DOM 与草稿值不动，取消即恢复）。
+   两套退出规则按当前布局区分：
+     竖屏（body.portrait，手机）——普通点卡片或圆框都是切换选中，不打开 JD；空白、滚动、
+       Esc、菜单等都不退出，选到 0 项也留在模式，只有“取消”退出。
+     宽屏 —— 保持原规则：点空白/Esc/其他控件退出，普通点卡片查看 JD 并退出，最后一项
+       取消也退出。宽屏里不会留下 0 项模式（缩放到宽屏时 0 项模式立即结束）。
+   操作：“标记为…”下拉（想投 / 已投 / 跳过）和“设为星标”都是对所选卡片的“绝对赋值”，一次 POST
    /api/labels/batch（服务端单事务，全成或全败）；成功后选择保留、卡片不移除不重排，
    只更新标注与统计。失败不写任何一项，选择保留，可重试。
-   退出：取消、Esc、最后一项被取消、点空白或其他控件、查看新 JD、离开页面。
+   退出（宽屏）：取消、Esc、最后一项被取消、点空白或其他控件、查看新 JD、离开页面。
      放行后才退出的两类（被保存门/草稿确认拦下时选择保留）：普通点卡片（openJob）、
      普通点导航链接（页面跳转）。批量栏内部、圆框、修饰键点选、长按切换不退出；
-     滚动本身不退出。批量写入在途时登记进 LABEL_WRITES（按所选 uid），所以保存门、
+     滚动本身不退出。竖屏只有取消和离开页面。批量写入在途时登记进 LABEL_WRITES（按所选 uid），所以保存门、
      beforeunload、待应用的新结果都与单条标注同口径；退出选择不会撤销已发出的请求，
      迟到的响应只更新标注，绝不重新打开选择。 */
 const SEL_MAX=100;
 const HOLD={ms:500,slop:10,clickMs:800};
 const HOLD_SKIP='a[href],button,input,textarea,select,option,summary,label,[contenteditable]';
 const SEL=new Set();
-let SEL_BUSY=null, HOLD_TRACK=null, HOLD_CLICK=null;
+let SEL_MODE=false, SEL_BUSY=null, SEL_LAST='', HOLD_TRACK=null, HOLD_CLICK=null;
+// 手机（竖屏）多选：模式只由“取消”结束
+function selSticky(){ return SEL_MODE && document.body.classList.contains('portrait'); }
 function dataOf(el,key){ return el && el.dataset ? el.dataset[key] : undefined; }
 function selMsg(text,kind){
   const el=document.getElementById('selbar-msg'); if(!el) return;
@@ -526,28 +534,57 @@ function selBusyUi(on){
     if(on) bar.setAttribute('aria-busy','true'); else bar.removeAttribute('aria-busy');
   }
   document.body.classList.toggle('sel-busy',!!on);
+  selControls();
 }
-function selRender(){
+// 写操作（标记为…、星标）：没有选中项或保存中时禁用；取消始终可用
+function selControls(){
+  const off=!SEL.size || !!SEL_BUSY;
+  document.querySelectorAll('#selbar [data-sel-write]').forEach(el=>{ el.disabled=off; });
+}
+function selCard(uid){
+  return Array.from(document.querySelectorAll('.list .card')).find(c=>c.dataset.uid===uid) || null;
+}
+// 模式结束后焦点不能留在随即隐藏的圆框或操作栏里：交给刚操作的那张卡片（不滚动、不触发导航）
+function selReleaseFocus(){
+  const ae=document.activeElement;
+  if(!ae || !ae.closest || !(ae.closest('.card-check') || ae.closest('#selbar'))) return;
+  const card=ae.closest('.card') || selCard(SEL_LAST);
+  if(card && card.focus) card.focus({preventScroll:true}); else if(ae.blur) ae.blur();
+}
+function selRender(anchorUid){
   const n=SEL.size, body=document.body, was=body.classList.contains('selecting');
   document.querySelectorAll('.list .card').forEach(card=>{
     const on=SEL.has(card.dataset.uid);
     card.classList.toggle('msel',on);
     const box=card.querySelector('.card-check');
-    if(box) box.setAttribute('aria-checked',on?'true':'false');
+    if(box){
+      box.setAttribute('aria-checked',on?'true':'false');
+      box.setAttribute('tabindex',SEL_MODE?'0':'-1');
+      box.setAttribute('aria-hidden',SEL_MODE?'false':'true');
+    }
   });
   const count=document.getElementById('selbar-count');
-  if(count) count.textContent=n ? T('sel.count',{n}) : '';
-  if(was===(n>0)) return;
-  const list=document.querySelector('.list'), top=list ? list.getBoundingClientRect().top : 0;
-  const scroll=list ? list.scrollTop : 0;
-  body.classList.toggle('selecting',n>0);
-  // 竖屏操作栏两行，会把列表整体推下去：补偿滚动，手指下的卡片留在原位
+  if(count) count.textContent=SEL_MODE ? T('sel.count',{n}) : '';
+  selControls();
+  if(was===SEL_MODE) return;
+  // 进入/退出会改变卡片左侧留白（标题可能换行）和竖屏头部高度：补偿滚动，让手指下的卡片留在原位。
   // 列表原本在顶部时保留顶部，不能把首张卡片滚进新增操作栏下方的裁剪区。
-  if(list && scroll>0){ const d=list.getBoundingClientRect().top-top; if(d) list.scrollTop+=d; }
+  const list=document.querySelector('.list');
+  let anchor=null, before=0;
+  const scroll=list ? list.scrollTop : 0;
+  if(list && scroll>0){
+    const top=list.getBoundingClientRect().top, bottom=list.getBoundingClientRect().bottom;
+    const cards=Array.from(list.querySelectorAll('.card')).filter(c=>{ const r=c.getBoundingClientRect(); return r.bottom>top+1 && r.top<bottom; });
+    anchor=cards.find(c=>c.dataset.uid===anchorUid) || cards[0] || null;
+    if(anchor) before=anchor.getBoundingClientRect().top;
+  }
+  body.classList.toggle('selecting',SEL_MODE);
+  if(anchor){ const d=anchor.getBoundingClientRect().top-before; if(d) list.scrollTop+=d; }
+  if(!SEL_MODE){ choicePanelClose(null,false); selReleaseFocus(); }
 }
-// 多选期间推迟的新结果：选择清空、没有打开的 JD 且没有在途写入时再载入
+// 多选期间推迟的新结果：退出模式、没有打开的 JD 且没有在途写入时再载入
 function selSettled(){
-  if(UPDATE_PENDING && !OPEN_UID && !SEL.size) applyLatestResults();
+  if(UPDATE_PENDING && !OPEN_UID && !SEL_MODE) applyLatestResults();
 }
 function selToggle(uid){
   if(!uid) return;
@@ -557,17 +594,25 @@ function selToggle(uid){
     if(SEL.size>=SEL_MAX){ toast(T('sel.limit',{max:SEL_MAX})); return; }
     SEL.add(uid);
   }
+  SEL_LAST=uid;
+  // 进入模式；宽屏没有选中项就没有模式，竖屏则留在模式里直到“取消”
+  SEL_MODE = SEL.size>0 || selSticky();
   selMsg('');
-  selRender();
-  if(!SEL.size) selSettled();
+  selRender(uid);
+  if(!SEL_MODE) selSettled();
 }
+// 显式退出（取消、宽屏的其他交互）：清空选择并结束模式
 function selClear(opts){
-  if(!SEL.size) return false;
-  SEL.clear();
+  if(!SEL_MODE && !SEL.size) return false;
+  SEL.clear(); SEL_MODE=false;
   selMsg('');
   selRender();
   if(!(opts && opts.keepUpdate)) selSettled();
   return true;
+}
+// 视口在宽屏/竖屏间切换：保留有效选择；宽屏不留 0 项模式
+function selLayoutChanged(){
+  if(SEL_MODE && !SEL.size && !document.body.classList.contains('portrait')) selClear();
 }
 function selCancel(){ selClear(); }
 // 单卡标注成功后的就地刷新：卡片标注/星标/统计行、详情里的按钮状态、推荐页的“已处理”淡化
@@ -594,6 +639,7 @@ async function selApply(kind){
   if(SEL_BUSY){ toast(T('sel.busy')); return SEL_BUSY; }
   if(!SEL.size || !['saved','applied','skipped','star'].includes(kind)) return false;
   const uids=Array.from(SEL), star=kind==='star';
+  const ae=document.activeElement, refocus=ae && ae.closest && ae.closest('#selbar [data-sel-write]');
   // 所选岗位里已有单条标注在途：不并发写同一条，提示后让用户重试
   if(uids.some(uid=>LABEL_WRITES.has(uid))){ toast(T('sel.busy')); return false; }
   const items=uids.map(uid=>star ? {uid,priority:true} : {uid,action:kind});
@@ -634,18 +680,24 @@ async function selApply(kind){
   }catch(e){
     // 只显示我们自己分类过的提示；意外异常一律说“未能确认”，不把内部文本摆给人看
     const message=e && e.sel ? e.message : T('sel.unconfirmed');
-    selMsg(message,'err');          // 选择仍在时提示留在栏里（持久，可重试）；已退出选择则下次选择时清掉，绝不重开
-    if(!SEL.size) toast(message);   // 栏已收起（在途中被取消）：只能用 toast 告知失败
+    selMsg(message,'err');          // 仍在模式时提示留在栏里（持久，可重试）；已退出则下次选择时清掉，绝不重开
+    if(!SEL_MODE) toast(message);   // 栏已收起（在途中被取消）：只能用 toast 告知失败
   }finally{
     uids.forEach(uid=>{
       if(LABEL_WRITES.get(uid)===locked) LABEL_WRITES.delete(uid);
       labelButtons(uid).forEach(b=>{b.disabled=false;b.removeAttribute('aria-busy');});
     });
     SEL_BUSY=null; selBusyUi(false);
+    // 保存中写控件是禁用的：从下拉或星标发起的，结束后把键盘焦点还给它
+    if(refocus && SEL_MODE && SEL.size && !refocus.disabled && document.body.contains(refocus)) refocus.focus({preventScroll:true});
     release(saved);
     selSettled();
   }
   return saved;
+}
+// “标记为…”下拉（choicePick 转来）：选中一项即对当前所选卡片绝对赋值；没有当前值，同一项可再选（重试同值）
+function selMark(kind){
+  return kind ? selApply(kind) : false;
 }
 /* 手机长按：约 500ms 不动 → 切换这张卡片。起手排除按钮/链接/输入/摘要/标签、多指、
    覆盖层打开、已有文字选区、保存/导航进行中。手指移动超过 slop、纵向滚动、抬起/取消
@@ -656,7 +708,7 @@ function holdCancel(){
   if(HOLD_TRACK){ clearTimeout(HOLD_TRACK.timer); HOLD_TRACK=null; }
 }
 function holdReady(){
-  return !NAV_GATES && !DETAIL_LEAVING && !UPDATE_APPLYING && !SEL_BUSY
+  return !NAV_GATES && !DETAIL_LEAVING && !UPDATE_APPLYING && !SEL_BUSY && !selSticky()   // 竖屏模式里点一下就是切换
     && !detailOverlayOpen() && !hasTextSelection();
 }
 function holdStart(ev){
@@ -677,7 +729,7 @@ function holdFire(){
   const h=HOLD_TRACK; if(!h) return;
   HOLD_TRACK=null;
   if(!holdReady()) return;
-  HOLD_CLICK={until:Date.now()+HOLD.clickMs,x:h.x,y:h.y};
+  HOLD_CLICK={until:Infinity,x:h.x,y:h.y};          // 手指还按着：抬起后才开始计时（按得久的长按照样被吞）
   const sel=document.getSelection ? document.getSelection() : null;
   if(sel && sel.removeAllRanges) sel.removeAllRanges();
   selToggle(h.uid);
@@ -695,8 +747,12 @@ function holdClickGuard(ev){
 const HOLD_OPT={passive:true,capture:true};
 document.addEventListener('touchstart',holdStart,HOLD_OPT);
 document.addEventListener('touchmove',holdMove,HOLD_OPT);
-document.addEventListener('touchend',holdCancel,HOLD_OPT);
-document.addEventListener('touchcancel',holdCancel,HOLD_OPT);
+function holdRelease(){
+  holdCancel();
+  if(HOLD_CLICK && HOLD_CLICK.until===Infinity) HOLD_CLICK.until=Date.now()+HOLD.clickMs;
+}
+document.addEventListener('touchend',holdRelease,HOLD_OPT);
+document.addEventListener('touchcancel',holdRelease,HOLD_OPT);
 document.addEventListener('scroll',holdCancel,true);
 document.addEventListener('pointerdown',ev=>{ if(ev.pointerType==='mouse') HOLD_CLICK=null; },true);
 document.addEventListener('contextmenu',ev=>{
@@ -710,13 +766,14 @@ document.addEventListener('contextmenu',ev=>{
 document.addEventListener('click',ev=>{
   if(holdClickGuard(ev)) return;
   const t=ev.target; if(!t || !t.closest) return;
-  const boxUid=dataOf(t.closest('.card-check'),'checkUid');
+  const boxUid=SEL_MODE ? dataOf(t.closest('.card-check'),'checkUid') : undefined;
   if(boxUid){ ev.preventDefault(); ev.stopPropagation(); selToggle(boxUid); return; }
-  if(ev.button===0 && (ev.metaKey || ev.ctrlKey) && !ev.altKey){
-    const cardUid=dataOf(t.closest('.card'),'uid');
-    if(cardUid && !t.closest(HOLD_SKIP)){ ev.preventDefault(); ev.stopPropagation(); selToggle(cardUid); return; }
+  const cardUid=dataOf(t.closest('.card'),'uid');
+  // 修饰键点卡片：进入/切换；竖屏模式里普通点卡片同样是切换（不打开 JD）
+  if(cardUid && ev.button===0 && !t.closest(HOLD_SKIP) && (selSticky() || ((ev.metaKey || ev.ctrlKey) && !ev.altKey))){
+    ev.preventDefault(); ev.stopPropagation(); selToggle(cardUid); return;
   }
-  if(!SEL.size || t.closest('#selbar,#toast')) return;
+  if(!SEL_MODE || selSticky() || t.closest('#selbar,#toast')) return;   // 竖屏：空白和其他控件都不退出
   if(t.closest('.card')) return;                                  // 普通点卡片：openJob 放行后再退出
   const link=t.closest('a[href]');
   if(link && ev.button===0 && !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey
@@ -724,7 +781,7 @@ document.addEventListener('click',ev=>{
   selClear();                                                      // 空白或其他控件
 },true);
 document.addEventListener('keydown',ev=>{
-  if(ev.key!=='Escape' || !SEL.size || ev.defaultPrevented || imeComposing(ev)) return;
+  if(ev.key!=='Escape' || !SEL_MODE || selSticky() || ev.defaultPrevented || imeComposing(ev)) return;
   if(ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName||'')) return;
   if(detailOverlayOpen()) return;                                  // 抽屉/覆盖层的 Esc 归它们
   ev.preventDefault(); selClear();
@@ -1139,6 +1196,7 @@ function fitLayout(){
     placeFilters(true);
     if(shown(document.getElementById('more-panel'))) filterDraftBegin();
     placeUpdate(true);
+    selLayoutChanged();
     return;
   }
   document.body.classList.remove('portrait');
@@ -1156,6 +1214,7 @@ function fitLayout(){
   closeDrawer();
   const want=readStoredLeft() ?? Math.min(DEFAULT_LEFT,avail-MIN_RIGHT);
   setLeft(Math.min(Math.max(want,MIN_LEFT),avail-MIN_RIGHT));
+  selLayoutChanged();
 }
 function resetSplit(){ storeLeft(DEFAULT_LEFT); fitLayout(); }
 function startDrag(ev){
@@ -1291,6 +1350,11 @@ function choiceToggle(ev,trigger){
 function choicePick(option){
   const picker=option.closest('.choicepick'); if(!picker) return;
   const trigger=picker.querySelector('[data-choice-trigger]');
+  if(dataOf(picker,'selMark')!==undefined){          // 批量“标记为…”：不是筛选条件
+    choicePanelClose(null,picker);
+    selMark(option.dataset.choiceValue||'');
+    return;
+  }
   choiceSetValue(trigger,option.dataset.choiceValue||'');
   choicePanelClose(null,picker);
   filterChanged();
@@ -1657,6 +1721,10 @@ if(window.visualViewport){
 function cardKeys(ev,uid){
   // 多选圆框是卡片里的真按钮：它自己的回车/空格不能被当成“打开卡片”
   if(ev.target && ev.target.closest && ev.target.closest('.card-check')) return;
+  // 键盘进入/切换多选（对应 Cmd/Ctrl+点击）；竖屏模式里 Enter/空格也是切换
+  if((ev.key==='Enter' && (ev.metaKey || ev.ctrlKey) && !ev.altKey) || (selSticky() && (ev.key==='Enter' || ev.key===' '))){
+    ev.preventDefault(); selToggle(uid); return;
+  }
   if(ev.key==='Enter' || ev.key===' '){ ev.preventDefault(); openJob(uid); }
 }
 
@@ -1692,7 +1760,7 @@ function toggleMore(force){
   }
   try{ if(open) sessionStorage.setItem(MORE_KEY,'1'); else sessionStorage.removeItem(MORE_KEY); }catch(e){}
   // 草稿期间推迟的新结果：丢弃草稿后没开着岗位就立刻载入
-  if(!open && UPDATE_PENDING && !OPEN_UID) applyLatestResults();
+  if(!open && UPDATE_PENDING && !OPEN_UID && !SEL_MODE) applyLatestResults();
 }
 function placeFilters(portrait){
   const slot=document.getElementById('sheet-slot'); if(!slot) return;
@@ -2166,7 +2234,7 @@ function rememberListPosition(){
     top:list.scrollTop,windowY:window.scrollY}));}catch(e){}
 }
 function applyLatestResults(hash){
-  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || LABEL_WRITES.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
+  if(!UPDATE_PENDING || UPDATE_APPLYING || SEL_MODE || document.hidden || NOTE_REQUESTS.size || LABEL_WRITES.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
   UPDATE_APPLYING=true;
   UPDATE_BASELINE=UPDATE_PENDING;UPDATE_PENDING=null;
   rememberListPosition();
@@ -2251,7 +2319,7 @@ function renderUpdateState(data, fromPoll=false){
   const failed=Array.isArray(data.failed_sources)?data.failed_sources.filter(s=>Object.hasOwn(names,s)):[];
   if(failed.length)meta.push(T('js.update_failed_sources',{sources:failed.map(s=>names[s]).join(', ')}));
   const detail=document.getElementById('update-meta');if(detail)detail.textContent=meta.join(' · ');
-  if(UPDATE_PENDING && !OPEN_UID && !SEL.size)applyLatestResults();   // 多选中同打开 JD 一样推迟
+  if(UPDATE_PENDING && !OPEN_UID && !SEL_MODE)applyLatestResults();   // 多选模式中（含 0 项）同打开 JD 一样推迟
 }
 
 function updateConnectionLost(){

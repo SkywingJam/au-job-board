@@ -344,9 +344,9 @@ class PanelMultiselectTests(unittest.TestCase):
         return html.decode("utf-8") if isinstance(html, bytes) else html
 
     def test_page_has_checkbox_circle_bar_and_keeps_the_search_row_intact(self):
-        for lang, expect in (("zh", {"bar": "批量操作", "count": "sel.count", "star": "设为星标", "cancel": "取消",
+        for lang, expect in (("zh", {"bar": "批量操作", "count": "sel.count", "star": "设为星标", "cancel": "取消", "mark": "标记为",
                                     "marks": ("想投", "已投", "跳过"), "check": "选择：Title with"}),
-                             ("en", {"bar": "Bulk actions", "count": "sel.count", "star": "Set star", "cancel": "Cancel",
+                             ("en", {"bar": "Bulk actions", "count": "sel.count", "star": "Set star", "cancel": "Cancel", "mark": "Mark as",
                                     "marks": ("To apply", "Applied", "Skipped"), "check": "Select: Title with"})):
             with self.subTest(lang):
                 html = self.page(lang)
@@ -354,12 +354,30 @@ class PanelMultiselectTests(unittest.TestCase):
                 self.assertIn('class="search"', html)
                 self.assertLess(html.index('class="search"'), html.index('id="selbar"'))
                 self.assertIn(f'aria-label="{expect["bar"]}"', html)
-                for text in expect["marks"]:
-                    self.assertRegex(html, r'data-sel-action="[a-z]+" onclick="selApply\(\'[a-z]+\'\)">%s</button>' % text)
+                # "Mark as…" is the panel's own popover (choicepick), not a native <select> and not a filter:
+                # one trigger that starts disabled (nothing selected) plus the three actions, in order.
+                picker = re.search(r'<div class="choicepick selpick" data-sel-mark>(.*?)</div></div>', html, re.S)
+                self.assertIsNotNone(picker)
+                trigger = re.search(r'<button type="button" class="selbtn selmark"[^>]*>', picker.group(1)).group(0)
+                self.assertIn(f'aria-label="{expect["mark"]}"', trigger)
+                for attr in ("data-choice-trigger", "data-sel-write", " disabled", 'aria-haspopup="listbox"'):
+                    self.assertIn(attr, trigger)
+                self.assertNotIn("data-fkey", picker.group(0))
+                self.assertIn(f'<span class="v">{expect["mark"]}…</span>', picker.group(1))
+                options = re.findall(r'data-choice-value="([^"]*)"[^>]*><span class="choice-label">([^<]*)</span>', picker.group(1))
+                self.assertEqual(options, [("saved", expect["marks"][0]), ("applied", expect["marks"][1]),
+                                           ("skipped", expect["marks"][2])])
+                self.assertNotIn("<select", html)
+                self.assertNotIn("data-sel-action", html)
+                self.assertRegex(html, r'<button type="button" class="selbtn selstar" data-sel-star data-sel-write disabled ')
+                self.assertNotRegex(html, r'data-sel-cancel[^>]*disabled')
                 self.assertIn(expect["star"], html)
                 self.assertIn(f'>{expect["cancel"]}</button>', html)
                 self.assertIn('data-check-uid="seek:j000"', html)
                 self.assertIn('role="checkbox" aria-checked="false"', html)
+                # The tick is an SVG whose path centre (12, 12) is the centre of its 24-unit box.
+                self.assertIn('<svg class="card-tick" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+                              '<path d="m6 12 4 4 8-8"/></svg>', html)
                 # The accessible name is HTML-escaped, never raw markup.
                 self.assertIn(expect["check"], html)
                 self.assertNotIn("<tags>", html)

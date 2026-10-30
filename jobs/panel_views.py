@@ -339,8 +339,10 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
         f'<div class="card{" done" if done else ""}" data-uid="{_e(uid)}" '
         f'role="group" aria-label="{_e(title)}" tabindex="0" '
         f'onclick="openJob(\'{_e(uid)}\')" onkeydown="cardKeys(event,\'{_e(uid)}\')">',
-        f'<button type="button" class="card-check" role="checkbox" aria-checked="false" '
-        f'data-check-uid="{_e(uid)}" aria-label="{_e(i18n.t(lang, "sel.check", title=title))}"></button>',
+        f'<button type="button" class="card-check" role="checkbox" aria-checked="false" tabindex="-1" aria-hidden="true" '
+        f'data-check-uid="{_e(uid)}" aria-label="{_e(i18n.t(lang, "sel.check", title=title))}">'
+        '<svg class="card-tick" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+        '<path d="m6 12 4 4 8-8"/></svg></button>',
         '<div class="card-top">',
         f'<p class="t">{_e(row.get("title"))}</p>',
         f'<span class="score" title="{_e(badge_title)}">{badge}</span>',
@@ -832,15 +834,24 @@ def _selection_bar(lang: str) -> str:
     """多选操作栏：与搜索筛选行叠在同一格里，有选择时 CSS 切换显示（panel.js selRender）。
     筛选行的 DOM 与控件值一概不动，所以取消后原样恢复。"""
     T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
-    marks = "".join(
-        f'<button type="button" class="selbtn" data-sel-action="{action}" '
-        f'onclick="selApply(\'{action}\')">{_e(i18n.value_label(lang, "action", action))}</button>'
+    # “标记为…”复用筛选器同一套自绘下拉（choicepick：键盘、展开层、点外面关闭都现成）。
+    # 它没有 data-fkey，不会被当成筛选条件；选中一项由 choicePick 转给 selMark，
+    # 每次选择都是一次写入，所以没有“当前值”，也不会有勾选态。无选中项/保存中由 JS 禁用。
+    options = "".join(
+        f'<button type="button" class="choiceopt" role="option" tabindex="-1" data-choice-value="{action}" '
+        f'aria-selected="false" onclick="choicePick(this)" onkeydown="choiceOptionKeys(event,this)">'
+        f'<span class="choice-label">{_e(i18n.value_label(lang, "action", action))}</span></button>'
         for action in ("saved", "applied", "skipped"))
     return (f'<div class="selbar" id="selbar" role="toolbar" aria-label="{_e(T("sel.bar"))}">'
             '<span class="selbar-count" id="selbar-count" role="status" aria-live="polite"></span>'
-            f'<div class="selbar-marks" role="group" aria-label="{_e(T("sel.mark"))}">'
-            f'<span class="selbar-lbl" aria-hidden="true">{_e(T("sel.mark"))}</span>{marks}</div>'
-            f'<button type="button" class="selbtn selstar" data-sel-star onclick="selApply(\'star\')">'
+            '<div class="choicepick selpick" data-sel-mark>'
+            f'<button type="button" class="selbtn selmark" id="selbar-mark" data-choice-trigger data-sel-write disabled '
+            f'aria-haspopup="listbox" aria-expanded="false" aria-controls="selbar-marks" aria-label="{_e(T("sel.mark"))}" '
+            'onclick="choiceToggle(event,this)" onkeydown="choiceTriggerKeys(event,this)">'
+            f'<span class="v">{_e(T("sel.mark_ph"))}</span><span class="caret" aria-hidden="true">▾</span></button>'
+            f'<div class="choicepanel" id="selbar-marks" role="listbox" aria-label="{_e(T("sel.mark"))}" hidden>'
+            f'{options}</div></div>'
+            f'<button type="button" class="selbtn selstar" data-sel-star data-sel-write disabled onclick="selApply(\'star\')">'
             f'<span aria-hidden="true">★</span> {_e(T("sel.star"))}</button>'
             f'<button type="button" class="selbtn selcancel" data-sel-cancel onclick="selCancel()">'
             f'{_e(T("sel.cancel"))}</button>'

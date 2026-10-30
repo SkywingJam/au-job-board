@@ -161,17 +161,28 @@ entry using an event watermark; refresh or enter a new session to rebuild it.
 
 ### Marking several cards at once
 
-Each card has an empty circle on its left. Click it (or press Space/Enter on it)
-to select the card without opening the job; on a computer Cmd/Ctrl+click anywhere
-on a card does the same, and on a touch screen a long press (about half a second
-without moving) selects or unselects the card. Scrolling does not clear the
-selection. While at least one card is selected, the search and filter row is
-replaced by a bar that shows the number selected and offers **To apply**,
-**Applied**, **Skipped**, **Set star** and **Cancel**. Search text and filters you
-had are untouched and return when the selection ends.
+Cards show no checkbox until you start selecting. On a computer, Cmd/Ctrl+click
+on a card (or Cmd/Ctrl+Enter on a focused card) starts selecting; on a touch screen
+a long press (about half a second without moving) does. In selecting mode every
+card shows a circle on its left (click it, or Space/Enter on it, to select without
+opening the job), and the search and filter row is replaced by a bar with the
+number selected, a **Mark as…** menu (**To apply**, **Applied**, **Skipped**; choosing one saves it at once),
+**Set star** and **Cancel**. Search text and filters you had are untouched and
+return when selecting ends. The menu and star are disabled while nothing is
+selected or a save is running; **Cancel** always works.
+
+How selecting ends depends on the layout. On a phone-sized (single-column) layout,
+tapping a card or its circle toggles it instead of opening the job; tapping
+elsewhere, scrolling or pressing Esc does not leave, and unselecting every card
+keeps you in selecting mode ("0 selected", actions disabled) so you can pick again;
+only **Cancel** ends it. On a wide layout, selecting ends when you cancel the last
+card, press Esc, click blank space or another control, or click a card normally
+(which opens the job). Resizing from phone-sized to wide ends an empty selecting mode
+and keeps any selection. Selections are never kept across pages. A newer result set
+waits while you are selecting, including with 0 selected, and loads after you cancel.
 
 Each action is applied to every selected card in one all-or-nothing save: a status
-button sets exactly that status (replacing any other) and **Set star** only sets
+choice sets exactly that status (replacing any other) and **Set star** only sets
 the star; neither touches the other axis, notes or qualification. Repeating the
 same action changes nothing. After a successful save the selection stays so you
 can add a star or correct the status; cards are not removed or reordered, and the
@@ -183,12 +194,10 @@ cards can be selected, only from the list currently loaded. There is no select
 all, cross-page selection, range selection, unstar or clear-status action here;
 use the job's own controls for those.
 
-Cancel, Esc, unselecting the last card, clicking blank space or another control,
-opening a job, going to another page or view all end the selection. Clicking a
-plain card or a navigation link keeps the selection until the destination is
-really entered, so a cancelled "unsaved changes" confirmation leaves it as it was.
-A pending new-results refresh waits while cards are selected, as it does while a
-job is open. A save already sent is not undone by leaving the selection.
+On a wide layout, clicking a plain card or a navigation link keeps the selection
+until the destination is really entered, so a cancelled "unsaved changes"
+confirmation leaves it as it was. A save already sent is not undone by leaving
+selecting mode; its late result only updates the marks and never reopens it.
 
 Plus a free-form note. Every change is also appended to a history table
 (`label_events`), so you can check what changed and restore a label by hand from

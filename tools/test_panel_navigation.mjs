@@ -192,7 +192,8 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   choiceTriggerKeys, choiceOptionKeys, geoSuggest, geoFocus, geoInput, geoPanelClose, geoOptionPick,
   geoOptionKeys, fitLayout, navKeyIgnored, LABELS, SWIPE, SWIPE_SKIP,
   SEL, HOLD, LABEL_WRITES, selToggle, selClear, selApply, selCancel, holdFire, cardKeys, applyLatestResults,
-  selState(){return {uids:[...SEL],busy:!!SEL_BUSY,hold:!!HOLD_TRACK,holdClick:!!HOLD_CLICK};},
+  selMark, selLayoutChanged, choicePick,
+  selState(){return {uids:[...SEL],mode:SEL_MODE,busy:!!SEL_BUSY,hold:!!HOLD_TRACK,holdClick:!!HOLD_CLICK};},
   state(){return {uid:OPEN_UID,pending:UPDATE_PENDING,applying:UPDATE_APPLYING,gates:NAV_GATES,draft:!!FILTER_DRAFT};},
   setUpdate(v){OPEN_UID=v.uid||null;UPDATE_BASELINE=v.baseline||'';UPDATE_PENDING=v.pending||null;UPDATE_APPLYING=false;},
   addPendingNote(p){NOTE_REQUESTS.add(p);p.finally(()=>NOTE_REQUESTS.delete(p));} };
@@ -1613,6 +1614,12 @@ function selPanel(opts = {}) {
   const bar = new El("div"); const count = new El("span"); const msg = new El("span"); msg.hidden = true;
   t.ids.set("selbar", bar); t.ids.set("selbar-count", count); t.ids.set("selbar-msg", msg);
   t.bar = bar; t.count = count; t.msg = msg;
+  // 写控件：“标记为…”下拉与星标；没有选中项或保存中时由 JS 禁用，取消始终可用
+  const mark = new El("button"); mark.disabled = true;
+  const star = new El("button"); star.disabled = true;
+  const cancel = new El("button");
+  t.reg["#selbar [data-sel-write]"] = [mark, star];
+  t.mark = mark; t.star = star; t.cancel = cancel;
   t.boxes = {};
   t.cards.forEach((c) => { const box = new El("button"); box.dataset.checkUid = c.dataset.uid; c.q[".card-check"] = [box]; t.boxes[c.dataset.uid] = box; });
   t.stat = new El("b"); t.reg["[data-stat]"] = [t.stat];
@@ -1638,6 +1645,9 @@ function selPanel(opts = {}) {
     t.docEvent("click", event);
     return event;
   };
+  // 进入多选：圆框平时不可见，进入靠 Cmd/Ctrl+点卡片（宽屏）或长按（手机）
+  t.enter = (uid) => t.click("card", uid, { metaKey: true });
+  t.mode = () => t.api.selState().mode;
   t.sel = () => t.api.selState().uids;
   t.selecting = () => t.api.state && document_is(t, "selecting");
   return t;
@@ -1672,7 +1682,7 @@ async function testMultiSelect() {
   }
   {
     const t = selPanel();
-    t.click("box", "A");
+    t.enter("A");
     eq("单个圆框进入多选", [t.sel(), document_is(t, "selecting")], [["A"], true]);
     const click = t.click("selbar", "A");
     eq("点批量栏内部不退出", [t.sel(), click.prevented], [["A"], undefined]);
@@ -1682,18 +1692,18 @@ async function testMultiSelect() {
     eq("普通点导航链接：交给页面跳转，不先清", t.sel(), ["A"]);
     t.click("link", "A", { metaKey: true });
     eq("修饰键点链接（不离开本页）= 其他交互，退出", t.sel(), []);
-    t.click("box", "A");
+    t.enter("A");
     t.click("link", "A", { href: "#" });
     eq("锚点链接 = 其他交互，退出", t.sel(), []);
-    t.click("box", "A");
+    t.enter("A");
     t.click("blank", "A");
     eq("点空白退出", [t.sel(), document_is(t, "selecting")], [[], false]);
-    t.click("box", "A"); t.click("btn", "A");
+    t.enter("A"); t.click("btn", "A");
     eq("点卡片外的其他控件退出", t.sel(), []);
-    t.click("box", "A"); t.click("control", "A");
+    t.enter("A"); t.click("control", "A");
     eq("点卡片内的控件不退出", t.sel(), ["A"]);
     t.api.selClear();
-    t.click("box", "A");
+    t.enter("A");
     t.api.selCancel();
     eq("取消退出", t.sel(), []);
     t.click("blank", "A");
@@ -1701,11 +1711,11 @@ async function testMultiSelect() {
   }
   {
     const t = selPanel();
-    t.click("box", "A");
+    t.enter("A");
     const esc = { key: "Escape", target: t.document.body, preventDefault() { this.p = true; } };
     t.docEvent("keydown", esc);
     eq("Esc 退出多选", [t.sel(), esc.p], [[], true]);
-    t.click("box", "A");
+    t.enter("A");
     t.ids.set("drawer", new El("div"));
     t.docEvent("keydown", { key: "Escape", target: t.document.body, preventDefault() {} });
     eq("抽屉开着时 Esc 归抽屉，不动选择", t.sel(), ["A"]);
@@ -1714,7 +1724,7 @@ async function testMultiSelect() {
     eq("输入框里的 Esc 不退出选择", t.sel(), ["A"]);
     t.winEvent("pagehide", {});
     eq("离开页面（pagehide）清除选择", t.sel(), []);
-    t.click("box", "A");
+    t.enter("A");
     t.winEvent("pageshow", { persisted: false });
     eq("普通 pageshow 不清选择", t.sel(), ["A"]);
     t.winEvent("pageshow", { persisted: true });
@@ -1723,7 +1733,8 @@ async function testMultiSelect() {
   {
     const cards = Array.from({ length: 105 }, (_, i) => "U" + i);
     const t = selPanel({ cards });
-    for (let i = 0; i < 100; i++) t.click("box", "U" + i);
+    t.enter("U0");
+    for (let i = 1; i < 100; i++) t.click("box", "U" + i);
     eq("选满 100 项", t.sel().length, 100);
     t.click("box", "U100");
     eq("第 101 项：明确提示、不加入", [t.sel().length, t.ids.get("toast").textContent], [100, "limit 100"]);
@@ -1742,7 +1753,7 @@ async function testMultiSelect() {
     const segApplied = new El("button"); segApplied.dataset.uid = "A"; segApplied.dataset.field = "action"; segApplied.dataset.value = "applied"; segApplied.classList.add("on");
     const starBtn = new El("button"); starBtn.dataset.uid = "A"; starBtn.dataset.field = "priority"; starBtn.dataset.value = "1";
     t.reg['[data-uid="A"][data-field]'] = [segSaved, segApplied, starBtn];
-    t.click("box", "A"); t.click("box", "C");
+    t.enter("A"); t.click("box", "C");
     const hold = manual();
     let seen = null;
     t.routes.batch = (body) => { seen = body; return hold.promise; };
@@ -1779,7 +1790,7 @@ async function testMultiSelect() {
   }
   {
     // 星标是绝对 true，只写 priority；状态不被带上
-    const t = selPanel(); t.click("box", "B");
+    const t = selPanel(); t.enter("B");
     await t.api.selApply("star");
     eq("星标请求体只含 priority:true", t.calls.at(-2).body, { items: [{ uid: "B", priority: true }] });
     eq("星标成功提示", t.ids.get("toast").textContent, "star 1");
@@ -1799,7 +1810,7 @@ async function testMultiSelect() {
   ]) {
     const t = selPanel(); t.api.LABELS.A = { action: null };
     const prog = new El("span"); t.reg['.prog[data-prog-uid="A"]'] = [prog];
-    t.click("box", "A");
+    t.enter("A");
     t.routes.batch = route;
     const saved = await t.api.selApply("saved");
     eq("失败（" + name + "）：不假装成功、选择保留、可重试", [saved, t.sel(), t.api.LABELS.A.action, prog.textContent, t.msg.textContent, t.msg.hidden, t.api.LABEL_WRITES.size, t.api.selState().busy],
@@ -1812,21 +1823,21 @@ async function testMultiSelect() {
   {
     // 在途中退出选择：请求不被撤销；迟到的成功只更新标注、迟到的失败不重开选择
     const t = selPanel(); t.api.LABELS.A = {}; const prog = new El("span"); t.reg['.prog[data-prog-uid="A"]'] = [prog];
-    t.click("box", "A");
+    t.enter("A");
     const hold = manual(); t.routes.batch = () => hold.promise;
     const run = t.api.selApply("applied"); await tick();
     t.api.selCancel();
     eq("在途退出：选择清空，但写入仍登记", [t.sel(), t.api.LABEL_WRITES.has("A"), t.api.selState().busy], [[], true, true]);
-    t.click("box", "B");
+    t.enter("B");
     eq("在途退出后新选择被挡住（避免与旧请求交叠）", [t.sel(), t.ids.get("toast").textContent], [[], "busy"]);
     hold.resolve({ ok: true, json: async () => ({ ok: true, items: [{ uid: "A", action: "applied", priority: false, changed: true }] }) });
     await run;
     eq("迟到成功：标注更新、选择不重开", [prog.textContent, t.sel(), document_is(t, "selecting")], ["A", [], false]);
-    t.click("box", "B");
+    t.enter("B");
     eq("结束后可正常重新选择", t.sel(), ["B"]);
   }
   {
-    const t = selPanel(); t.click("box", "A");
+    const t = selPanel(); t.enter("A");
     const hold = manual(); t.routes.batch = () => hold.promise;
     const run = t.api.selApply("saved"); await tick();
     t.api.selCancel();
@@ -1834,12 +1845,12 @@ async function testMultiSelect() {
     await run;
     eq("迟到失败：不重开选择、不残留忙状态", [t.sel(), document_is(t, "selecting"), t.api.selState().busy, t.api.LABEL_WRITES.size], [[], false, false, 0]);
     eq("迟到失败：栏已收起，用 toast 告知", t.ids.get("toast").textContent, "failed");
-    t.click("box", "B");
+    t.enter("B");
     eq("迟到失败的提示不带进下一次选择", [t.msg.hidden, t.msg.textContent], [true, ""]);
   }
   {
     // 在途中取消选择 + 新结果信号：信号保留，写入结束且无选择后载入一次（不提前、不丢）
-    const t = selPanel(); t.click("box", "A");
+    const t = selPanel(); t.enter("A");
     const hold = manual(); t.routes.batch = () => hold.promise;
     const run = t.api.selApply("saved"); await tick();
     t.api.setUpdate({ uid: null, baseline: "generation-1", pending: "generation-2" });
@@ -1852,7 +1863,7 @@ async function testMultiSelect() {
   }
   {
     // 查看新 JD：批量在途时等待（含没有打开的 JD）；失败被保存门拦下，选择与原目的地保留
-    const t = selPanel(); t.click("box", "A");
+    const t = selPanel(); t.enter("A");
     const hold = manual(); t.routes.batch = () => hold.promise;
     const run = t.api.selApply("saved"); await tick();
     const opening = t.api.openJob("B"); await tick();
@@ -1868,7 +1879,7 @@ async function testMultiSelect() {
     const t = selPanel(); await t.api.openJob("A");
     const input = new El("input"); input.dataset.noteLoaded = "saved"; input.value = "draft"; t.reg[".note input"] = [input];
     let asked = 0; t.sandbox.confirm = () => { asked++; return false; };
-    t.click("box", "C");
+    t.enter("C");
     eq("打开着 JD 时选卡不触发草稿确认", [asked, t.api.state().uid, t.sel()], [0, "A", ["C"]]);
     eq("草稿确认取消：留在 A、选择保留", [await t.api.openJob("B"), asked, t.api.state().uid, t.sel()], [false, 1, "A", ["C"]]);
     t.sandbox.confirm = () => true;
@@ -1876,7 +1887,7 @@ async function testMultiSelect() {
   }
   {
     // 待应用新结果 + 多选：点开 JD 放行后整页载入并带上目标 uid
-    const t = selPanel(); t.click("box", "A");
+    const t = selPanel(); t.enter("A");
     t.api.setUpdate({ uid: null, baseline: "generation-1", pending: "generation-2" });
     t.api.renderUpdateState({ state: "idle", generation: "generation-2" });
     eq("多选中信号保留", [t.reloads(), t.api.state().pending], [0, "generation-2"]);
@@ -1884,15 +1895,15 @@ async function testMultiSelect() {
     eq("最后一项取消：载入推迟的新结果一次", t.reloads(), 1);
   }
   {
-    const t = selPanel(); t.click("box", "A");
+    const t = selPanel(); t.enter("A");
     t.api.setUpdate({ uid: "A", baseline: "generation-1", pending: "generation-2" });
     t.api.selCancel();
     eq("有打开的 JD 时退出选择不载入新结果（仍等离开 JD）", [t.reloads(), t.api.state().pending], [0, "generation-2"]);
   }
 
-  console.log("\n-- 卡片多选：手机长按 --");
+  console.log("\n-- 卡片多选：触屏长按（宽布局：模式里长按切换，点击规则同电脑） --");
   {
-    const t = selPanel({ portrait: true });
+    const t = selPanel();
     t.api.HOLD.ms = 25;
     const pt = (x, y) => ({ clientX: x, clientY: y });
     const down = (uid, x = 100, y = 200, extra = {}) => t.docEvent("touchstart", { target: t.target("card", uid), touches: [pt(x, y)], changedTouches: [pt(x, y)], ...extra });
@@ -1966,7 +1977,7 @@ async function testMultiSelect() {
     t.sandbox.document.getSelection = () => ({ rangeCount: 1, isCollapsed: false, toString: () => "abc" });
     down("A"); await wait(60); delete t.sandbox.document.getSelection;
     eq("已有文字选区：不开始", t.sel(), []);
-    const hold = manual(); t.routes.batch = () => hold.promise; t.click("box", "B");
+    const hold = manual(); t.routes.batch = () => hold.promise; t.enter("B");
     const run = t.api.selApply("saved"); await tick(); down("C"); await wait(60);
     eq("批量在途：长按不改选择", t.sel(), ["B"]);
     hold.resolve({ ok: true, json: async () => ({ ok: true, items: [{ uid: "B", action: "saved", priority: false, changed: true }] }) }); await run;
@@ -1979,6 +1990,184 @@ async function testMultiSelect() {
     const late = { type: "click", target: t.target("card", "A"), button: 0, detail: 1, clientX: 100, clientY: 200, pointerType: "touch", preventDefault() { this.p = true; }, stopPropagation() { this.s = true; } };
     t.docEvent("click", late);
     eq("窗口过期后的点击不被吞", late.s, undefined);
+  }
+
+  console.log("\n-- 多选模式：圆框平时隐藏、“标记为…”下拉、写控件禁用 --");
+  {
+    const t = selPanel();
+    eq("平时：没有模式、没有选择、写控件与下拉禁用", [t.mode(), t.sel(), document_is(t, "selecting"), t.mark.disabled, t.star.disabled, t.count.textContent], [false, [], false, true, true, ""]);
+    t.click("box", "A");
+    eq("平时点（不可见的）圆框不会进入多选", [t.mode(), t.sel()], [false, []]);
+    t.api.cardKeys({ key: " ", target: { closest: () => null }, preventDefault() {} }, "A"); await tick();
+    eq("平时 Enter/空格仍是打开 JD", [t.api.state().uid, t.mode()], ["A", false]);
+    t.api.selClear();
+    const k = { key: "Enter", ctrlKey: true, target: { closest: () => null }, preventDefault() { this.p = true; } };
+    t.api.cardKeys(k, "B");
+    eq("键盘进入：卡片上 Ctrl/Cmd+Enter 等同修饰键点击", [t.sel(), t.mode(), k.p], [["B"], true, true]);
+    t.api.selClear();
+    t.enter("A");
+    eq("进入后：写控件可用", [t.mark.disabled, t.star.disabled], [false, false]);
+    // 下拉（复用自绘 choicepick）：选一项即对所选绝对赋值；没有“当前值”，同值可再次选择（重试）
+    const pick = (value, filterCalls = []) => t.api.choicePick({ dataset: { choiceValue: value },
+      closest: (sel) => sel === ".choicepick" ? { dataset: { selMark: "" }, querySelector: () => ({}) } : null });
+    const bodies = [];
+    t.routes.batch = (body) => { bodies.push(body); return { ok: true, json: async () => ({ ok: true, items: body.items.map((i) => ({ uid: i.uid, action: i.action, priority: "priority" in i, changed: bodies.length === 1 })) }) }; };
+    const run = pick("applied");
+    eq("选一项即发出请求，写控件随即禁用", [t.mark.disabled, t.star.disabled], [true, true]);
+    await tick(); await new Promise((r) => setTimeout(r, 5));
+    eq("下拉的请求体是绝对赋值 action", bodies, [{ items: [{ uid: "A", action: "applied" }] }]);
+    eq("成功：选择保留，写控件恢复", [t.sel(), t.mode(), t.mark.disabled, t.star.disabled], [["A"], true, false, false]);
+    pick("applied"); await tick(); await new Promise((r) => setTimeout(r, 5));
+    eq("同一值可再次选择（重试同值）", [bodies.length, t.ids.get("toast").textContent], [2, "same 1 A"]);
+    t.api.selMark(""); await tick();
+    eq("空值不写入", bodies.length, 2);
+    await t.api.selApply("star");
+    eq("星标是独立写入，只含 priority", bodies.at(-1), { items: [{ uid: "A", priority: true }] });
+    // 保存中：下拉与星标禁用，取消仍可用且可退出
+    const hold = manual(); t.routes.batch = () => hold.promise;
+    pick("skipped"); await tick();
+    eq("保存中：写控件禁用，取消不禁用", [t.mark.disabled, t.star.disabled, t.cancel.disabled], [true, true, false]);
+    t.api.selCancel();
+    eq("保存中取消：退出模式，写控件保持禁用直到结束", [t.mode(), t.sel(), t.mark.disabled], [false, [], true]);
+    hold.resolve({ ok: false, status: 503, json: async () => ({ error: "write_failed" }) });
+    await tick(); await new Promise((r) => setTimeout(r, 5));
+    eq("迟到失败：只 toast，不重开模式", [t.mode(), t.sel(), t.ids.get("toast").textContent, t.mark.disabled], [false, [], "failed", true]);
+  }
+  {
+    // 圆框焦点：退出模式后焦点不能留在随即隐藏的圆框/操作栏里
+    const t = selPanel(); t.enter("B");
+    const card = t.cards[1], box = t.boxes.B;
+    box.closestMap = { ".card-check": box, ".card": card };
+    t.document.activeElement = box;
+    t.click("box", "B");
+    eq("最后一项取消（圆框有焦点）：焦点交给这张卡片", [t.mode(), t.document.activeElement === card], [false, true]);
+    t.enter("B"); t.cancel.closestMap = { "#selbar": t.bar }; t.document.activeElement = t.cancel;
+    t.api.selCancel();
+    eq("键盘按取消：焦点回到刚操作的卡片", t.document.activeElement === card, true);
+    t.enter("B"); t.document.activeElement = t.document.body; t.api.selCancel();
+    eq("焦点不在圆框/操作栏时不动它", t.document.activeElement === t.document.body, true);
+  }
+
+  console.log("\n-- 竖屏（手机）多选：模式独立于选中数，只有“取消”退出 --");
+  {
+    const t = selPanel({ portrait: true });
+    t.api.HOLD.ms = 25;
+    const pt = (x, y) => ({ clientX: x, clientY: y });
+    const down = (uid, x = 100, y = 200) => t.docEvent("touchstart", { target: t.target("card", uid), touches: [pt(x, y)], changedTouches: [pt(x, y)] });
+    const up = () => t.docEvent("touchend", { target: t.document.body, touches: [], changedTouches: [pt(100, 200)] });
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const tapEvent = (kind, uid, extra = {}) => ({ type: "click", target: t.target(kind, uid), button: 0, detail: 1, clientX: 100, clientY: 200, pointerType: "touch",
+      preventDefault() { this.p = true; }, stopPropagation() { this.s = true; }, ...extra });
+    // 普通模式：短按看 JD、长按进入
+    down("A"); up(); await wait(60);
+    eq("普通模式短按不进入", [t.mode(), t.sel()], [false, []]);
+    // 长按按得很久：补发的 click 在抬起后才计时，所以仍被吞，且不双切
+    down("B"); await wait(60);
+    eq("长按到时进入模式并选中", [t.mode(), t.sel(), document_is(t, "selecting")], [true, ["B"], true]);
+    await wait(900);
+    up();
+    const compat = tapEvent("card", "B"); t.docEvent("click", compat);
+    eq("按得久（>800ms）的长按抬起后补发的 click：仍被吞，不双切、不打开 JD", [compat.p, compat.s, t.sel(), t.jobCalls()], [true, true, ["B"], []]);
+    // 模式里：普通点卡片 = 切换，不打开详情
+    const tap = tapEvent("card", "C"); t.docEvent("click", tap);
+    eq("模式里普通点卡片：选中、不打开 JD、拦下卡片自己的点击", [t.sel(), tap.p, tap.s, t.jobCalls()], [["B", "C"], true, true, []]);
+    const box = tapEvent("box", "C"); t.docEvent("click", box);
+    eq("点圆框同样是切换", [t.sel(), box.p], [["B"], true]);
+    const inner = tapEvent("control", "B"); t.docEvent("click", inner);
+    eq("点卡片内部的按钮/链接：不当作切换，也不退出", [t.sel(), t.mode(), inner.p], [["B"], true, undefined]);
+    t.docEvent("click", tapEvent("card", "B"));
+    eq("取消最后一项：仍在模式里，显示“0 selected”，写操作禁用", [t.sel(), t.mode(), document_is(t, "selecting"), t.count.textContent, t.mark.disabled, t.star.disabled, t.cancel.disabled], [[], true, true, "0 selected", true, true, false]);
+    t.docEvent("click", tapEvent("card", "D"));
+    eq("0 项后可以重新选卡", [t.sel(), t.mode()], [["D"], true]);
+    t.docEvent("click", tapEvent("card", "D"));
+    // 0 项模式下其他交互都不退出
+    t.docEvent("click", tapEvent("blank", "A"));
+    t.docEvent("click", tapEvent("btn", "A"));
+    t.docEvent("click", tapEvent("link", "A"));
+    t.docEvent("click", tapEvent("selbar", "A"));
+    t.docEvent("keydown", { key: "Escape", target: t.document.body, preventDefault() {} });
+    t.docEvent("scroll", { target: t.document.body });
+    t.winEvent("pageshow", { persisted: false });
+    eq("空白/其他控件/链接/Esc/滚动/普通 pageshow：0 项模式都不退出", [t.mode(), t.sel(), document_is(t, "selecting")], [true, [], true]);
+    // 模式里长按不再触发（点一下就是切换）；键盘 Enter/空格切换
+    down("A"); await wait(60); up();
+    eq("模式里长按不重复触发切换", [t.sel(), t.api.selState().holdClick], [[], false]);
+    const ek = { key: "Enter", target: { closest: () => null }, preventDefault() { this.p = true; } };
+    t.api.cardKeys(ek, "A"); await tick();
+    t.api.cardKeys({ key: " ", target: { closest: () => null }, preventDefault() {} }, "C");
+    eq("模式里键盘 Enter/空格 切换选中，不打开 JD", [t.sel(), t.jobCalls(), ek.p], [["A", "C"], [], true]);
+    t.api.selClear();
+    // 0 项模式 + 新结果：延迟；取消后才按既有门载入
+    t.enter("A"); t.click("card", "A", { metaKey: true });
+    t.api.setUpdate({ uid: null, baseline: "generation-1", pending: "generation-2" });
+    t.api.renderUpdateState({ state: "idle", generation: "generation-2" });
+    eq("0 项模式：新结果仍推迟（不当作无操作）", [t.mode(), t.sel(), t.reloads(), t.api.state().pending], [true, [], 0, "generation-2"]);
+    t.api.selCancel();
+    eq("取消后载入一次推迟的新结果", [t.mode(), t.reloads()], [false, 1]);
+    eq("退出后选择与控件复位", [t.sel(), document_is(t, "selecting"), t.count.textContent, t.mark.disabled], [[], false, "", true]);
+  }
+  {
+    // 宽屏已有详情和多选，转竖屏后返回列表不能借待更新信号清掉移动端模式。
+    const t = selPanel(); await t.api.openJob("A"); t.enter("B");
+    t.document.body.classList.add("portrait");
+    t.api.setUpdate({ uid: "A", baseline: "generation-1", pending: "generation-2" });
+    await t.api.closeDetail();
+    eq("有多选模式时返回列表：保留选择与更新信号，不重载", [t.mode(), t.sel(), t.reloads(), t.api.state().uid, t.pane.classList.contains("open"), t.api.state().pending],
+      [true, ["B"], 0, null, false, "generation-2"]);
+    t.api.selCancel();
+    eq("明确取消模式后才应用新结果", [t.mode(), t.reloads()], [false, 1]);
+  }
+  {
+    // 竖屏：保存失败（模式仍在）提示留在栏里；0 项模式里的批量按钮无法触发
+    const t = selPanel({ portrait: true }); t.enter("A");
+    t.routes.batch = () => ({ ok: false, status: 503, json: async () => ({ error: "write_failed" }) });
+    await t.api.selMark("saved");
+    eq("竖屏失败：选择与模式保留，栏内提示，写控件恢复", [t.sel(), t.mode(), t.msg.textContent, t.mark.disabled], [["A"], true, "failed", false]);
+    t.click("card", "A");
+    eq("取消选中最后一项后：提示被清、模式仍在", [t.sel(), t.mode(), t.msg.hidden], [[], true, true]);
+    eq("0 项时 selApply 不发请求", [await t.api.selApply("saved"), t.calls.filter((c) => c.url === "/api/labels/batch").length], [false, 1]);
+    // 保存中主动取消：退出模式；迟到失败只 toast，不重开
+    t.click("card", "A");
+    const hold = manual(); t.routes.batch = () => hold.promise;
+    const run = t.api.selApply("applied"); await tick();
+    t.api.selCancel();
+    eq("保存中取消：模式退出（竖屏也一样）", [t.mode(), t.sel()], [false, []]);
+    hold.resolve({ ok: false, status: 502, json: async () => { throw new Error("x"); } });
+    await run;
+    eq("迟到的未知失败：只 toast，不重开模式", [t.mode(), t.sel(), t.ids.get("toast").textContent], [false, [], "unconfirmed"]);
+    t.api.selCancel();
+    // pagehide / bfcache 清理
+    t.enter("A"); t.click("card", "A");
+    t.winEvent("pagehide", {});
+    eq("pagehide：连 0 项模式一起清理", [t.mode(), t.sel()], [false, []]);
+    t.enter("A"); t.winEvent("pageshow", { persisted: true });
+    eq("bfcache 恢复：不带着旧模式", [t.mode(), t.sel()], [false, []]);
+  }
+  {
+    // 视口切换：保留有效选择；宽屏不留 0 项模式；宽屏模式进入竖屏后按竖屏规则
+    const t = selPanel({ portrait: true });
+    t.enter("A"); t.click("card", "A");
+    eq("竖屏 0 项模式", [t.mode(), t.sel()], [true, []]);
+    t.document.body.classList.remove("portrait"); t.api.selLayoutChanged();
+    eq("切到宽屏：0 项模式立即结束，不遗留", [t.mode(), t.sel(), document_is(t, "selecting")], [false, [], false]);
+    t.document.body.classList.add("portrait");
+    t.enter("A"); t.enter("B");
+    t.document.body.classList.remove("portrait"); t.api.selLayoutChanged();
+    eq("切到宽屏：有效选择保留", [t.mode(), t.sel()], [true, ["A", "B"]]);
+    t.click("blank", "A");
+    eq("宽屏规则：点空白退出", [t.mode(), t.sel()], [false, []]);
+    t.enter("A");
+    t.document.body.classList.add("portrait"); t.api.selLayoutChanged();
+    t.click("blank", "A");
+    eq("宽屏进入后切到竖屏：按竖屏规则，空白不退出", [t.mode(), t.sel()], [true, ["A"]]);
+    t.click("card", "A");
+    eq("竖屏：取消最后一项留在模式", [t.mode(), t.sel()], [true, []]);
+    // 宽屏：最后一项取消即退出；Esc 退出
+    t.document.body.classList.remove("portrait"); t.api.selLayoutChanged();
+    t.enter("A"); t.click("box", "A");
+    eq("宽屏：最后一项取消退出", [t.mode(), t.sel()], [false, []]);
+    t.enter("A"); t.docEvent("keydown", { key: "Escape", target: t.document.body, preventDefault() {} });
+    eq("宽屏：Esc 退出", [t.mode(), t.sel()], [false, []]);
   }
 }
 
