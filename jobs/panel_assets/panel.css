@@ -181,7 +181,8 @@ main{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:14px 
 body.resizing{cursor:col-resize}
 body.resizing *{user-select:none!important}
 /* 两栏各自滚动。min-height:0 是关键 —— 没有它 overflow:auto 失效 */
-.list{overflow-y:auto;min-height:0;padding-bottom:16px;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px}
+/* 给选中外描边及首张卡片的悬停上移留出绘制空间，避免滚动容器裁切。 */
+.list{overflow-y:auto;min-height:0;padding:2px 2px 16px;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-box);padding:12px 14px;cursor:pointer;flex:0 0 auto;scroll-margin-block:56px}
 .card:hover{border-color:var(--line3)}
 .card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
