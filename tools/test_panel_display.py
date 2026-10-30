@@ -101,6 +101,11 @@ def test_card() -> None:
               f'data-prog-uid="seek:synthetic_x" title="{i18n.t(lang, "field.action")}' in html
               and f">{prog}</span>" in html and 'class="prog good"' in html
               and re.search(r'class="card-star"[^>]* hidden>', html) is not None)
+    for action in (None, "saved", "applied", "skipped"):
+        for since in (None, "2026-10-30T00:00:00"):
+            html = panel._card(synthetic_row(_label={"action": action}), since, "zh")
+            check(f"卡片亮度 action={action} since={bool(since)}",
+                  ('class="card done"' in html) == bool(since and action in ("applied", "skipped")))
     for score in (7, -3, 12):
         lone = panel._card(synthetic_row(total_score=score, reasons=json.dumps(REASONS[1:])), None, "zh")
         badge = re.search(r'class="score"[^>]*>(.*?)</span>', lone)

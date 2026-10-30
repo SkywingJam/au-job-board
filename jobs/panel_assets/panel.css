@@ -233,7 +233,7 @@ body.selecting.sel-busy .card-check{cursor:progress;opacity:.6}
 /* 触屏：长按用于多选，不要让系统弹出文字选择/拷贝菜单 */
 @media (pointer:coarse){.card{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}}
 /* 推荐视图里，本次会话（since 之后）标过的卡片仍留在列表中 —— 那是保证
-   翻页不跳条目的前提（见 _unlabelled_at）。变灰表示「这条已经处理过了」。 */
+   翻页不跳条目的前提（见 _unlabelled_at）。变灰表示已投或跳过，想投保持正常亮度。 */
 .card.done{opacity:.55}
 .card-top{display:flex;gap:10px;align-items:flex-start}
 .t{flex:1 1 auto;min-width:0;font-size:var(--fs-md);font-weight:600;margin:0;line-height:1.35}

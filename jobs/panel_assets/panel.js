@@ -278,9 +278,9 @@ async function setLabel(uid,field,value,btn){
       const on=field==='priority' ? !!chosen : b.dataset.value===chosen;
       b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false');
     });
-    // 只有推荐视图把本次处理过的卡片变淡（与服务端 _card 的 since 口径一致）
+    // 推荐视图仅淡化已投/跳过；改成想投恢复亮度，与服务端 _card 一致
     if(window.__VIEW__==='recommend') document.querySelectorAll('.card[data-uid="'+uid+'"]').forEach(c=>{
-      if(inScope(c,id))c.classList.toggle('done',!!savedLabel.action);
+      if(inScope(c,id))c.classList.toggle('done',['applied','skipped'].includes(savedLabel.action));
     });
     if(field==='eligibility') refreshCorrectionTag(uid,data.qualification,id);
     refreshDot(uid,id);refreshStats();
@@ -629,7 +629,7 @@ function selSync(uid){
     const on=field==='priority' ? !!s.priority : b.dataset.value===s.action;
     b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false');
   });
-  if(window.__VIEW__==='recommend') document.querySelectorAll('.card[data-uid="'+uid+'"]').forEach(c=>c.classList.toggle('done',!!s.action));
+  if(window.__VIEW__==='recommend') document.querySelectorAll('.card[data-uid="'+uid+'"]').forEach(c=>c.classList.toggle('done',['applied','skipped'].includes(s.action)));
 }
 function selFail(message){ return {sel:true,message}; }
 function selFailure(status,data){

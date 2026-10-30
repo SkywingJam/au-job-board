@@ -139,7 +139,8 @@ summary shows the current result and whether it comes from the analysis or a
 manual correction. A machine result is outlined with a dashed border and a
 manual correction is filled. Cards show the status and star; they also show a
 correction tag when it contradicts the analysis. In Recommended, jobs processed
-during the current visit stay in place and are dimmed.
+during the current visit stay in place. Applied and Skipped cards are dimmed;
+changing a card to To apply restores its normal brightness.
 
 | Axis | Values | Meaning |
 |---|---|---|

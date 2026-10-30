@@ -2184,6 +2184,30 @@ async function testMultiSelect() {
   }
 }
 
+async function testActionBrightness() {
+  console.log("\n-- 跳过改想投恢复卡片亮度 --");
+  for (const batch of [false, true]) {
+    const t = batch ? selPanel() : loadPanel();
+    t.sandbox.__VIEW__ = "recommend";
+    const card = t.cards[0];
+    t.reg['.card[data-uid="A"]'] = [card];
+    const buttons = ["saved", "applied", "skipped"].map(value => {
+      const b = new El("button"); b.dataset.uid = "A"; b.dataset.field = "action"; b.dataset.value = value; return b;
+    });
+    t.reg['[data-uid="A"][data-field]'] = buttons;
+    if (batch) t.enter("A");
+    for (const action of ["skipped", "saved", "applied", "saved"]) {
+      if (batch) await t.api.selApply(action);
+      else await t.api.setLabel("A", "action", action, buttons.find(b => b.dataset.value === action));
+      eq(`${batch ? "批量" : "单条"} ${action}：亮度反映最新状态`, card.classList.contains("done"), action !== "saved");
+    }
+    if (!batch) {
+      await t.api.setLabel("A", "action", "saved", buttons[0]);
+      eq("清除想投：保持正常亮度", card.classList.contains("done"), false);
+    }
+  }
+}
+
 async function main() {
   console.log("== v1.2.2 PR-B 面板导航与异步（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
@@ -2196,6 +2220,7 @@ async function main() {
   await testLabelSheet();
   await testStats();
   await testLabelLock();
+  await testActionBrightness();
   await testInterleavedLabelNotes();
   await testDetailOpenRefreshesLabel();
   await testFilterDrawer();

@@ -294,8 +294,8 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     uid = row["uid"]
     label = row.get("_label") or {}
     # 推荐视图（有 since）里本次会话处理过的仍然留在列表里（保证翻页不跳），
-    # 变淡表示「已经处理过了」。其他视图本来就混着各种状态，不变淡。
-    done = bool(since and label.get("action"))
+    # 仅已投/跳过变淡，想投保持正常亮度。其他视图不变淡。
+    done = bool(since and label.get("action") in ("applied", "skipped"))
 
     # 卡片只用三类强调：状态（挂出 N 天 / 已排除）、资格线索、薪资。
     # 层级并进分数徽章；加减分移到详情的「为什么是 …」；技能是中性文字。
