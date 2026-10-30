@@ -573,46 +573,74 @@ function noteClosed(v){
 /* typed=true 表示是「打字」触发的，此时用输入内容过滤；
    点一下只是聚焦时（typed=false）显示**全部**候选 —— 否则已经写了备注的岗位
    一聚焦就只剩「无匹配候选」，等于候选表白做。 */
-/* 下拉菜单定位。可见区域必须按 visualViewport 算：iOS 弹键盘时 layout viewport
-   不变（window.innerHeight 也不变），屏幕下沿已经被键盘盖住；用 innerHeight 算
-   「下方够不够」会以为够，菜单就排到键盘背后。
-   **坐标系只有一个：layout viewport。** getBoundingClientRect() 和 position:fixed
-   的 top/left 在本机浏览器中以它为原点；visualViewport.offsetLeft/Top 是
-   「可见窗口的左上角在 layout viewport 里的位置」。所以 offset 只用来划定可见范围
-   [offset, offset+size]，**不能从要写进 fixed 的 top/left 里再减一次**：减了之后
-   菜单被整体上推 offset，与输入框的间隙恰好多出 offset，键盘弹出、页面被推上去
-   （offsetTop 很大）时菜单就跑出屏幕上沿。桌面无键盘、未缩放时 offset 恒为 0，
-   行为与原先相同。两边都放不下时压缩高度并贴着输入框，不盖住输入框。 */
+/* Use an actual fixed element to measure the origin in the same client-rect
+   coordinates as the input. WebKit can offset fixed coordinates differently
+   while the keyboard pans the visual viewport. No engine-name assumption is
+   needed: both the visible bounds and written top/left use this measurement. */
+let MENU_ORIGIN=null, MENU_TRACK=null, MENU_FRAME=null;
+function menuGeometry(input){
+  if(!MENU_ORIGIN){
+    MENU_ORIGIN=document.createElement('div');
+    MENU_ORIGIN.id='menu-origin';
+    MENU_ORIGIN.setAttribute('aria-hidden','true');
+    MENU_ORIGIN.style.cssText='position:fixed;left:0;top:0;width:0;height:0;margin:0;padding:0;border:0;visibility:hidden;pointer-events:none';
+    document.body.appendChild(MENU_ORIGIN);
+  }
+  const origin=MENU_ORIGIN.getBoundingClientRect();
+  const r=input.getBoundingClientRect(), vv=window.visualViewport;
+  const ox=vv?vv.offsetLeft:0, oy=vv?vv.offsetTop:0;
+  const width=vv?vv.width:window.innerWidth, height=vv?vv.height:window.innerHeight;
+  return {origin,r,width,height,left:origin.left+ox,top:origin.top+oy,
+    signature:[r.left,r.top,r.bottom,r.width,origin.left,origin.top,ox,oy,width,height].join(',')};
+}
+function followMenu(){
+  MENU_FRAME=null;
+  const current=MENU_TRACK;
+  if(!current || current.input.isConnected===false || document.activeElement!==current.input
+      || !current.menu.classList.contains('open')){
+    MENU_TRACK=null;
+    return;
+  }
+  // Keyboard/auto-scroll layout can settle after the last viewport event.
+  // Read geometry while open, but do not write styles when it stays unchanged.
+  if(menuGeometry(current.input).signature!==current.signature){
+    placeMenu(current.input,current.menu,current.opts);
+  }
+  if(MENU_FRAME===null) MENU_FRAME=requestAnimationFrame(followMenu);
+}
 function placeMenu(input,menu,opts){
   opts=opts||{};
   const gap=opts.gap||4;
   const minWidth=opts.minWidth||200;
-  const vv=window.visualViewport;
-  const ox=vv?vv.offsetLeft:0, oy=vv?vv.offsetTop:0;
-  const viewW=vv?vv.width:window.innerWidth;
-  const viewH=vv?vv.height:window.innerHeight;
-  const visLeft=ox, visTop=oy, visRight=ox+viewW, visBottom=oy+viewH;
-  const r=input.getBoundingClientRect();
-  const width=Math.min(Math.max(minWidth,r.width),viewW-8);
-  menu.style.left=Math.max(visLeft+4,Math.min(r.left,visRight-4-width))+'px';
+  const g=menuGeometry(input), r=g.r;
+  const visLeft=g.left, visTop=g.top, visRight=g.left+g.width, visBottom=g.top+g.height;
+  const width=Math.min(Math.max(minWidth,r.width),Math.max(0,g.width-8));
+  menu.style.minWidth='0';
+  menu.style.left=(Math.max(visLeft+4,Math.min(r.left,visRight-4-width))-g.origin.left)+'px';
   menu.style.width=width+'px';
-  menu.style.maxHeight='';                 // 恢复 CSS 上限，才能量到真实高度
-  menu.classList.add('open');              // 先显示才能量高度
+  menu.style.maxHeight='';
+  menu.classList.add('open');
   const h=menu.offsetHeight;
   const below=visBottom-r.bottom-gap;
   const above=r.top-visTop-gap;
-  if(h<=below){                            // 下方够：放下面
-    menu.style.top=(r.bottom+gap)+'px';
-  } else if(h<=above){                     // 上方够：放上面
-    menu.style.top=(r.top-h-gap)+'px';
-  } else if(below>=above){                 // 两边都不够：挑大的一侧并压缩高度（与屏幕边缘也留 gap）
+  let top;
+  if(h<=below){
+    top=r.bottom+gap;
+  } else if(h<=above){
+    top=r.top-h-gap;
+  } else if(below>=above){
     const avail=Math.max(0,below-gap);
     menu.style.maxHeight=avail+'px';
-    menu.style.top=(r.bottom+gap)+'px';
+    top=r.bottom+gap;
   } else {
     const avail=Math.max(0,above-gap);
     menu.style.maxHeight=avail+'px';
-    menu.style.top=(r.top-avail-gap)+'px';
+    top=r.top-avail-gap;
+  }
+  menu.style.top=(top-g.origin.top)+'px';
+  MENU_TRACK={input,menu,opts,signature:g.signature};
+  if(MENU_FRAME===null && typeof requestAnimationFrame==='function'){
+    MENU_FRAME=requestAnimationFrame(followMenu);
   }
 }
 function noteRender(input,typed){

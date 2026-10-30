@@ -141,7 +141,7 @@ function loadPanel(lang, tags, noteTagLabels, settingsGeneration) {
   const windowListeners = new Map();
   const document = {
     documentElement: { style: { setProperty() {} }, dataset: {} },
-    body: { classList: new ClassList() },
+    body: new FakeEl("body"),
     activeElement: null,
     cookie: "",
     getElementById: (id) => byId.get(id) || null,

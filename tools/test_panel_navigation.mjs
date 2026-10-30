@@ -183,7 +183,7 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
 ;globalThis.__T__ = { stepDetail, syncDetailNav, openJob, closeDetail, setLabel, setNote, noteAdopt, noteBlur,
   refreshStats, renderUpdateState, toggleLabelSheet, toggleMore, filterChanged, moreDone, clearHidden, clearFilter,
   commitFilter, gotoView, removeFilter,
-  applyFilter, searchTyping, filterDraftCount, skillRows, skillRender,
+  applyFilter, searchTyping, filterDraftCount, skillRows, skillRender, placeMenu,
   skillKeys, skillClean, skillOwner, choiceToggle, choicePick, choicePanelClose, choiceSetValue,
   choiceTriggerKeys, choiceOptionKeys, geoSuggest, geoFocus, geoInput, geoPanelClose, geoOptionPick,
   geoOptionKeys, fitLayout, navKeyIgnored, LABELS,
@@ -1104,6 +1104,60 @@ async function testMenuPlacement() {
   }
 }
 
+async function testMenuOriginsAndLateLayout() {
+  console.log("\n-- 候选菜单：fixed 原点差异与事件后布局变化（合成坐标）--");
+  function fixture(origin = { left: 0, top: 0 }) {
+    const t = loadPanel();
+    t.document.createElement = tag => {
+      const el = new El(tag);
+      el.getBoundingClientRect = function () {
+        return this.id === "menu-origin" ? { ...origin } : El.prototype.getBoundingClientRect.call(this);
+      };
+      return el;
+    };
+    const input = new El("input");
+    const rect = { left: 29, top: 273, bottom: 308, width: 332 };
+    input.getBoundingClientRect = () => ({ ...rect });
+    const menu = new El("div"); menu.offsetHeight = 216;
+    t.document.activeElement = input;
+    return { t, origin, input, menu, rect };
+  }
+  {
+    const f = fixture({ left: -73, top: -150 });
+    f.t.sandbox.visualViewport = { offsetLeft: 73, offsetTop: 150, width: 244, height: 415 };
+    f.t.api.placeMenu(f.input, f.menu);
+    const top = parseFloat(f.menu.style.top) + f.origin.top;
+    const left = parseFloat(f.menu.style.left) + f.origin.left;
+    const height = f.menu.style.maxHeight ? parseFloat(f.menu.style.maxHeight) : 216;
+    eq("fixed 原点偏移：菜单在输入框上方，间距4px", top + height, f.rect.top - 4);
+    check("fixed 原点偏移：菜单留在可视范围", top >= 0 && top + height <= 415);
+    check("fixed 原点偏移：水平也按实测原点转换", left >= 4 && left + parseFloat(f.menu.style.width) <= 240);
+  }
+  {
+    const f = fixture();
+    const frames = new Map(); let sequence = 0;
+    f.t.sandbox.requestAnimationFrame = cb => { frames.set(++sequence, cb); return sequence; };
+    const frame = () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(cb => cb()); };
+    let writes = 0;
+    f.menu.style = new Proxy(f.menu.style, { set(target, key, value) { writes++; target[key] = value; return true; } });
+    f.t.api.placeMenu(f.input, f.menu);
+    f.rect.top -= 80; f.rect.bottom -= 80; // No resize, scroll or transition event follows.
+    frame();
+    eq("布局晚于事件更新：下一帧仍跟随输入框", f.menu.style.top, "232px");
+    check("聚焦候选只保留一个跟随回调", frames.size === 1);
+    const changedWrites = writes;
+    frame();
+    eq("布局稳定时不累计偏移", f.menu.style.top, "232px");
+    eq("布局稳定的跟随帧不写样式", writes, changedWrites);
+    f.origin.top = -30;
+    frame();
+    eq("fixed 原点晚变也能恢复4px间距", parseFloat(f.menu.style.top) + f.origin.top, 232);
+    f.menu.classList.remove("open"); frame();
+    eq("菜单关闭后停止帧跟随", frames.size, 0);
+    check("跟随没有重开候选或发起写入", !f.menu.classList.contains("open") && f.t.calls.length === 0);
+  }
+}
+
 async function testIneligibleLast() {
   console.log("\n-- v1.3.1：资格不符置后的按视图记忆与纠正后的列表连续性 --");
   const t = loadPanel();
@@ -1173,6 +1227,7 @@ async function main() {
   await testFilterDrawer();
   await testSkillCandidates();
   await testMenuPlacement();
+  await testMenuOriginsAndLateLayout();
   await testIneligibleLast();
   console.log();
   if (failures.length) {
