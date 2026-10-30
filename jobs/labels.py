@@ -314,6 +314,134 @@ def clear_label(conn, uid: str) -> bool:
         raise
 
 
+MAX_BATCH_ITEMS = 100
+MAX_UID_LENGTH = 512
+PROGRESS_KEYS = ("uid", "action", "priority")
+
+
+class BatchLabelError(ValueError):
+    """A whole progress batch was rejected; nothing was written.
+
+    `code` is a fixed vocabulary (never echoes request content) and `index`
+    is the offending item's position when one item is to blame.
+    """
+
+    def __init__(self, code: str, index: int | None = None):
+        super().__init__(code)
+        self.code, self.index = code, index
+
+
+def parse_progress_items(raw) -> list[dict]:
+    """Validate a batch request strictly and return only the keys given.
+
+    Omitted `action`/`priority` mean "keep"; `action: None` explicitly cancels
+    progress. `priority` must be a real bool. Unknown keys, empty or overlong
+    UIDs, duplicate UIDs and items without any writable field are rejected.
+    """
+    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_BATCH_ITEMS:
+        raise BatchLabelError("invalid_request")
+    items, seen = [], set()
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict) or set(entry) - set(PROGRESS_KEYS):
+            raise BatchLabelError("invalid_item", index)
+        uid = entry.get("uid")
+        if not isinstance(uid, str) or not 1 <= len(uid) <= MAX_UID_LENGTH:
+            raise BatchLabelError("invalid_item", index)
+        if "action" not in entry and "priority" not in entry:
+            raise BatchLabelError("invalid_item", index)
+        if "action" in entry and entry["action"] is not None and (
+                not isinstance(entry["action"], str) or entry["action"] not in VALID["action"]):
+            raise BatchLabelError("invalid_item", index)
+        if "priority" in entry and type(entry["priority"]) is not bool:
+            raise BatchLabelError("invalid_item", index)
+        if uid in seen:
+            raise BatchLabelError("duplicate_uid", index)
+        seen.add(uid)
+        items.append({key: entry[key] for key in PROGRESS_KEYS if key in entry})
+    return items
+
+
+def set_progress_batch(conn, items, *, source: str = "api",
+                       rules_version: int | None = None) -> list[dict]:
+    """Absolutely assign action/priority for several UIDs in one transaction.
+
+    Same transaction ownership as `set_label` (BEGIN IMMEDIATE unless the caller
+    already opened one, one commit at the end, rollback on any error), but the
+    group resolution, old-state reads, every field write and its audit events
+    commit together. Each UID's *effective* group state (what `report.label_of`
+    shows) is compared with the request; a field that already matches is not
+    written at all, so it adds no event and refreshes no timestamp. A changed
+    field goes through `_set_label`, keeping its time, history, legacy-snapshot
+    and explicit-clear semantics. Fields not requested are never passed on.
+    Returns one {uid, action, priority, changed} per item, from the state the
+    transaction ends with.
+    """
+    items = parse_progress_items(items)
+    try:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        results = _set_progress_batch(conn, items, rules_version, source)
+        conn.commit()
+        return results
+    except BaseException:
+        conn.rollback()
+        raise
+
+
+def _set_progress_batch(conn, items, rules_version, source):
+    from . import report  # report imports this module; resolve lazily
+
+    groups, members = {}, {}
+    for uid, group in conn.execute(
+            "SELECT uid, COALESCE(NULLIF(dedupe_group, ''), uid) FROM jobs"):
+        groups[uid] = group
+        members.setdefault(group, []).append(uid)
+    claimed = set()
+    for index, item in enumerate(items):
+        group = groups.get(item["uid"])
+        if group is None:
+            raise BatchLabelError("unknown_uid", index)
+        if group in claimed:
+            raise BatchLabelError("duplicate_group", index)
+        claimed.add(group)
+
+    def effective(labels, item):
+        row = {"uid": item["uid"], "dedupe_group": groups[item["uid"]]}
+        merged = report.label_of(row, labels, members)
+        return merged.get("action") or None, bool(merged.get("priority"))
+
+    before = get_labels(conn, with_events=True)
+    changed = set()
+    for index, item in enumerate(items):
+        action, priority = effective(before, item)
+        fields = {}
+        if "action" in item and item["action"] != action:
+            fields["action"] = item["action"]
+        if "priority" in item and item["priority"] != priority:
+            fields["priority"] = item["priority"]
+        if fields:
+            _set_label(conn, item["uid"], rules_version, source, True, fields)
+            if fields.get("action") == "applied":
+                # This is a real transition of the effective group state. The
+                # requested UID may still carry an older applied value after
+                # a peer superseded it; its stale applied_at must not return.
+                conn.execute("UPDATE labels SET applied_at=action_at WHERE uid=?",
+                             (item["uid"],))
+            changed.add(index)
+
+    after = get_labels(conn, with_events=True)
+    results = []
+    for index, item in enumerate(items):
+        action, priority = effective(after, item)
+        if (("action" in item and item["action"] != action)
+                or ("priority" in item and item["priority"] != priority)):
+            # E.g. a peer event dated in the future would still win the merge.
+            raise BatchLabelError("label_not_effective", index)
+        results.append({"uid": item["uid"], "action": action, "priority": priority,
+                        "changed": index in changed})
+    return results
+
+
 def get_labels(conn, *, with_events: bool = False) -> dict[str, dict]:
     rows = {r["uid"]: dict(r) for r in conn.execute("SELECT * FROM labels")}
     if with_events:

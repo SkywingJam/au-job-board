@@ -50,6 +50,7 @@ Never overwrite an existing configuration. Point commands at it with an explicit
 | `jobspy.indeed`, `jobspy.linkedin` | Enable flag, location and number of results. LinkedIn also has `fetch_description`. |
 | `report` | Number of top jobs and the output directory. |
 | `panel` | Host, port and page size. |
+| `agent_api` | Snapshot budgets and `allow_label_writes`, which defaults to false. Enabling it permits authenticated batches of progress/star updates; see [agent-api.md](agent-api.md#optional-batch-label-write). |
 | `filtering` | Must be `mode: legacy`. See [eligibility-profiles.md](eligibility-profiles.md). |
 | `legacy_rule_profile` | Which existing hard-filter rules run. See [legacy-rule-profiles.md](legacy-rule-profiles.md). |
 | `eligibility` | A read-only capability snapshot for the `eligibility-profile` command. It does not affect filtering. |

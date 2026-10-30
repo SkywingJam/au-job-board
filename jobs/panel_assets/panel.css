@@ -84,6 +84,24 @@ header.main-header{flex:0 0 auto;z-index:20;background:var(--surface);border-bot
 .mobile-view span{font-family:var(--mono);font-size:var(--fs-sm);color:var(--ink3);margin-left:4px}
 
 .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 20px;border-top:1px solid var(--line-soft)}
+/* 搜索筛选行与多选操作栏叠在同一格：有选择时只切可见性，筛选行的 DOM 与值原样保留 */
+.toolzone{display:grid}
+.toolzone>.toolbar,.toolzone>.selbar{grid-area:1/1}
+/* 平时脱离文档流，不撑高这一格；选择开始时才回到流内（见 body.selecting .selbar） */
+.selbar{position:absolute;left:0;right:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 20px;min-width:0;
+ background:var(--accent-tint);border-top:1px solid var(--accent-line);color:var(--accent-ink)}
+.selbar-count{order:1;font-size:var(--fs-md);font-weight:700;white-space:nowrap}
+.selpick{order:2;max-width:100%}
+.selmark{display:inline-flex;align-items:center;justify-content:space-between;gap:10px}
+.selbtn{min-height:36px;padding:0 14px;border:1px solid var(--accent-line);border-radius:var(--r-ctl);background:var(--surface);
+ color:var(--accent-ink);font-size:var(--fs-sm);font-weight:600;cursor:pointer;white-space:nowrap}
+@media (hover:hover){.selbtn:hover{border-color:var(--accent)}}
+.selstar{order:3}
+.selcancel{order:4;margin-left:auto;background:transparent;border-color:transparent}
+.selbar-msg{order:5;flex:1 1 100%;font-size:var(--fs-sm);line-height:1.4;overflow-wrap:anywhere}
+.selbar-msg.err{color:var(--bad-ink);font-weight:600}
+.selbtn:disabled{opacity:.5;cursor:default}
+.selbar.busy .selbtn:disabled{cursor:progress}
 .search{display:flex;align-items:center;gap:8px;flex:1 1 300px;max-width:440px;min-height:36px;padding:0 10px;
  border:1px solid var(--line3);border-radius:var(--r-ctl);background:var(--surface);color:var(--ink3)}
 .search:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-tint)}
@@ -181,14 +199,41 @@ main{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:14px 
 body.resizing{cursor:col-resize}
 body.resizing *{user-select:none!important}
 /* 两栏各自滚动。min-height:0 是关键 —— 没有它 overflow:auto 失效 */
-.list{overflow-y:auto;min-height:0;padding-bottom:16px;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-box);padding:12px 14px;cursor:pointer;flex:0 0 auto;scroll-margin-block:56px}
+/* 给选中外描边及首张卡片的悬停上移留出绘制空间，避免滚动容器裁切。 */
+.list{overflow-y:auto;min-height:0;padding:2px 2px 16px;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px}
+.card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-box);padding:12px 14px;cursor:pointer;flex:0 0 auto;scroll-margin-block:56px}
+body.selecting .card{padding-left:46px}
 .card:hover{border-color:var(--line3)}
 .card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .card.sel:focus-visible{outline:none}
+.card:focus-visible:not(.sel){outline-offset:-2px}
 .card.hidden{display:none}
+/* ---- 多选 -----------------------------------------------------------------
+   圆框只在多选模式里出现（body.selecting）：平时 visibility:hidden，不可见、不可点、不在
+   Tab 顺序里，卡片也不留左侧空间。真按钮，44px 命中区，画出来的圆是 20px；对勾是同一
+   20px 方框内的 SVG（24 格坐标里路径中心就在 12,12），与圆同心。选中 = 实心 accent 圆
+   + 对勾，整张卡片着底色。.msel 是“被多选”，.sel 是“当前打开的 JD”（描边 + 外圈）：
+   两者各有各的视觉，同时存在时叠加。 */
+.card-check{position:absolute;left:0;top:0;width:44px;height:44px;margin:0;padding:0;border:0;border-radius:var(--r-box);
+ background:transparent;cursor:pointer;-webkit-tap-highlight-color:transparent;
+ visibility:hidden;opacity:0;transform:scale(.7);pointer-events:none}
+body.selecting .card-check{visibility:visible;opacity:1;transform:none;pointer-events:auto}
+.card-check::before{content:"";position:absolute;left:12px;top:12px;width:20px;height:20px;box-sizing:border-box;
+ border-radius:50%;border:1.5px solid var(--line3);background:var(--surface)}
+.card-tick{position:absolute;left:12px;top:12px;width:20px;height:20px;display:block;pointer-events:none;
+ fill:none;stroke:var(--on-fill);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;transform:scale(.5);opacity:0}
+.card-check[aria-checked="true"]::before{background:var(--accent);border-color:var(--accent)}
+.card-check[aria-checked="true"] .card-tick{transform:none;opacity:1}
+.card-check:focus-visible{outline:none}
+.card-check:focus-visible::before{outline:2px solid var(--accent);outline-offset:2px}
+@media (hover:hover){.card-check:hover::before{border-color:var(--accent)}}
+.card.msel{background:var(--accent-tint);border-color:var(--accent)}
+.card.msel.done{opacity:.85}
+body.selecting.sel-busy .card-check{cursor:progress;opacity:.6}
+/* 触屏：长按用于多选，不要让系统弹出文字选择/拷贝菜单 */
+@media (pointer:coarse){.card{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}}
 /* 推荐视图里，本次会话（since 之后）标过的卡片仍留在列表中 —— 那是保证
-   翻页不跳条目的前提（见 _unlabelled_at）。变灰表示「这条已经处理过了」。 */
+   翻页不跳条目的前提（见 _unlabelled_at）。变灰表示已投或跳过，想投保持正常亮度。 */
 .card.done{opacity:.55}
 .card-top{display:flex;gap:10px;align-items:flex-start}
 .t{flex:1 1 auto;min-width:0;font-size:var(--fs-md);font-weight:600;margin:0;line-height:1.35}
@@ -253,8 +298,12 @@ a.apply{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0
 .d-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .copy-btn{min-height:40px;font-size:var(--fs-sm);font-weight:600;color:var(--ink);white-space:nowrap}
 .copy-btn.copied{color:var(--good-ink);border-color:currentColor}
-body.portrait .d-head{gap:10px}
-body.portrait .copy-btn{min-height:44px}
+body.portrait .d-head{gap:12px}
+body.portrait .d-title{flex:1 1 100%}
+body.portrait .detail h2{overflow-wrap:anywhere}
+body.portrait .d-actions{flex:1 1 100%}
+body.portrait .copy-btn{flex:1 1 0;min-width:0;min-height:44px;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;
+ background:var(--surface2)}
 .modal.copy-modal{align-items:center}
 .copy-modal .dialog{max-width:640px}
 .copy-modal .dialog-body{gap:12px}
@@ -373,9 +422,9 @@ body.portrait .copy-btn{min-height:44px}
 
 /* ---- 汉堡菜单与底部抽屉（只在竖屏出现）---------------------------------- */
 .drawer{position:fixed;inset:0;z-index:250;display:flex}
-.drawer-panel{width:min(304px,86vw);height:100%;background:var(--surface);box-shadow:8px 0 32px var(--shadow);
+.drawer-panel{position:relative;z-index:1;width:min(304px,86vw);height:100%;background:var(--surface);box-shadow:8px 0 32px var(--shadow);
  display:flex;flex-direction:column;overflow-y:auto;padding-bottom:env(safe-area-inset-bottom)}
-.drawer .scrim{flex:1 1 auto;border:0;background:var(--scrim);cursor:pointer}
+.drawer .scrim{position:absolute;inset:0;border:0;padding:0;background:var(--scrim);cursor:pointer}
 .drawer-head{display:flex;align-items:center;gap:8px;min-height:60px;padding:0 8px 0 18px;border-bottom:1px solid var(--line)}
 .drawer-head b{flex:1 1 auto;font-size:var(--fs-xl)}
 .drawer-head .iconbtn{border:0;width:44px;height:44px}
@@ -414,6 +463,18 @@ body.portrait .topbar h1,body.portrait .tabs,body.portrait .top-actions{display:
 body.portrait .menu-btn{display:inline-flex;border:0;width:44px;height:44px}
 body.portrait .mobile-view{display:inline}
 body.portrait .toolbar{padding:4px 14px 10px;border-top:0}
+body.portrait .selbar{padding:6px 14px 10px;gap:0 6px;border-top:0}
+body.portrait .selbtn{min-height:44px;padding:0 12px}
+body.portrait .selbar-count{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+body.portrait .selcancel{order:2;margin-left:0;flex:0 0 auto}
+/* 第一行数量与取消；第二行“标记为…”下拉占剩余空间，星标保留自然宽度。 */
+body.portrait .selbar::after{content:"";order:3;flex:1 0 100%;height:0}
+body.portrait .selpick{order:4;flex:1 1 0;min-width:0;margin-top:6px}
+body.portrait .selmark{width:100%;padding:0 10px}
+body.portrait .selpick .choiceopt{min-height:44px}
+body.portrait .selpick .choicepanel{width:100%;max-width:none}
+body.portrait .selstar{order:5;flex:0 0 auto;padding:0 6px;margin-top:6px}
+body.portrait .selbar-msg{margin-top:6px}
 body.portrait .search{flex:1 1 100%;max-width:none;min-height:44px}
 body.portrait .search input{font-size:16px}
 body.portrait #primary-filters,body.portrait #tail-filters,body.portrait .more-btn,body.portrait a.clear{display:none}
@@ -519,7 +580,8 @@ body.settings{background:var(--paper)}
  grid-template-rows:minmax(0,1fr);gap:28px;align-items:stretch;overflow:hidden}
 .set-nav{display:flex;flex-direction:column;gap:4px;overflow-y:auto;padding-bottom:24px}
 .set-nav-item{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:var(--r-ctl);text-decoration:none;color:var(--ink2);font-size:var(--fs-md)}
-.set-nav-item.on{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 0 0 1px var(--line)}
+/* Draw selected edges inside the control, clear of the settings scroll clips. */
+.set-nav-item.on{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--line)}
 /* 右栏是 flex 列但不滚：标题、说明、新增条固定，只让下面的列表滚。 */
 .set-pane{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:0 6px 20px 0}
 .set-pane-scroll{overflow-y:auto}
@@ -564,7 +626,8 @@ body.settings{background:var(--paper)}
 .opts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .opt{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--line);border-radius:var(--r-box);
  cursor:pointer;background:var(--surface);text-align:left}
-.opt.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.opt.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.set-nav-item:focus-visible,.opt:focus-visible{outline-offset:-3px}
 .opt b{display:block}
 .opt small{display:block;font-size:var(--fs-sm);color:var(--ink2)}
 .radio{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--ink4);margin-top:2px;flex:0 0 auto}
@@ -666,9 +729,11 @@ a.apply,.achip button,.skillopt,.note-item,.dchip,.danger-btn,.search,.note inpu
 
 /* 卡片：悬停轻抬，选中描边过渡；首屏前 12 张依次淡入（只用 backwards，
    动画结束后交还给原样式，所以「已处理」卡片的半透明不会被覆盖） */
-.card{transition:border-color var(--t) var(--ease),box-shadow var(--t) var(--ease),transform var(--t) var(--ease),opacity var(--t-slow) var(--ease)}
+.card{transition:border-color var(--t) var(--ease),box-shadow var(--t) var(--ease),transform var(--t) var(--ease),opacity var(--t-slow) var(--ease),background-color var(--t) var(--ease)}
 @media (hover:hover){.card:hover{transform:translateY(-1px);box-shadow:0 4px 14px var(--shadow)}}
 .list.keyboard-nav .card:hover:not(.sel){border-color:var(--line);transform:none;box-shadow:none}
+/* 立即撤掉旧JD描边，保留多选底色与非导航过渡。 */
+.list.keyboard-nav .card:not(.sel):not(.msel){transition:transform var(--t) var(--ease),opacity var(--t-slow) var(--ease),background-color var(--t) var(--ease)}
 .card:active{transform:translateY(0) scale(.995)}
 .list>.card{animation:rise-in var(--t-slow) var(--ease) backwards}
 .list>.card:nth-child(2){animation-delay:20ms}.list>.card:nth-child(3){animation-delay:40ms}
@@ -696,8 +761,12 @@ a.apply,.achip button,.skillopt,.note-item,.dchip,.danger-btn,.search,.note inpu
 .skeleton .sk-box{height:150px;border-radius:var(--r-box);margin:6px 0}.skeleton .sk-l.short{width:60%}
 
 /* 展开 / 收起的面板 */
-.more-panel.entering,.skill-edit.entering{animation:drop-in var(--t) var(--ease)}
-.more-panel.leaving,.skill-edit.leaving{animation:drop-out var(--t-fast) var(--ease-in) forwards}
+.more-panel.entering{animation:drop-in var(--t) var(--ease)}
+.more-panel.leaving{animation:drop-out var(--t-fast) var(--ease-in) forwards}
+/* 技能编辑框里有 position:fixed 的候选菜单。祖先在 transform 动画期间会成为 fixed
+   的包含块，菜单会按它的原点定位、动画结束后再跳回，所以这里只做透明度动画。 */
+.skill-edit.entering{animation:fade-in var(--t) var(--ease)}
+.skill-edit.leaving{animation:fade-out var(--t-fast) var(--ease-in) forwards}
 .skillpanel.open,.choicepanel.open,.geo-suggest-panel.open{animation:pop-in var(--t-fast) var(--ease);transform-origin:top left}
 .note-menu.open{animation:fade-in var(--t-fast) var(--ease)}
 .achip{animation:pop-in var(--t) var(--ease) backwards}
@@ -739,11 +808,29 @@ body.portrait .detail.swap>*{animation:none}
  transition:background-color .35s var(--ease),color .35s var(--ease),border-color .35s var(--ease),
   fill .35s var(--ease),stroke .35s var(--ease)!important}
 
+/* 多选：先后切换而不是叠着淡入淡出——离开的一方 90ms 内淡出，到来的一方随后淡入
+   （操作栏另带一点自上而下的位移）。只动 opacity / transform；visibility 与 opacity 同步延后，
+   保证隐藏的一方不可聚焦，也不会在淡出期间叠影。 */
+.toolbar{transition:opacity var(--t) var(--ease) 90ms,visibility 0s linear 90ms}
+.selbar{opacity:0;visibility:hidden;transform:translateY(-6px);
+ transition:opacity 90ms var(--ease-in),transform 90ms var(--ease-in),visibility 0s linear 90ms}
+body.selecting .toolbar{opacity:0;visibility:hidden;transition:opacity 90ms var(--ease-in),visibility 0s linear 90ms}
+body.selecting .selbar{position:relative;opacity:1;visibility:visible;transform:none;
+ transition:opacity var(--t) var(--ease) 90ms,transform var(--t-slow) var(--ease) 90ms,visibility 0s linear 90ms}
+.selbtn{transition:background-color var(--t) var(--ease),border-color var(--t) var(--ease),opacity var(--t) var(--ease),
+ transform var(--t-fast) var(--ease)}
+.selbtn:active{transform:scale(.96)}
+.card-check{transition:opacity var(--t-fast) var(--ease),transform var(--t) var(--ease),visibility 0s linear var(--t)}
+body.selecting .card-check{transition-delay:0s}
+.card-check::before{transition:background-color var(--t) var(--ease),border-color var(--t) var(--ease)}
+.card-tick{transition:transform var(--t-slow) var(--ease),opacity var(--t-fast) var(--ease)}
+
 /* 尊重系统「减少动态效果」：保留状态变化，去掉位移与过渡 */
 @media (prefers-reduced-motion:reduce){
  *,*::before,*::after{animation-duration:.001ms!important;animation-delay:0s!important;
   animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
  .card:hover,.dchip:hover{transform:none}
+ .toolbar,.selbar{transition-delay:0s!important}
 }
 
 /* Fetch configuration and manual updates share the existing quiet settings UI. */
@@ -921,9 +1008,10 @@ body.portrait .more-panel .skillpick>button.ctl .v{font-size:16px}   /* 与旁�
 .geo-control .k{flex:0 0 auto;white-space:nowrap}
 .geo-control input{width:20ch;min-width:20ch;max-width:none;flex:0 0 auto;border:0;outline:none;background:transparent;color:var(--ink);
  font:inherit;min-height:34px}
-.geo-control .geo-apply{flex-shrink:0;min-height:36px;padding:0 12px;margin-left:-1px;border-top-left-radius:0;
+.geo-control .geo-apply{flex-shrink:0;min-height:36px;padding:0 12px;border-top-left-radius:0;
  border-bottom-left-radius:0;color:var(--accent-ink)}
-.geo-control .ctl:focus-within{outline:2px solid var(--accent);outline-offset:-1px;position:relative;z-index:1}
+.geo-control .ctl{border-right-width:0}
+.geo-control .ctl:focus-within,.geo-control .geo-apply:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .geo-control.invalid .ctl{border-color:var(--bad-line);background:var(--bad-tint)}
 .geo-empty b{overflow-wrap:anywhere}
 .geo-divider{border:0;border-top:1px solid var(--line2);margin:14px 2px}

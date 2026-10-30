@@ -145,6 +145,85 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('access-control-allow-origin', {k.lower():v for k,v in headers.items()})
         self.assertEqual(self.request(body=b'x'*(65536+1))[0], 413)
 
+    async def connect(self, service):
+        http = httpx2.AsyncClient(headers={'Authorization': 'Bearer '+TOKEN})
+        self.addAsyncCleanup(http.aclose)
+        return Client(streamable_http_client(service.url, http_client=http), mode='legacy')
+
+    async def test_default_http_exposes_only_the_four_read_tools(self):
+        before = self.fixture.human_state()
+        service = self.start()
+        async with await self.connect(service) as client:
+            self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
+            self.assertEqual({t.name for t in (await client.list_tools()).tools},
+                             {'list_jobs', 'get_job', 'list_batches', 'get_batch'})
+            result = await client.call_tool('batch_label_jobs', {'items': [
+                {'uid': 'synthetic:c', 'action': 'saved'}]})
+            self.assertTrue(result.is_error)
+        self.assertFalse(service.api.api.allow_label_writes)
+        self.assertEqual(self.fixture.human_state(), before)
+
+    async def test_configured_label_writes_register_and_persist_through_http_mcp(self):
+        self.config['agent_api'] = {'allow_label_writes': True}
+        service = self.start()
+        self.assertTrue(service.api.api.allow_label_writes)
+        async with await self.connect(service) as client:
+            self.assertEqual(client.server_info.name, 'AU Job Board')
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            self.assertEqual(set(tools), {'list_jobs', 'get_job', 'list_batches', 'get_batch',
+                                          'batch_label_jobs'})
+            for name, tool in tools.items():
+                note = tool.annotations
+                expected = (False, True, True, False) if name == 'batch_label_jobs' else (True, False, True, False)
+                self.assertEqual((note.read_only_hint, note.destructive_hint,
+                                  note.idempotent_hint, note.open_world_hint), expected, name)
+            self.assertIsInstance(tools['batch_label_jobs'].output_schema, dict)
+            result = await client.call_tool('batch_label_jobs', {'items': [
+                {'uid': 'synthetic:b', 'action': 'applied', 'priority': True},
+                {'uid': 'synthetic:c', 'action': 'skipped'}]})
+            self.assertFalse(result.is_error, result.content)
+            text = result.content[0].text
+            self.assertEqual(json.loads(text), result.structured_content)
+            self.assertEqual(text, json.dumps(result.structured_content, ensure_ascii=False,
+                                              separators=(',', ':'), allow_nan=False))
+            self.assertEqual((result.structured_content['updated'], result.structured_content['unchanged']), (2, 0))
+            bad = await client.call_tool('batch_label_jobs', {'items': [
+                {'uid': 'synthetic:d', 'action': 'saved'}, {'uid': 'synthetic:missing', 'action': 'saved'}]})
+            self.assertTrue(bad.is_error)
+            self.assertNotIn(TOKEN, str(bad))
+        with closing(sqlite3.connect(self.fixture.path)) as conn:
+            rows = {r[0]: r[1:] for r in conn.execute('SELECT uid,action,priority FROM labels')}
+        self.assertEqual(rows['synthetic:b'], ('applied', 1))
+        self.assertEqual(rows['synthetic:c'], ('skipped', None))
+        self.assertNotIn('synthetic:d', rows)
+
+    async def test_unauthenticated_or_foreign_write_calls_never_reach_the_database(self):
+        self.config['agent_api'] = {'allow_label_writes': True}
+        self.start()
+        before = self.fixture.human_state()
+        call = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {
+            'name': 'batch_label_jobs', 'arguments': {'items': [
+                {'uid': 'synthetic:c', 'action': 'applied'}]}}}).encode()
+        accept = {'Accept': 'application/json, text/event-stream'}
+        for headers, status in [({'Authorization': ''}, 401), ({'Authorization': 'Bearer wrong'}, 401),
+                                ({'Host': 'evil.invalid'}, 403), ({'Origin': 'http://evil.invalid'}, 403)]:
+            self.assertEqual(self.request(headers={**accept, **headers}, body=call)[0], status)
+        self.assertEqual(self.request(headers=accept, body=call + b' '*(65536))[0], 413)
+        self.assertEqual(self.fixture.human_state(), before)
+        self.assertEqual(self.request(headers=accept, body=call)[0], 200)
+        self.assertNotEqual(self.fixture.human_state(), before)
+
+    async def test_non_boolean_write_setting_fails_startup_and_releases_ports(self):
+        for value in ('true', 1, None):
+            self.config['agent_api'] = {'allow_label_writes': value}
+            with self.assertRaises(ValueError):
+                self.start()
+            self.assertIsNone(self.service)
+            with socket.socket() as probe:   # the derived port was released again
+                probe.bind(('127.0.0.1', self.panel.server_port+1))
+        self.config['agent_api'] = {'allow_label_writes': False}
+        self.assertFalse(self.start().api.api.allow_label_writes)
+
     async def test_container_listener_keeps_loopback_authority_and_auth(self):
         self.container_panel()
         with patch.dict(os.environ, {'JOBS_CONTAINER': '0'}):

@@ -1,14 +1,16 @@
-# Read-only HTTP access for an external agent
+# HTTP access for an external agent (read-only by default)
 
 This is a separate, opt-in service. It reads the same source records, human
 states, geographic classifications, filters and sorting used by the panel.
-It does not include an LLM, schedule reports, accept labels, fetch jobs or edit
-configuration. The panel remains a separate service with its existing exposure
+It does not include an LLM, schedule reports, fetch jobs or edit configuration,
+and by default it accepts no labels. An [optional batch label write](#optional-batch-label-write)
+for application progress and stars exists but is disabled until explicitly
+configured. The panel remains a separate service with its existing exposure
 policy; this token does not add authentication to the panel.
 
-An optional [read-only MCP](mcp.md) exposes these reads to
-stdio or Streamable HTTP MCP clients through a thin adapter, using the same
-read-only API and shared snapshot settings.
+An optional [MCP](mcp.md) exposes these reads (and, only when enabled, the
+batch label write) to stdio or Streamable HTTP MCP clients through a thin
+adapter, using the same API and shared snapshot settings.
 
 Docker users can start the optional `api` Compose profile at
 `http://127.0.0.1:8092/api/v1/jobs`; follow the
@@ -20,7 +22,7 @@ persistent paths and image selection. It is separate from MCP on port 8091.
 Use the normal application to upgrade an installation to schema 3 first, under
 your usual backup/maintenance procedure. Schema 3 is required for exact fetch
 membership; it does not require location tables. The API opens an existing database
-with SQLite `mode=ro` and `PRAGMA query_only=ON`; it refuses missing or older
+for reads with SQLite `mode=ro` and `PRAGMA query_only=ON`; it refuses missing or older
 schemas and never initializes, migrates, repairs runtime files or starts an
 update manager. Back up consistently with SQLite before upgrading; an older
 program must use a separate matching snapshot, never the upgraded live DB.
@@ -43,8 +45,9 @@ Source launches bind only `127.0.0.1`. Docker explicitly uses `--host 0.0.0.0`
 with `JOBS_CONTAINER=1` inside its namespace and publishes only host loopback;
 Host validation still requires `127.0.0.1:<listener port>`. Every mounted route requires
 `Authorization: Bearer <token>`. It rejects foreign Host headers and browser
-Origin headers, sends no CORS permission, and mounts no write/config/update
-routes. Tokens, query strings and job contents are not logged. The token file
+Origin headers, sends no CORS permission, and mounts no config/update routes;
+its one write route is refused unless label writes are enabled. Tokens, query
+strings, request bodies and job contents are not logged. The token file
 must be readable only by its owner. Restart to rotate it; existing in-memory
 snapshots do not survive a restart.
 
@@ -86,6 +89,17 @@ values fail explicitly. Location search supports states, eight capitals,
 supported postcodes and locality names, including ambiguous names such as
 Carlton; see [location data](location-data.md). It is not accepted for the
 `recommend` view.
+
+`ineligible_last=1` is the same optional ordering as the panel's **Ineligible
+last** control. It is valid for `all`, `labelled` and `new` (the `legacy_new`
+scope) and rejected for `recommend` and `excluded`; only the value `1` is
+accepted. Omit it to keep the previous order exactly. It filters nothing and
+changes no score or rule: the whole result is first divided by effective
+qualification (the machine rule result, replaced by a human eligible/ineligible
+correction; unknown never counts as ineligible), then each part keeps the
+location blocks and the chosen score/date order, and only then is paged. A
+snapshot keeps its order after later corrections; a new query uses the new
+qualification.
 
 `scope` determines the source candidate pool **before** display grouping:
 
@@ -153,6 +167,119 @@ distinguishable. `panel_url` opens the exact current source in the normal panel.
 The panel is live, not a frozen snapshot; its left list/order can differ. Never
 rebuild an Indeed/source URL by guessing from a UID.
 
+## Optional batch label write
+
+Off by default: this service only reads unless the application configuration
+contains the literal boolean
+
+```yaml
+agent_api:
+  allow_label_writes: true
+```
+
+Any other value (`"true"`, `1`, `null`) fails startup. Restart the standalone
+API, or the panel that owns MCP, after changing it. With the default, an
+authenticated `POST /api/v1/labels/batch` is refused with `403
+label_writes_disabled` before any database connection is opened. **Enabling it
+turns every holder of this Bearer token into someone who can change application
+progress and stars**; there are no separate read/write tokens or roles, and the
+panel's own access policy is unchanged. Rotate the token as described above if
+it was shared more widely than intended. Source installations need the
+database already upgraded to the current schema; the writer opens that existing
+file with SQLite `mode=rw` only for this route, never creates a database or
+directory, never migrates it, never changes its journal mode, and refuses a
+schema that is older or newer than this program. All reads keep using
+`mode=ro` / `query_only`.
+
+```http
+POST /api/v1/labels/batch
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{"items":[
+  {"uid":"seek:111","action":"saved","priority":true},
+  {"uid":"seek:222","action":"applied"},
+  {"uid":"seek:333","action":null},
+  {"uid":"seek:444","priority":false}
+]}
+```
+
+The response (`Cache-Control: no-store`, no job text or notes):
+
+```json
+{"api_version":1,"updated":3,"unchanged":1,"items":[
+  {"uid":"seek:111","action":"saved","priority":true,"changed":true,"human_scope":"group"},
+  {"uid":"seek:222","action":"applied","priority":false,"changed":true,"human_scope":"group"},
+  {"uid":"seek:333","action":null,"priority":false,"changed":true,"human_scope":"group"},
+  {"uid":"seek:444","action":null,"priority":false,"changed":false,"human_scope":"group"}]}
+```
+
+Request rules, all validated before anything is written:
+
+- Exactly one top-level key, `items`: 1 to 100 objects. A body is at most
+  32 KiB (413 beyond that), `Content-Type: application/json` (UTF-8) with a
+  `Content-Length`; chunked bodies, duplicate JSON keys and `NaN` are rejected.
+- Each item has an exact `uid` (1 to 512 characters, an existing source UID;
+  there is no query-based "select all") and at least one of `action` and
+  `priority`. Nothing else is accepted, so notes, eligibility, interest and
+  vocabulary cannot be written here.
+- `action` is `saved` (shown as To apply), `applied`, `skipped`, or `null` to
+  cancel progress. `priority` must be a real `true`/`false`. **Omitting a field
+  keeps it**; `null` is only meaningful for `action`.
+- A repeated UID, or two UIDs of the same de-duplication group, reject the whole
+  batch, so there is no ambiguous order. An unknown UID, an invalid value or any
+  other failure also rejects the whole batch with nothing written.
+
+Semantics:
+
+- **Group scope.** Human state belongs to the de-duplication group
+  (`human_scope: "group"`, as in reads). Writing any member's UID changes what
+  every member shows, using the same merge as the panel. `priority: false`
+  overrides a star inherited from another member, and `action: null` clears a
+  progress state inherited from another member; both are recorded as explicit
+  edits on the UID you named. Other members' rows are not rewritten.
+- **Absolute and atomic.** The group resolution, reading the old state, every
+  change, its history events and the commit happen in one SQLite
+  `BEGIN IMMEDIATE` transaction: all items apply or none do. A concurrent panel
+  note edit commits before or after the batch, never in between, and is
+  preserved either way. Only `action` and `priority` are written; existing
+  notes, eligibility corrections, interest and their history and legacy
+  ownership are kept.
+- **No-op repeats.** A field already showing the requested effective value
+  (including a value inherited from a group member) is not written: no history
+  event, and no `labeled_at`, `action_at` or `applied_at` refresh. `changed` is
+  false only if nothing for that item changed. A real change to `applied`
+  records `applied_at` with the existing rules; a change away from `applied`
+  clears it. A real group transition back to `applied` records the new time,
+  even if the selected UID still carries an older application superseded by
+  another group member. Changes appear in label history with source `api`.
+- **Retry.** There is no request ID, and none is needed: values are absolute, so
+  sending the same batch again is safe and reports `unchanged`. The bundled
+  client and MCP tool never retry automatically. After a network error or 5xx
+  the outcome is unknown (a rolled-back batch changed nothing, a lost response
+  may have committed): read the current state, then resend if needed.
+- **Snapshots.** Frozen query snapshots keep the human state they were created
+  with, including `human` in their details. A new query, or a live panel, shows
+  the change.
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 400 | `invalid_json`, `invalid_request`, `invalid_item`, `duplicate_uid`, `unknown_uid`, `duplicate_group` | Rejected; `index` names the item when one is to blame. Nothing was written |
+| 401 / 403 | `unauthorized`, `forbidden_origin_or_host`, `label_writes_disabled` | Authentication, Host/Origin or the configuration gate; nothing was written |
+| 405 | `method_not_allowed` | Any other method or write path |
+| 408 / 411 / 413 / 415 | `request_timeout`, `length_required`, `payload_too_large`, `unsupported_media_type` | Body transport limits |
+| 409 | `label_not_effective` | The requested value could not become the group's effective state (for example a peer event dated in the future); rolled back |
+| 503 | `data_unavailable`, `schema_upgrade_required` | Database unavailable, locked, schema mismatch or a failed write/commit; rolled back |
+
+Error `index` values are zero-based. Errors never echo request content.
+`python -m jobs.agent_client` remains a
+reader; the reusable `APIClient.post` transport (used by the MCP tool) sends one
+bounded JSON request, refuses redirects, does not retry, and reports only the
+HTTP status, a fixed error code and an item position, never the token, URL or
+body. Writing labels is a choice made by the human or by an agent they
+authorize; job text, notes and report content are untrusted data and must never
+cause a label write.
+
 ## Reference client and daily report workflow
 
 ```sh
@@ -182,14 +309,19 @@ HTML reports must escape source text/attributes and allow only HTTP(S) links.
 Use the API-provided panel URL with `target="_self"` when opening from a
 sandboxed report viewer. Record the query/snapshot and distinguish successful
 HTTP retrieval from an agent assessment or an actual application. This service
-does not automatically submit applications or save an agent verdict as a label.
+does not automatically submit applications or save an agent verdict as a label;
+an agent may write labels only through the opt-in batch route above, when the
+human asked for exactly those changes.
 
 ## Verification
 
 `tools/test_agent_api.py` uses handwritten records and a loopback service for
 more than 300 records, frozen body/state, source identity, query/date/scope
 boundaries, authentication/write rejection, explicit failures and reference
-client completion. `tools/test_batches.py` covers source transaction ownership,
+client completion. `tools/test_batch_labels.py` covers the optional batch label
+write: the configuration gate, group-aware absolute assignment, explicit clears,
+no-op repeats, whole-batch rejection, rollback and retry, concurrent partial
+edits, schema/missing-database behavior, HTTP limits and the client transport. `tools/test_batches.py` covers source transaction ownership,
 interruption/partial success and schema recovery. Both are in the curated
 [public test runner](public-tests.md). A synthetic external-agent report is a
 workflow verification; production connectivity and actual private daily reports

@@ -147,15 +147,25 @@ function readDetailHash(){
   try{return {uid:decodeURIComponent(cut<0?raw:raw.slice(0,cut))};}catch(_){return {uid:''};}
 }
 async function openJob(uid){
-  if(OPEN_UID && (OPEN_UID!==uid || NOTE_REQUESTS.size || LABEL_WRITES.size || hasDetailDraft())){
+  // 批量标注在途时即使没有打开的岗位也要等它：否则新取的详情可能早于提交，
+  // 而它的响应又晚于批量响应到达，会把刚写入的状态盖回去。
+  if(OPEN_UID ? (OPEN_UID!==uid || NOTE_REQUESTS.size || LABEL_WRITES.size || hasDetailDraft()) : !!SEL_BUSY){
     if(!await allowDetailNavigation()){
-      history.replaceState(null,"",location.pathname+location.search+detailHash(OPEN_UID));
+      if(OPEN_UID)history.replaceState(null,"",location.pathname+location.search+detailHash(OPEN_UID));
       return false;
     }
-    if(UPDATE_PENDING){applyLatestResults(detailHash(uid));return false;}
+    if(UPDATE_PENDING){selClear({keepUpdate:true});applyLatestResults(detailHash(uid));return false;}
   }
+  selClear({keepUpdate:true});                       // 查看新 JD 才退出多选；被门拦下时选择保留
   OPEN_UID=uid;
+  const heldCard=document.activeElement;
   document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.uid===uid));
+  // 在详情请求返回前同步交接焦点，避免旧卡片的键盘环残留；竖屏保持原焦点行为。
+  if(heldCard && heldCard.classList && heldCard.classList.contains('card') && heldCard.dataset.uid!==uid &&
+     !document.body.classList.contains('portrait')){
+    const next=Array.from(document.querySelectorAll('.card')).find(c=>c.dataset.uid===uid);
+    if(next && next.focus) next.focus({preventScroll:true});
+  }
   history.replaceState(null,'',detailHash(uid));
   const pane=document.getElementById('detail');
   const seq=(OPEN_SEQ+=1);
@@ -172,10 +182,20 @@ async function openJob(uid){
   }
   try{
     const params=new URLSearchParams({uid});
-    const r=await fetch('/api/job?'+params);
-    if(!r.ok) throw new Error(await r.text());
-    const d=await r.json();
-    if(seq!==OPEN_SEQ) return;                      // 连点时只认最后一次
+    let d;
+    for(;;){
+      const version=LABEL_VERSIONS.get(uid)||0;
+      const r=await fetch('/api/job?'+params);
+      if(!r.ok) throw new Error(await r.text());
+      d=await r.json();
+      if(seq!==OPEN_SEQ) return;                    // 连点时只认最后一次
+      // 详情可能早于随后发起的标注读取。写入中或版本已变化时，等提交再重取，
+      // 不让旧 HTML / scope label 覆盖已确认的单条或批量状态。
+      const writing=LABEL_WRITES.get(uid);
+      if(writing) await writing;
+      if(seq!==OPEN_SEQ) return;
+      if(!writing && version===(LABEL_VERSIONS.get(uid)||0)) break;
+    }
     clearTimeout(slow);
     pane.innerHTML=d.html;
     const scope=detailScope();
@@ -203,6 +223,7 @@ let OPEN_SEQ=0, OPEN_UID=null;
 const NOTE_REQUESTS=new Set();
 const NOTE_WRITES=new Map();
 const LABEL_WRITES=new Map();
+const LABEL_VERSIONS=new Map();
 function showSkeleton(pane){
   pane.innerHTML='<div class="skeleton" aria-busy="true" aria-label="'+T('js.loading')+'">'
     +'<i class="sk-t"></i><i class="sk-m"></i><i class="sk-chips"></i><i class="sk-box"></i>'
@@ -213,14 +234,16 @@ function swapIn(pane){
   if(REDUCED.matches) return;
   pane.classList.remove('swap'); void pane.offsetWidth; pane.classList.add('swap');
 }
-async function closeDetail(){
+async function closeDetail(expect){
   if(!await allowDetailNavigation()){
     if(OPEN_UID)history.replaceState(null,"",location.pathname+location.search+detailHash(OPEN_UID));
     return;
   }
+  // 手势等保存/确认期间换了岗位（或已被别处关掉）：这次返回只属于当时那条，不关新的。
+  if(expect && (OPEN_UID!==expect.uid || OPEN_SEQ!==expect.seq)) return;
   OPEN_UID=null;
   history.replaceState(null,"",location.pathname+location.search);
-  if(UPDATE_PENDING){applyLatestResults("");return;}
+  if(UPDATE_PENDING && !SEL_MODE){applyLatestResults("");return;}
   OPEN_SEQ+=1; // Ignore pending responses and skeleton timers after closing.
   const pane=document.getElementById('detail');
   pane.classList.remove('label-open');
@@ -242,6 +265,7 @@ async function setLabel(uid,field,value,btn){
   let release;
   const locked=new Promise(resolve=>{release=resolve;});
   LABEL_WRITES.set(uid,locked);
+  LABEL_VERSIONS.set(uid,(LABEL_VERSIONS.get(uid)||0)+1);
   let saved=false;
   try{
     if(NOTE_WRITES.has(uid)) await NOTE_WRITES.get(uid);
@@ -266,9 +290,9 @@ async function setLabel(uid,field,value,btn){
       const on=field==='priority' ? !!chosen : b.dataset.value===chosen;
       b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false');
     });
-    // 只有推荐视图把本次处理过的卡片变淡（与服务端 _card 的 since 口径一致）
+    // 推荐视图仅淡化已投/跳过；改成想投恢复亮度，与服务端 _card 一致
     if(window.__VIEW__==='recommend') document.querySelectorAll('.card[data-uid="'+uid+'"]').forEach(c=>{
-      if(inScope(c,id))c.classList.toggle('done',!!savedLabel.action);
+      if(inScope(c,id))c.classList.toggle('done',['applied','skipped'].includes(savedLabel.action));
     });
     if(field==='eligibility') refreshCorrectionTag(uid,data.qualification,id);
     refreshDot(uid,id);refreshStats();
@@ -385,7 +409,10 @@ function navKeyIgnored(ev){
     if(el.closest && el.closest('[role="separator"],[role="slider"],[role="tablist"],[role="listbox"],[role="menu"],[role="radiogroup"],[role="dialog"]'))return true;
     if(el.closest && el.closest('.choicepick,.skillpick,.geo-control')) return true;
   }
-  // 抽屉、筛选面板和对话浮层开着时按键属于它们
+  return detailOverlayOpen();
+}
+// 抽屉、筛选面板和对话浮层开着时，按键和触摸手势都属于它们
+function detailOverlayOpen(){
   const detail=document.getElementById('detail');
   return shown(document.getElementById('drawer')) || shown(document.getElementById('more-panel'))
     || !!document.querySelector('.choicepanel.open,.skillpanel.open,.geo-suggest-panel.open')
@@ -404,6 +431,386 @@ document.addEventListener('keydown',ev=>{
 document.addEventListener('pointermove',()=>{
   document.querySelector('.list')?.classList.remove('keyboard-nav');
 });
+/* ---- 竖屏：详情内右滑返回 -----------------------------------------------
+   只识别「完成的」单指右滑，然后走与「返回」按钮同一条 closeDetail（保存中等待、
+   未保存确认、失败保护、新结果延后都在它里面）；不跟手移动详情，也不 preventDefault。
+   用被动的 touch 事件：touchend 在浏览器接管滚动后仍会送达，不需要 touch-action 约束，
+   纵向滚动、横向滚动、缩放、长按选字都留给浏览器。桌面鼠标不产生 touch 事件。
+   起手不必在边缘，但左侧 SWIPE.edge 内留给浏览器自己的边缘手势。
+   阈值（CSS px）：右移 ≥ minDx，横向 ≥ ratio 倍纵向，纵向偏移始终 ≤ maxDy，
+   全程 ≤ maxMs；途中左移超过 backMove、详情纵向滚动超过 scroll、出现第二指/选区/
+   缩放、岗位或版面变化，都作废本次识别。 */
+const SWIPE={edge:24,minDx:80,ratio:2,maxDy:48,verticalIntent:16,maxMs:800,backMove:24,scroll:12,clickMs:600};
+const SWIPE_SKIP='a[href],button,input,textarea,select,option,summary,label,[contenteditable],'
+  +'[role="button"],[role="link"],[role="slider"],[role="separator"],[role="textbox"]';
+let SWIPE_TRACK=null, SWIPE_CLICK=null;
+function swipeFieldActive(){
+  const a=document.activeElement;
+  return !!a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || !!a.isContentEditable);
+}
+function swipeReady(){
+  const pane=document.getElementById('detail');
+  return !!(OPEN_UID && pane && shown(pane) && pane.classList.contains('open')
+    && document.body.classList.contains('portrait')
+    && !NAV_GATES && !DETAIL_LEAVING && !UPDATE_APPLYING
+    && !detailOverlayOpen() && !shown(document.getElementById('skill-edit'))
+    && !swipeFieldActive() && !hasTextSelection()
+    && !(window.visualViewport && window.visualViewport.scale>1.01));
+}
+function swipeTargetOk(target,pane){
+  if(!target || !pane.contains(target)) return false;
+  if(target.closest && target.closest(SWIPE_SKIP)) return false;
+  for(let n=target; n && n!==pane; n=n.parentNode){
+    if(n.isContentEditable) return false;
+    if(n.scrollWidth>n.clientWidth+1 && /^(auto|scroll)$/.test(getComputedStyle(n).overflowX)) return false;
+  }
+  return true;
+}
+function swipeAlive(s){ return OPEN_UID===s.uid && OPEN_SEQ===s.seq && swipeReady(); }
+function swipeStart(ev){
+  SWIPE_CLICK=null;                                    // 新触摸的点击不能被上次手势拦住
+  SWIPE_TRACK=null;
+  if(ev.touches.length!==1) return;                      // 多指：缩放等，整次作废
+  const t=ev.touches[0], pane=document.getElementById('detail');
+  if(t.clientX<SWIPE.edge || !swipeReady() || !swipeTargetOk(ev.target,pane)) return;
+  SWIPE_TRACK={x:t.clientX,y:t.clientY,at:ev.timeStamp,uid:OPEN_UID,seq:OPEN_SEQ,top:pane.scrollTop};
+}
+function swipeMove(ev){
+  const s=SWIPE_TRACK; if(!s) return;
+  if(ev.touches.length!==1 || !swipeAlive(s)){ SWIPE_TRACK=null; return; }
+  const t=ev.touches[0], pane=document.getElementById('detail');
+  const dx=t.clientX-s.x, dy=Math.abs(t.clientY-s.y);
+  if(dy>SWIPE.maxDy || dx<-SWIPE.backMove || (dy>=SWIPE.verticalIntent && dy>Math.abs(dx))
+    || Math.abs(pane.scrollTop-s.top)>SWIPE.scroll) SWIPE_TRACK=null;
+}
+function swipeEnd(ev){
+  const s=SWIPE_TRACK; SWIPE_TRACK=null;
+  if(!s || ev.touches.length || !ev.changedTouches.length || !swipeAlive(s)) return;
+  const t=ev.changedTouches[0], dx=t.clientX-s.x, dy=Math.abs(t.clientY-s.y);
+  if(dx<SWIPE.minDx || dy>SWIPE.maxDy || dy*SWIPE.ratio>dx || ev.timeStamp-s.at>SWIPE.maxMs
+    || Math.abs(document.getElementById('detail').scrollTop-s.top)>SWIPE.scroll) return;
+  SWIPE_CLICK={until:ev.timeStamp+SWIPE.clickMs,x:t.clientX,y:t.clientY};
+  closeDetail({uid:s.uid,seq:s.seq});
+}
+const SWIPE_OPT={passive:true,capture:true};
+document.addEventListener('touchstart',swipeStart,SWIPE_OPT);
+document.addEventListener('touchmove',swipeMove,SWIPE_OPT);
+document.addEventListener('touchend',swipeEnd,SWIPE_OPT);
+document.addEventListener('touchcancel',()=>{SWIPE_TRACK=null;},SWIPE_OPT);
+// 只拦同次手势落点的一个兼容 click；键盘、鼠标、新触摸点击照常处理
+document.addEventListener('click',ev=>{
+  const s=SWIPE_CLICK; if(!s) return;
+  if(ev.timeStamp>=s.until){ SWIPE_CLICK=null; return; }
+  if(ev.detail===0 || ev.button!==0 || (ev.pointerType && ev.pointerType!=='touch')
+    || (ev.sourceCapabilities && !ev.sourceCapabilities.firesTouchEvents)
+    || Math.abs(ev.clientX-s.x)>24 || Math.abs(ev.clientY-s.y)>24) return;
+  SWIPE_CLICK=null;
+  ev.preventDefault(); ev.stopPropagation();
+},true);
+/* ---- 卡片多选与批量标注 -------------------------------------------------
+   多选“模式”(SEL_MODE) 与所选集合 SEL 分开：模式里可以暂时一张都没选。
+   进入：电脑 Cmd/Ctrl+左键点卡片（键盘：卡片上 Cmd/Ctrl+Enter）；手机长按卡片（约 500ms）。
+   平时看不到圆框；进入模式后每张卡片左侧出现圆框（真按钮，可直接点），搜索筛选行被
+   操作栏取代（CSS 叠在同一格里切换，筛选行的 DOM 与草稿值不动，取消即恢复）。
+   两套退出规则按当前布局区分：
+     竖屏（body.portrait，手机）——普通点卡片或圆框都是切换选中，不打开 JD；空白、滚动、
+       Esc、菜单等都不退出，选到 0 项也留在模式，只有“取消”退出。
+     宽屏 —— 保持原规则：点空白/Esc/其他控件退出，普通点卡片查看 JD 并退出，最后一项
+       取消也退出。宽屏里不会留下 0 项模式（缩放到宽屏时 0 项模式立即结束）。
+   操作：“标记为…”下拉（想投 / 已投 / 跳过）和“设为星标”都是对所选卡片的“绝对赋值”，一次 POST
+   /api/labels/batch（服务端单事务，全成或全败）；成功后选择保留、卡片不移除不重排，
+   只更新标注与统计。失败不写任何一项，选择保留，可重试。
+   退出（宽屏）：取消、Esc、最后一项被取消、点空白或其他控件、查看新 JD、离开页面。
+     放行后才退出的两类（被保存门/草稿确认拦下时选择保留）：普通点卡片（openJob）、
+     普通点导航链接（页面跳转）。批量栏内部、圆框、修饰键点选、长按切换不退出；
+     滚动本身不退出。竖屏只有取消和离开页面。批量写入在途时登记进 LABEL_WRITES（按所选 uid），所以保存门、
+     beforeunload、待应用的新结果都与单条标注同口径；退出选择不会撤销已发出的请求，
+     迟到的响应只更新标注，绝不重新打开选择。 */
+const SEL_MAX=100;
+const HOLD={ms:500,slop:10,clickMs:800};
+const HOLD_SKIP='a[href],button,input,textarea,select,option,summary,label,[contenteditable]';
+const SEL=new Set();
+let SEL_MODE=false, SEL_BUSY=null, SEL_LAST='', SEL_KEYBOARD=true, HOLD_TRACK=null, HOLD_CLICK=null;
+document.addEventListener('keydown',()=>{SEL_KEYBOARD=true;},true);
+// 手机（竖屏）多选：模式只由“取消”结束
+function selSticky(){ return SEL_MODE && document.body.classList.contains('portrait'); }
+function dataOf(el,key){ return el && el.dataset ? el.dataset[key] : undefined; }
+function selMsg(text,kind){
+  const el=document.getElementById('selbar-msg'); if(!el) return;
+  el.textContent=text||''; el.hidden=!text;
+  el.classList.toggle('err',kind==='err');
+}
+function selBusyUi(on){
+  const bar=document.getElementById('selbar');
+  if(bar){
+    bar.classList.toggle('busy',!!on);
+    if(on) bar.setAttribute('aria-busy','true'); else bar.removeAttribute('aria-busy');
+  }
+  document.body.classList.toggle('sel-busy',!!on);
+  selControls();
+}
+// 写操作（标记为…、星标）：没有选中项或保存中时禁用；取消始终可用
+function selControls(){
+  const off=!SEL.size || !!SEL_BUSY;
+  document.querySelectorAll('#selbar [data-sel-write]').forEach(el=>{ el.disabled=off; });
+}
+function selCard(uid){
+  return Array.from(document.querySelectorAll('.list .card')).find(c=>c.dataset.uid===uid) || null;
+}
+// 鼠标/触摸退出不制造新的卡片焦点环；键盘退出优先回当前JD，否则回列表操作位置。
+function selReleaseFocus(){
+  const ae=document.activeElement;
+  if(!ae || !ae.closest) return;
+  const focusedCard=ae.closest('.card');
+  if(!focusedCard && !ae.closest('#selbar')) return;
+  if(!SEL_KEYBOARD){ if(ae.blur) ae.blur(); return; }
+  const card=selCard(OPEN_UID) || focusedCard || selCard(SEL_LAST);
+  if(card && card.focus) card.focus({preventScroll:true}); else if(ae.blur) ae.blur();
+}
+function selRender(anchorUid){
+  const n=SEL.size, body=document.body, was=body.classList.contains('selecting');
+  document.querySelectorAll('.list .card').forEach(card=>{
+    const on=SEL.has(card.dataset.uid);
+    card.classList.toggle('msel',on);
+    const box=card.querySelector('.card-check');
+    if(box){
+      box.setAttribute('aria-checked',on?'true':'false');
+      box.setAttribute('tabindex',SEL_MODE?'0':'-1');
+      box.setAttribute('aria-hidden',SEL_MODE?'false':'true');
+    }
+  });
+  const count=document.getElementById('selbar-count');
+  if(count) count.textContent=SEL_MODE ? T('sel.count',{n}) : '';
+  selControls();
+  if(was===SEL_MODE) return;
+  // 进入/退出会改变卡片左侧留白（标题可能换行）和竖屏头部高度：补偿滚动，让手指下的卡片留在原位。
+  // 列表原本在顶部时保留顶部，不能把首张卡片滚进新增操作栏下方的裁剪区。
+  const list=document.querySelector('.list');
+  let anchor=null, before=0;
+  const scroll=list ? list.scrollTop : 0;
+  if(list && scroll>0){
+    const top=list.getBoundingClientRect().top, bottom=list.getBoundingClientRect().bottom;
+    const cards=Array.from(list.querySelectorAll('.card')).filter(c=>{ const r=c.getBoundingClientRect(); return r.bottom>top+1 && r.top<bottom; });
+    anchor=cards.find(c=>c.dataset.uid===anchorUid) || cards[0] || null;
+    if(anchor) before=anchor.getBoundingClientRect().top;
+  }
+  body.classList.toggle('selecting',SEL_MODE);
+  if(anchor){ const d=anchor.getBoundingClientRect().top-before; if(d) list.scrollTop+=d; }
+  if(!SEL_MODE){ choicePanelClose(null,false); selReleaseFocus(); }
+}
+// 多选期间推迟的新结果：退出模式、没有打开的 JD 且没有在途写入时再载入
+function selSettled(){
+  if(UPDATE_PENDING && !OPEN_UID && !SEL_MODE) applyLatestResults();
+}
+function selToggle(uid){
+  if(!uid) return;
+  if(SEL_BUSY){ toast(T('sel.busy')); return; }
+  if(SEL.has(uid)) SEL.delete(uid);
+  else{
+    if(SEL.size>=SEL_MAX){ toast(T('sel.limit',{max:SEL_MAX})); return; }
+    SEL.add(uid);
+  }
+  SEL_LAST=uid;
+  // 进入模式；宽屏没有选中项就没有模式，竖屏则留在模式里直到“取消”
+  SEL_MODE = SEL.size>0 || selSticky();
+  selMsg('');
+  selRender(uid);
+  if(!SEL_MODE) selSettled();
+}
+// 显式退出（取消、宽屏的其他交互）：清空选择并结束模式
+function selClear(opts){
+  if(!SEL_MODE && !SEL.size) return false;
+  SEL.clear(); SEL_MODE=false;
+  selMsg('');
+  selRender();
+  if(!(opts && opts.keepUpdate)) selSettled();
+  return true;
+}
+// 视口在宽屏/竖屏间切换：保留有效选择；宽屏不留 0 项模式
+function selLayoutChanged(){
+  if(SEL_MODE && !SEL.size && !document.body.classList.contains('portrait')) selClear();
+}
+function selCancel(){ selClear(); }
+// 单卡标注成功后的就地刷新：卡片标注/星标/统计行、详情里的按钮状态、推荐页的“已处理”淡化
+function selSync(uid){
+  const s=scopeLabel(uid);
+  refreshDot(uid);
+  labelButtons(uid).forEach(b=>{
+    const field=b.dataset.field;
+    if(field!=='action' && field!=='priority') return;
+    const on=field==='priority' ? !!s.priority : b.dataset.value===s.action;
+    b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false');
+  });
+  if(window.__VIEW__==='recommend') document.querySelectorAll('.card[data-uid="'+uid+'"]').forEach(c=>c.classList.toggle('done',['applied','skipped'].includes(s.action)));
+}
+function selFail(message){ return {sel:true,message}; }
+function selFailure(status,data){
+  const code=data && typeof data.error==='string' ? data.error : '';
+  if(code==='unknown_uid') return T('sel.failed_unknown');
+  if(code==='duplicate_group' || code==='duplicate_uid') return T('sel.failed_group');
+  const rejected=['invalid_request','invalid_item','origin_rejected','label_not_effective','write_failed'];
+  return T(rejected.includes(code)?'sel.failed':'sel.unconfirmed');
+}
+async function selApply(kind){
+  if(SEL_BUSY){ toast(T('sel.busy')); return SEL_BUSY; }
+  if(!SEL.size || !['saved','applied','skipped','star'].includes(kind)) return false;
+  const uids=Array.from(SEL), star=kind==='star';
+  const ae=document.activeElement, refocus=ae && ae.closest && ae.closest('#selbar [data-sel-write]');
+  // 所选岗位里已有单条标注在途：不并发写同一条，提示后让用户重试
+  if(uids.some(uid=>LABEL_WRITES.has(uid))){ toast(T('sel.busy')); return false; }
+  const items=uids.map(uid=>star ? {uid,priority:true} : {uid,action:kind});
+  let release;
+  const locked=new Promise(resolve=>{release=resolve;});
+  // 在任何 await 之前登记：重复点击、单条标注、导航、更新信号都立刻看得到
+  SEL_BUSY=locked;
+  uids.forEach(uid=>{
+    LABEL_WRITES.set(uid,locked);
+    LABEL_VERSIONS.set(uid,(LABEL_VERSIONS.get(uid)||0)+1);
+    // 打开着的详情里同一岗位的状态/星标按钮也锁住，与单条标注在途时一样
+    labelButtons(uid).forEach(b=>{b.disabled=true;b.setAttribute('aria-busy','true');});
+  });
+  selBusyUi(true); selMsg(T('sel.saving'));
+  let saved=false;
+  try{
+    await Promise.allSettled(uids.map(uid=>NOTE_WRITES.get(uid)).filter(Boolean));
+    let r, data=null;
+    try{
+      r=await fetch('/api/labels/batch',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({items})});
+    }catch(e){ throw selFail(T('sel.unconfirmed')); }
+    try{ data=await r.json(); }catch(e){ data=null; }
+    if(!r.ok) throw selFail(selFailure(r.status,data));
+    const rows=data && data.ok===true && Array.isArray(data.items) ? data.items : null;
+    // 服务端对每项回传落库后的有效状态；与请求不符就不当成功
+    if(!rows || rows.length!==items.length || rows.some((row,i)=>!row || row.uid!==items[i].uid
+        || (star ? row.priority!==true : row.action!==kind))) throw selFail(T('sel.unconfirmed'));
+    rows.forEach(row=>{
+      adoptScopeLabel(row.uid,'',star ? 'priority' : 'action',star ? row.priority : row.action);
+      selSync(row.uid);
+    });
+    refreshStats();
+    const changed=rows.some(row=>row.changed), n=rows.length;
+    selMsg('');
+    saved=true;
+    toast(star ? T(changed?'sel.star_done':'sel.star_same',{n})
+      : T(changed?'sel.action_done':'sel.action_same',{n,status:T('value.action.'+kind)}));
+  }catch(e){
+    // 只显示我们自己分类过的提示；意外异常一律说“未能确认”，不把内部文本摆给人看
+    const message=e && e.sel ? e.message : T('sel.unconfirmed');
+    selMsg(message,'err');          // 仍在模式时提示留在栏里（持久，可重试）；已退出则下次选择时清掉，绝不重开
+    if(!SEL_MODE) toast(message);   // 栏已收起（在途中被取消）：只能用 toast 告知失败
+  }finally{
+    uids.forEach(uid=>{
+      if(LABEL_WRITES.get(uid)===locked) LABEL_WRITES.delete(uid);
+      labelButtons(uid).forEach(b=>{b.disabled=false;b.removeAttribute('aria-busy');});
+    });
+    SEL_BUSY=null; selBusyUi(false);
+    // 保存中写控件是禁用的：从下拉或星标发起的，结束后把键盘焦点还给它
+    if(refocus && SEL_MODE && SEL.size && !refocus.disabled && document.body.contains(refocus)) refocus.focus({preventScroll:true});
+    release(saved);
+    selSettled();
+  }
+  return saved;
+}
+// “标记为…”下拉（choicePick 转来）：选中一项即对当前所选卡片绝对赋值；没有当前值，同一项可再选（重试同值）
+function selMark(kind){
+  return kind ? selApply(kind) : false;
+}
+/* 手机长按：约 500ms 不动 → 切换这张卡片。起手排除按钮/链接/输入/摘要/标签、多指、
+   覆盖层打开、已有文字选区、保存/导航进行中。手指移动超过 slop、纵向滚动、抬起/取消
+   都放弃；滚动本身不取消已有选择。长按之后浏览器可能补发 click / contextmenu：只吞
+   同一次触摸落点附近的一个（HOLD_CLICK 限时、限位置、限触摸来源），新的触摸、鼠标、
+   键盘点击都不受影响。被动监听，不 preventDefault，不拦截触摸滚动。 */
+function holdCancel(){
+  if(HOLD_TRACK){ clearTimeout(HOLD_TRACK.timer); HOLD_TRACK=null; }
+}
+function holdReady(){
+  return !NAV_GATES && !DETAIL_LEAVING && !UPDATE_APPLYING && !SEL_BUSY && !selSticky()   // 竖屏模式里点一下就是切换
+    && !detailOverlayOpen() && !hasTextSelection();
+}
+function holdStart(ev){
+  SEL_KEYBOARD=false;
+  HOLD_CLICK=null; holdCancel();
+  if(ev.touches.length!==1 || !holdReady()) return;
+  const target=ev.target, uid=dataOf(target && target.closest && target.closest('.card'),'uid');
+  if(!uid || target.closest(HOLD_SKIP)) return;
+  const t=ev.touches[0];
+  HOLD_TRACK={uid,x:t.clientX,y:t.clientY,timer:setTimeout(holdFire,HOLD.ms)};
+}
+function holdMove(ev){
+  const h=HOLD_TRACK; if(!h) return;
+  if(ev.touches.length!==1){ holdCancel(); return; }
+  const t=ev.touches[0];
+  if(Math.abs(t.clientX-h.x)>HOLD.slop || Math.abs(t.clientY-h.y)>HOLD.slop) holdCancel();
+}
+function holdFire(){
+  const h=HOLD_TRACK; if(!h) return;
+  HOLD_TRACK=null;
+  if(!holdReady()) return;
+  HOLD_CLICK={until:Infinity,x:h.x,y:h.y};          // 手指还按着：抬起后才开始计时（按得久的长按照样被吞）
+  const sel=document.getSelection ? document.getSelection() : null;
+  if(sel && sel.removeAllRanges) sel.removeAllRanges();
+  selToggle(h.uid);
+}
+function holdClickGuard(ev){
+  const c=HOLD_CLICK; if(!c) return false;
+  if(Date.now()>=c.until){ HOLD_CLICK=null; return false; }
+  if(ev.detail===0 || ev.button!==0 || (ev.pointerType && ev.pointerType!=='touch')
+    || (ev.sourceCapabilities && !ev.sourceCapabilities.firesTouchEvents)
+    || Math.abs(ev.clientX-c.x)>24 || Math.abs(ev.clientY-c.y)>24) return false;
+  HOLD_CLICK=null;
+  ev.preventDefault(); ev.stopPropagation();
+  return true;
+}
+const HOLD_OPT={passive:true,capture:true};
+document.addEventListener('touchstart',holdStart,HOLD_OPT);
+document.addEventListener('touchmove',holdMove,HOLD_OPT);
+function holdRelease(){
+  holdCancel();
+  if(HOLD_CLICK && HOLD_CLICK.until===Infinity) HOLD_CLICK.until=Date.now()+HOLD.clickMs;
+}
+document.addEventListener('touchend',holdRelease,HOLD_OPT);
+document.addEventListener('touchcancel',holdRelease,HOLD_OPT);
+document.addEventListener('scroll',holdCancel,true);
+document.addEventListener('pointerdown',ev=>{
+  SEL_KEYBOARD=false;
+  if(ev.pointerType==='mouse') HOLD_CLICK=null;
+},true);
+document.addEventListener('contextmenu',ev=>{
+  const uid=dataOf(ev.target && ev.target.closest && ev.target.closest('.card'),'uid');
+  if(!uid) return;
+  const h=HOLD_TRACK, c=HOLD_CLICK;
+  if(h && h.uid===uid){ ev.preventDefault(); holdFire(); return; }   // 系统长按菜单抢先到了
+  if(c && Date.now()<c.until && ev.pointerType!=='mouse') ev.preventDefault();      // 同次长按的菜单
+},true);
+// 点击分流（捕获阶段，先于卡片自己的 onclick）
+document.addEventListener('click',ev=>{
+  // 键盘/辅助技术的 click.detail 为0；鼠标及触摸则保留指针退出语义。
+  if(ev.detail===0) SEL_KEYBOARD=true; else if(ev.detail>0) SEL_KEYBOARD=false;
+  if(holdClickGuard(ev)) return;
+  const t=ev.target; if(!t || !t.closest) return;
+  const boxUid=SEL_MODE ? dataOf(t.closest('.card-check'),'checkUid') : undefined;
+  if(boxUid){ ev.preventDefault(); ev.stopPropagation(); selToggle(boxUid); return; }
+  const cardUid=dataOf(t.closest('.card'),'uid');
+  // 修饰键点卡片：进入/切换；竖屏模式里普通点卡片同样是切换（不打开 JD）
+  if(cardUid && ev.button===0 && !t.closest(HOLD_SKIP) && (selSticky() || ((ev.metaKey || ev.ctrlKey) && !ev.altKey))){
+    ev.preventDefault(); ev.stopPropagation(); selToggle(cardUid); return;
+  }
+  if(!SEL_MODE || selSticky() || t.closest('#selbar,#toast')) return;   // 竖屏：空白和其他控件都不退出
+  if(t.closest('.card')) return;                                  // 普通点卡片：openJob 放行后再退出
+  const link=t.closest('a[href]');
+  if(link && ev.button===0 && !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey
+    && link.target!=='_blank' && String(link.getAttribute('href')||'').charAt(0)!=='#') return;   // 页面跳转：离开即清除
+  selClear();                                                      // 空白或其他控件
+},true);
+document.addEventListener('keydown',ev=>{
+  if(ev.key!=='Escape' || !SEL_MODE || selSticky() || ev.defaultPrevented || imeComposing(ev)) return;
+  if(ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName||'')) return;
+  if(detailOverlayOpen()) return;                                  // 抽屉/覆盖层的 Esc 归它们
+  ev.preventDefault(); selClear();
+});
+window.addEventListener('pagehide',()=>{ holdCancel(); selClear({keepUpdate:true}); });
+window.addEventListener('pageshow',ev=>{ if(ev.persisted) selClear(); });
 /* ---- 竖屏：标注抽屉 -----------------------------------------------------
    竖屏先读正文：「做标记 + 备注」这一块（同一组节点，不复制）变成底部抽屉，
    由底栏「标注 ▴」打开。收起时让抽屉里的焦点失焦 —— 备注照常走 noteBlur →
@@ -573,45 +980,74 @@ function noteClosed(v){
 /* typed=true 表示是「打字」触发的，此时用输入内容过滤；
    点一下只是聚焦时（typed=false）显示**全部**候选 —— 否则已经写了备注的岗位
    一聚焦就只剩「无匹配候选」，等于候选表白做。 */
-/* 下拉菜单定位。**必须用 visualViewport**：iOS 弹键盘时 layout viewport 不变
-   （window.innerHeight 也不变），屏幕下沿已经被键盘盖住；用 innerHeight 算
-   「下方够不够」会以为够，菜单就排到键盘背后 —— 现象正是「闪一下没了 /
-   被上推遮住输入框」。visualViewport 给的是真正可见的那块，按它选上/下，
-   两边都不够时压缩高度，始终不盖住输入框。 */
+/* Use an actual fixed element to measure the origin in the same client-rect
+   coordinates as the input. WebKit can offset fixed coordinates differently
+   while the keyboard pans the visual viewport. No engine-name assumption is
+   needed: both the visible bounds and written top/left use this measurement. */
+let MENU_ORIGIN=null, MENU_TRACK=null, MENU_FRAME=null;
+function menuGeometry(input){
+  if(!MENU_ORIGIN){
+    MENU_ORIGIN=document.createElement('div');
+    MENU_ORIGIN.id='menu-origin';
+    MENU_ORIGIN.setAttribute('aria-hidden','true');
+    MENU_ORIGIN.style.cssText='position:fixed;left:0;top:0;width:0;height:0;margin:0;padding:0;border:0;visibility:hidden;pointer-events:none';
+    document.body.appendChild(MENU_ORIGIN);
+  }
+  const origin=MENU_ORIGIN.getBoundingClientRect();
+  const r=input.getBoundingClientRect(), vv=window.visualViewport;
+  const ox=vv?vv.offsetLeft:0, oy=vv?vv.offsetTop:0;
+  const width=vv?vv.width:window.innerWidth, height=vv?vv.height:window.innerHeight;
+  return {origin,r,width,height,left:origin.left+ox,top:origin.top+oy,
+    signature:[r.left,r.top,r.bottom,r.width,origin.left,origin.top,ox,oy,width,height].join(',')};
+}
+function followMenu(){
+  MENU_FRAME=null;
+  const current=MENU_TRACK;
+  if(!current || current.input.isConnected===false || document.activeElement!==current.input
+      || !current.menu.classList.contains('open')){
+    MENU_TRACK=null;
+    return;
+  }
+  // Keyboard/auto-scroll layout can settle after the last viewport event.
+  // Read geometry while open, but do not write styles when it stays unchanged.
+  if(menuGeometry(current.input).signature!==current.signature){
+    placeMenu(current.input,current.menu,current.opts);
+  }
+  if(MENU_FRAME===null) MENU_FRAME=requestAnimationFrame(followMenu);
+}
 function placeMenu(input,menu,opts){
   opts=opts||{};
   const gap=opts.gap||4;
   const minWidth=opts.minWidth||200;
-  const vv=window.visualViewport;
-  // 统一换算到 **可见视口坐标**。iOS 弹键盘时 fixed 元素按可见视口定位，而
-  // getBoundingClientRect 给的是 layout 坐标，差值就是 offsetTop/offsetLeft。
-  // 页面在顶部时 iOS 只能平移可见视口，差值最大 —— 不换算就会整体上移盖住
-  // 输入框；先手动下滑过之后差值归 0，所以那种情况看着正常。桌面无键盘时
-  // offset 恒为 0，退化成原来的行为。
-  const ox=vv?vv.offsetLeft:0, oy=vv?vv.offsetTop:0;
-  const viewW=vv?vv.width:window.innerWidth;
-  const viewH=vv?vv.height:window.innerHeight;
-  const r=input.getBoundingClientRect();
-  const left=r.left-ox, top=r.top-oy, bottom=r.bottom-oy;
-  menu.style.left=Math.max(4,left)+'px';
-  menu.style.width=Math.min(Math.max(minWidth,r.width),viewW-8)+'px';
-  menu.style.maxHeight='';                 // 恢复 CSS 上限，才能量到真实高度
-  menu.classList.add('open');              // 先显示才能量高度
+  const g=menuGeometry(input), r=g.r;
+  const visLeft=g.left, visTop=g.top, visRight=g.left+g.width, visBottom=g.top+g.height;
+  const width=Math.min(Math.max(minWidth,r.width),Math.max(0,g.width-8));
+  menu.style.minWidth='0';
+  menu.style.left=(Math.max(visLeft+4,Math.min(r.left,visRight-4-width))-g.origin.left)+'px';
+  menu.style.width=width+'px';
+  menu.style.maxHeight='';
+  menu.classList.add('open');
   const h=menu.offsetHeight;
-  const below=viewH-bottom-gap;
-  const above=top-gap;
-  if(h<=below){                            // 下方够：放下面
-    menu.style.top=(bottom+gap)+'px';
-  } else if(h<=above){                     // 上方够：放上面
-    menu.style.top=(top-h-gap)+'px';
-  } else if(below>=above){                 // 两边都不够：挑大的一侧并压缩高度
-    const avail=Math.max(96,below);
+  const below=visBottom-r.bottom-gap;
+  const above=r.top-visTop-gap;
+  let top;
+  if(h<=below){
+    top=r.bottom+gap;
+  } else if(h<=above){
+    top=r.top-h-gap;
+  } else if(below>=above){
+    const avail=Math.max(0,below-gap);
     menu.style.maxHeight=avail+'px';
-    menu.style.top=Math.min(bottom+gap,viewH-avail)+'px';
+    top=r.bottom+gap;
   } else {
-    const avail=Math.max(96,above);
+    const avail=Math.max(0,above-gap);
     menu.style.maxHeight=avail+'px';
-    menu.style.top=Math.max(gap,top-avail-gap)+'px';
+    top=r.top-avail-gap;
+  }
+  menu.style.top=(top-g.origin.top)+'px';
+  MENU_TRACK={input,menu,opts,signature:g.signature};
+  if(MENU_FRAME===null && typeof requestAnimationFrame==='function'){
+    MENU_FRAME=requestAnimationFrame(followMenu);
   }
 }
 function noteRender(input,typed){
@@ -783,6 +1219,7 @@ function fitLayout(){
     placeFilters(true);
     if(shown(document.getElementById('more-panel'))) filterDraftBegin();
     placeUpdate(true);
+    selLayoutChanged();
     return;
   }
   document.body.classList.remove('portrait');
@@ -800,6 +1237,7 @@ function fitLayout(){
   closeDrawer();
   const want=readStoredLeft() ?? Math.min(DEFAULT_LEFT,avail-MIN_RIGHT);
   setLeft(Math.min(Math.max(want,MIN_LEFT),avail-MIN_RIGHT));
+  selLayoutChanged();
 }
 function resetSplit(){ storeLeft(DEFAULT_LEFT); fitLayout(); }
 function startDrag(ev){
@@ -935,6 +1373,11 @@ function choiceToggle(ev,trigger){
 function choicePick(option){
   const picker=option.closest('.choicepick'); if(!picker) return;
   const trigger=picker.querySelector('[data-choice-trigger]');
+  if(dataOf(picker,'selMark')!==undefined){          // 批量“标记为…”：不是筛选条件
+    choicePanelClose(null,picker);
+    selMark(option.dataset.choiceValue||'');
+    return;
+  }
   choiceSetValue(trigger,option.dataset.choiceValue||'');
   choicePanelClose(null,picker);
   filterChanged();
@@ -1280,6 +1723,13 @@ document.addEventListener('scroll',ev=>{
   if(t && menus.some(el=>el===t || el.contains(t))) return;
   syncMenusOnScroll();
 },true);
+// The note input moves while its sheet slides in. Focus can arrive before
+// that movement ends, without a scroll/viewport event at its final position.
+document.addEventListener('transitionend',ev=>{
+  if(ev.target===document.getElementById('label-sheet') && ev.propertyName==='transform'){
+    syncMenusOnScroll();
+  }
+});
 window.addEventListener('resize',()=>{
   skillMenuClose(); noteClose(); skillPanelClose(); choicePanelClose(null,false); geoPanelClose(); fitLayout();
 });
@@ -1292,6 +1742,13 @@ if(window.visualViewport){
 
 /* ---- 卡片键盘可达 ---------------------------------------------------- */
 function cardKeys(ev,uid){
+  SEL_KEYBOARD=true;
+  // 多选圆框是卡片里的真按钮：它自己的回车/空格不能被当成“打开卡片”
+  if(ev.target && ev.target.closest && ev.target.closest('.card-check')) return;
+  // 键盘进入/切换多选（对应 Cmd/Ctrl+点击）；竖屏模式里 Enter/空格也是切换
+  if((ev.key==='Enter' && (ev.metaKey || ev.ctrlKey) && !ev.altKey) || (selSticky() && (ev.key==='Enter' || ev.key===' '))){
+    ev.preventDefault(); selToggle(uid); return;
+  }
   if(ev.key==='Enter' || ev.key===' '){ ev.preventDefault(); openJob(uid); }
 }
 
@@ -1327,7 +1784,7 @@ function toggleMore(force){
   }
   try{ if(open) sessionStorage.setItem(MORE_KEY,'1'); else sessionStorage.removeItem(MORE_KEY); }catch(e){}
   // 草稿期间推迟的新结果：丢弃草稿后没开着岗位就立刻载入
-  if(!open && UPDATE_PENDING && !OPEN_UID) applyLatestResults();
+  if(!open && UPDATE_PENDING && !OPEN_UID && !SEL_MODE) applyLatestResults();
 }
 function placeFilters(portrait){
   const slot=document.getElementById('sheet-slot'); if(!slot) return;
@@ -1801,7 +2258,7 @@ function rememberListPosition(){
     top:list.scrollTop,windowY:window.scrollY}));}catch(e){}
 }
 function applyLatestResults(hash){
-  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || LABEL_WRITES.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
+  if(!UPDATE_PENDING || UPDATE_APPLYING || SEL_MODE || document.hidden || NOTE_REQUESTS.size || LABEL_WRITES.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
   UPDATE_APPLYING=true;
   UPDATE_BASELINE=UPDATE_PENDING;UPDATE_PENDING=null;
   rememberListPosition();
@@ -1886,7 +2343,7 @@ function renderUpdateState(data, fromPoll=false){
   const failed=Array.isArray(data.failed_sources)?data.failed_sources.filter(s=>Object.hasOwn(names,s)):[];
   if(failed.length)meta.push(T('js.update_failed_sources',{sources:failed.map(s=>names[s]).join(', ')}));
   const detail=document.getElementById('update-meta');if(detail)detail.textContent=meta.join(' · ');
-  if(UPDATE_PENDING && !OPEN_UID)applyLatestResults();
+  if(UPDATE_PENDING && !OPEN_UID && !SEL_MODE)applyLatestResults();   // 多选模式中（含 0 项）同打开 JD 一样推迟
 }
 
 function updateConnectionLost(){

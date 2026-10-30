@@ -72,9 +72,14 @@ mcp:
   # tls_certfile: data/server-cert.pem
   # tls_keyfile: data/server-key.pem
 
-# Shared by the standalone read-only API and MCP's internal API. These are
-# serialized snapshot budgets, not a bound on total process RSS.
+# Shared by the standalone API and MCP's internal API. These are serialized
+# snapshot budgets, not a bound on total process RSS. Reads are always
+# read-only. allow_label_writes (default false; must be a literal true/false)
+# lets the same Bearer token also POST /api/v1/labels/batch and, with MCP
+# enabled, exposes the batch_label_jobs tool. It writes only application
+# progress (saved/applied/skipped/none) and the priority star by exact UID.
 agent_api:
+  allow_label_writes: false
   snapshots:
     ttl_seconds: 300
     max_snapshots: 8

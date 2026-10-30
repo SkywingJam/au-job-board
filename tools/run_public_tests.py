@@ -46,11 +46,15 @@ PYTHON_TESTS = (
     ("tools/test_file_security.py", "private save permissions and shared token ACL validation", None),
     ("tools/test_platform_install.py", "timezone data, LF resources and Unicode source paths", None),
     ("tools/test_agent_api.py", "authenticated read-only snapshots and external agent client", None),
+    ("tools/test_batch_labels.py",
+     "opt-in batch label write API: atomic group-aware progress/priority, gates and client", None),
     ("tools/test_batches.py", "exact fetch membership and schema 3 recovery", None),
     ("tools/test_location_http.py", "location HTTP scope and same-origin protection", None),
     ("tools/test_locations.py", "offline Australian location reference and matching", None),
     ("tools/test_location_search.py", "group representative selection and three-block location search", None),
     ("tools/test_panel_location_views.py", "location UI rendering and provenance", None),
+    ("tools/test_ineligible_last.py",
+     "ineligible-last qualification zones across panel, API snapshots and pages", None),
     ("tools/test_label_migration.py",
      "label migration, priority, correction provenance and frozen action state", None),
     ("tools/test_patch_boundaries.py",
@@ -93,6 +97,8 @@ PYTHON_TESTS = (
      "panel English / Chinese text", None),
     ("tools/test_panel_stats_http.py",
      "read-only header counts endpoint, same-origin boundary and navigation hooks (loopback)", None),
+    ("tools/test_panel_multiselect.py",
+     "panel multi-select bulk marking endpoint, same-origin boundary and rendered hooks (loopback)", None),
     ("tools/test_panel_display.py",
      "panel display layer: evidence moved not removed, shared tags unchanged", None),
     ("tools/test_skills_and_search.py",
@@ -178,6 +184,7 @@ def print_inventory() -> None:
     print("Excluded from the public entry (see docs/public-tests.md):")
     print("  tools/test_public_snapshot.py      maintainer snapshot planner")
     print("  tools/regression_corpus.py         needs a private corpus")
+    print("  tools/build_metro_reference.py     maintainer rebuild of the ABS metropolitan reference")
     print("  Optional --with-mcp: tools/test_mcp.py and tools/test_mcp_http.py (requirements-mcp.txt)")
 
 

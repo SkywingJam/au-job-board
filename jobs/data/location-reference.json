@@ -56,5 +56,5 @@
     "Perth": "WA",
     "Sydney": "NSW"
   },
-  "city_scope": "Hand-maintained state/territory capital names only. A capital listing is coarser than a postcode; capital searches compare against an explicit eight-row CBD postcode table in code and do not establish metro membership."
+  "city_scope": "Hand-maintained state/territory capital names only. A capital listing is coarser than a postcode; capital searches compare against an explicit eight-row CBD postcode table in code. Metropolitan membership is not hand-written: it comes from the separate ABS-derived metro-reference.json."
 }

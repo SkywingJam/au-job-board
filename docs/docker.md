@@ -15,7 +15,7 @@ container check. Docker Desktop on macOS runs Linux containers in a VM.
 
 The published image supports `linux/amd64` and `linux/arm64`. Docker selects the
 matching platform. Use a version tag for a specific release (for example
-`v1.3.0.2`), `sha-<full-main-commit>` for a specific main build, or `latest` for
+`v1.3.1`), `sha-<full-main-commit>` for a specific main build, or `latest` for
 the most recently published main build. A digest pins the exact image content.
 Publication requires the synthetic container smoke test on each native platform;
 it does not test real job sources or other operating systems.
@@ -23,7 +23,7 @@ it does not test real job sources or other operating systems.
 From a source checkout, use the image overlay with the existing Compose file:
 
 ```bash
-export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.0.2
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.1
 docker compose -f compose.yaml -f compose.image.yaml pull
 docker compose -f compose.yaml -f compose.image.yaml up -d --no-build
 docker compose -f compose.yaml -f compose.image.yaml logs panel
@@ -99,7 +99,11 @@ docker compose restart panel
 Connect your MCP client to `http://127.0.0.1:8091/mcp` using its private secret
 configuration. Verify discovery of the four [read-only tools](mcp.md#tools-and-a-first-read)
 and one `list_jobs` call. An empty successful snapshot is valid on a new DB.
-The server identifies itself as `AU Job Board (read-only)`.
+The server identifies itself as `AU Job Board (read-only)`. The optional batch
+label tool is off by default; to enable it, add `allow_label_writes: true`
+under `agent_api` in `/app/config/config.yaml` and restart the services that read
+it (see [MCP](mcp.md#optional-batch-label-tool)). Both Compose services mount the
+same writable data volume.
 
 The HTTP API is independent of MCP. After the panel has initialized/upgraded the
 database and the token exists, start it with:
@@ -200,7 +204,7 @@ For a published-image installation, after updates have finished, select the
 new version and recreate the panel without building:
 
 ```bash
-export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.0.2
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.1
 docker compose -f compose.yaml -f compose.image.yaml pull
 docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --force-recreate
 # If the API was enabled, recreate it from the same image too:

@@ -38,6 +38,8 @@ TIER_KEY = "tier"            # 层级下拉（T1/T2/T3）—— 把 t1 搜索从
 TIER_LABELS = ("T1", "T2", "T3")
 SKILL_PICK_TOP = 18          # 技能筛选器展示多少个（按实际命中数降序）
 SINCE_KEY = "since"          # 视图的「冻结时间」，见 _resolve_since
+INELIGIBLE_LAST_KEY = "ineligible_last"   # 「资格不符置后」：只改排序，不筛、不扣分
+INELIGIBLE_LAST_VIEWS = ("all", "new", "labelled")   # 推荐/已排除保持原有列表行为
 
 # 每个视图给哪些筛选控件。
 # 推荐视图只留搜索 + 薪资：它默认就是「未处理、分数优先」，
@@ -55,10 +57,10 @@ LABELLED_FILTER_KEYS = (tuple(k for k in ALL_FILTER_KEYS if k != "labeled")
                         + (PRIORITY_KEY,))
 VIEW_FILTER_KEYS = {
     "recommend": (QUERY_KEY, "salary", SKILL_KEY, TIER_KEY),
-    "all": ALL_FILTER_KEYS,
-    "new": ALL_FILTER_KEYS,
+    "all": ALL_FILTER_KEYS + (INELIGIBLE_LAST_KEY,),
+    "new": ALL_FILTER_KEYS + (INELIGIBLE_LAST_KEY,),
     "excluded": ALL_FILTER_KEYS,
-    "labelled": LABELLED_FILTER_KEYS,
+    "labelled": LABELLED_FILTER_KEYS + (INELIGIBLE_LAST_KEY,),
 }
 
 
@@ -75,6 +77,8 @@ def parse_filters(qs) -> dict:
         out[FRESH_KEY] = "1"
     if (qs.get(PRIORITY_KEY) or [""])[0]:
         out[PRIORITY_KEY] = "1"
+    if (qs.get(INELIGIBLE_LAST_KEY) or [""])[0] == "1":
+        out[INELIGIBLE_LAST_KEY] = "1"
     skills = [v for v in (qs.get(SKILL_KEY) or []) if v]
     if skills:
         out[SKILL_KEY] = skills[:20]        # 多选也要兜一下超长 URL
@@ -201,6 +205,22 @@ def _ordered(rows: list[dict], view: str, filters: dict) -> list[dict]:
                                            r.get("uid") or ""))
     return sorted(rows, key=lambda r: (-report_mod.score_value(r),
                                        _date_key(r), r.get("uid") or ""))
+
+
+def ineligible_last(view: str, filters: dict) -> bool:
+    """「资格不符置后」是否对该视图生效。其余视图即使带了参数也保持原排序。"""
+    return bool(filters.get(INELIGIBLE_LAST_KEY)) and view in INELIGIBLE_LAST_VIEWS
+
+
+def sink_rank(row: dict, labels: dict, index: dict) -> int:
+    """0 = 资格相符或未知，1 = 有效资格为不符。
+
+    读 labels.qualification().effective —— 与卡片展示同一口径：人工 eligible /
+    ineligible 覆盖规则结论，未知（无决策、旧 unsure）不算不符。不扫正文、不改分。
+    """
+    label = report_mod.label_of(row, labels, index)
+    effective = labels_mod.qualification(row, label)["effective"]
+    return 1 if effective == "ineligible" else 0
 
 
 def _label_time(row: dict, labels: dict, index: dict) -> str:
@@ -332,6 +352,13 @@ def _query(conn, config, view, offset, limit, filters=None, since=None,
         rows = [r for r in rows
                 if passes_filters(r, report_mod.label_of(r, labels, index), filters,
                                   report_mod.has_labels(r, labels, index))]
+
+    if ineligible_last(view, filters):
+        # 先过滤、再按有效资格分区（区内保持原顺序），最后才分页 —— 所以
+        # 不符的岗位沉到整个结果的末尾，而不是每页各自沉底。
+        for row in rows:
+            row["_ineligible_last"] = sink_rank(row, labels, index)
+        rows = sorted(rows, key=lambda r: r["_ineligible_last"])
 
     total = len(rows)
     page = report_mod.decorate(rows[offset:offset + limit], labels, index)

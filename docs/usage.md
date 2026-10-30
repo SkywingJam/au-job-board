@@ -72,9 +72,22 @@ status (including "not processed"), the ★ priority queue, eligibility
 correction and label status. Legacy interest records are kept in the database
 and API but no longer shown in the panel; old `interest=` links still work.
 All, New, Excluded and Labelled also provide one location box for an Australian
-postcode, suburb, capital city, state or `Australia`. Results are grouped in
-exact, same-state coarse and unknown blocks with dividers; the recommended view
+postcode, suburb, capital city, state or `Australia`. A capital or its CBD
+postcode lists the CBD, then the rest of that city's metropolitan area, then
+places that cannot be placed; other places in the state outside the area are
+hidden. Results are grouped in blocks with dividers; the recommended view
 does not offer location search. See [Locations and records](location-workflow.md).
+
+**More filters → Job details → Ineligible last** (All, New and Labelled; off by
+default and remembered per view in this browser) moves jobs whose effective
+qualification is ineligible after the rest of the whole result. It uses the same
+qualification shown on the card: the rule result, replaced by your
+Eligible/Ineligible correction; unknown is not ineligible. It filters nothing
+and changes no score or rule. Inside each part the location blocks and your
+score/date sort stay in order, and paging runs over the complete ordering.
+A correction saved in the detail pane shows at once and keeps the open job and
+its previous/next targets; the list re-sorts on the next refresh or when the
+query is applied again. Recommended and Excluded keep their own order.
 The detail pane shows the original description, the extracted evidence sentence
 for eligibility-related requirements, and a link to the original posting.
 
@@ -84,6 +97,16 @@ shortcuts**: Default `←` / `→`, Vim `K` / `J`, or Gamer `A` / `D`. Only the
 chosen set works, and the button hints show it. Keys typed in text fields,
 menus, the location search box and open dialogs or drawers never switch jobs, and
 unsaved or saving notes are protected as with the buttons.
+
+On a narrow (portrait) screen, a one-finger swipe to the right on the job text
+goes back to the list like the **Back** button: it does not need to start at the
+screen edge, but must travel at least 80 px, mostly sideways, in under 0.8 s,
+and not start in the leftmost 24 px (left to the browser's own back gesture).
+Vertical scrolling, left swipes, short or slow drags, pinch zoom, selected text,
+buttons, links, fields, horizontally scrolling content and open drawers or
+dialogs are never treated as a swipe back, and a mouse on a desktop layout is
+unaffected. Saving notes are awaited and unsaved notes ask first, exactly as
+with the button; the list keeps its filters and scroll position.
 
 **Copy job** in the detail header copies plain text for pasting into another
 tool such as an AI assistant: UID, title, company, listing location, listing
@@ -116,7 +139,8 @@ summary shows the current result and whether it comes from the analysis or a
 manual correction. A machine result is outlined with a dashed border and a
 manual correction is filled. Cards show the status and star; they also show a
 correction tag when it contradicts the analysis. In Recommended, jobs processed
-during the current visit stay in place and are dimmed.
+during the current visit stay in place. Applied and Skipped cards are dimmed;
+changing a card to To apply restores its normal brightness.
 
 | Axis | Values | Meaning |
 |---|---|---|
@@ -135,6 +159,46 @@ either binary result. Re-analysis does not remove manual corrections.
 
 Status changes keep the current job open. The Recommended pool is frozen at
 entry using an event watermark; refresh or enter a new session to rebuild it.
+
+### Marking several cards at once
+
+Cards show no checkbox until you start selecting. On a computer, Cmd/Ctrl+click
+on a card (or Cmd/Ctrl+Enter on a focused card) starts selecting; on a touch screen
+a long press (about half a second without moving) does. In selecting mode every
+card shows a circle on its left (click it, or Space/Enter on it, to select without
+opening the job), and the search and filter row is replaced by a bar with the
+number selected, a **Mark as…** menu (**To apply**, **Applied**, **Skipped**; choosing one saves it at once),
+**Set star** and **Cancel**. Search text and filters you had are untouched and
+return when selecting ends. The menu and star are disabled while nothing is
+selected or a save is running; **Cancel** always works.
+
+How selecting ends depends on the layout. On a phone-sized (single-column) layout,
+tapping a card or its circle toggles it instead of opening the job; tapping
+elsewhere, scrolling or pressing Esc does not leave, and unselecting every card
+keeps you in selecting mode ("0 selected", actions disabled) so you can pick again;
+only **Cancel** ends it. On a wide layout, selecting ends when you cancel the last
+card, press Esc, click blank space or another control, or click a card normally
+(which opens the job). Resizing from phone-sized to wide ends an empty selecting mode
+and keeps any selection. Selections are never kept across pages. A newer result set
+waits while you are selecting, including with 0 selected, and loads after you cancel.
+
+Each action is applied to every selected card in one all-or-nothing save: a status
+choice sets exactly that status (replacing any other) and **Set star** only sets
+the star; neither touches the other axis, notes or qualification. Repeating the
+same action changes nothing. After a successful save the selection stays so you
+can add a star or correct the status; cards are not removed or reordered, and the
+card marks, header counts and an open job's status buttons update. If the save
+is rejected, nothing is written and the selection stays for retry. If the connection
+fails before confirmation, the panel reports an unknown save outcome; retrying the
+same assignment is safe and does not duplicate label events. At most 100
+cards can be selected, only from the list currently loaded. There is no select
+all, cross-page selection, range selection, unstar or clear-status action here;
+use the job's own controls for those.
+
+On a wide layout, clicking a plain card or a navigation link keeps the selection
+until the destination is really entered, so a cancelled "unsaved changes"
+confirmation leaves it as it was. A save already sent is not undone by leaving
+selecting mode; its late result only updates the marks and never reopens it.
 
 Plus a free-form note. Every change is also appended to a history table
 (`label_events`), so you can check what changed and restore a label by hand from

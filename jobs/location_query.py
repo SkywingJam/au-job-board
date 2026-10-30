@@ -110,9 +110,16 @@ def query(conn, config, view, offset, limit, filters, since, skills_cfg, *,
 
     ordered = []
     sort_view = "all" if view == "excluded" and not filters.get("sort") else view
-    for tier in TIER_ORDER:
-        members = [row for row in rows if row["_geo_match"] == tier]
-        ordered.extend(panel_data._ordered(members, sort_view, filters))
+    # Effective qualification (when requested) outranks location; each
+    # qualification zone keeps the CBD / metro / fallback blocks and the user's sort.
+    sink = panel_data.ineligible_last(view, filters)
+    for row in rows:
+        row["_ineligible_last"] = panel_data.sink_rank(row, labels, index) if sink else 0
+    for zone in ((0, 1) if sink else (0,)):
+        for tier in TIER_ORDER:
+            members = [row for row in rows
+                       if row["_geo_match"] == tier and row["_ineligible_last"] == zone]
+            ordered.extend(panel_data._ordered(members, sort_view, filters))
 
     total = len(ordered)
     page = [

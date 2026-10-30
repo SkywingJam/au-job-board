@@ -68,6 +68,55 @@ def _reference():
     return metadata, places, postcodes, states, capitals
 
 
+@lru_cache(maxsize=1)
+def _metro():
+    """Postcode -> (ABS GCCSA code, person share in permille), verified like the seed."""
+    manifest = json.loads((_DATA / "metro-reference.json").read_text(encoding="utf-8"))
+    data = (_DATA / "au-postcode-metro.tsv").read_bytes().replace(b"\r\n", b"\n")
+    table = manifest["tsv"]
+    if (manifest["schema_version"] != 1 or hashlib.sha256(data).hexdigest() != table["sha256"]):
+        raise ValueError("Australian metropolitan reference is invalid; restore the bundled data files.")
+    reader = csv.DictReader(io.StringIO(data.decode("utf-8")), delimiter="\t")
+    if reader.fieldnames != table["columns"]:
+        raise ValueError("Australian metropolitan reference has invalid columns.")
+    shares = {}
+    for row in reader:
+        share = int(row["share_permille"])
+        if (not re.fullmatch(r"[0-9]{4}", row["postcode"]) or row["postcode"] in shares
+                or row["gccsa"] not in manifest["regions"] or not 0 < share <= 1000):
+            raise ValueError("Australian metropolitan reference has an invalid row.")
+        shares[row["postcode"]] = (row["gccsa"], share)
+    if len(shares) != table["rows"] or not shares:
+        raise ValueError("Australian metropolitan reference has an invalid row count.")
+    return manifest, shares
+
+
+def _inside_metro(location: dict, city: str) -> bool | None:
+    """True/False when every postcode of the listing is clearly in/out of the
+    capital's Greater Capital City Statistical Area; None when undetermined.
+
+    A city-level listing names its own capital. Postcodes without an ABS postal
+    area (PO-box and large-volume codes of a locality) are ignored when another
+    postcode of the place decides. One shared by several states, or split below
+    the minimum share between areas, is never guessed.
+    """
+    manifest, shares = _metro()
+    if location.get("precision") == "city":
+        return True if location.get("city") == city else None
+    _, _, postcodes, _, _ = _reference()
+    wanted = manifest["capitals"][city]["gccsa"]
+    verdicts = set()
+    for code in location.get("postcodes") or ():
+        entry = shares.get(code)
+        if entry is None:
+            continue
+        if (entry[1] < manifest["min_share_permille"]
+                or len({state for _, state in postcodes.get(code, ())}) != 1):
+            return None
+        verdicts.add(entry[0] == wanted)
+    return verdicts.pop() if len(verdicts) == 1 else None
+
+
 def _first(raw: str) -> str:
     head = _FIRST_LOCATION.split(raw, maxsplit=1)[0]
     for separator in _CONJUNCTION.finditer(head):
@@ -403,11 +452,14 @@ def match_tier(location: dict, target: dict | None) -> str:
             return "exact"
         return "hidden"
     if precision == "capital" or target.get("capital"):
+        # CBD postcode first, then the rest of the capital's metropolitan area;
+        # a place that cannot be placed inside or outside it stays last.
         if target["postcode"] in postcodes:
             return "exact"
-        if states & target["states"]:
-            return "near"
-        return "hidden"
+        if not states & target["states"]:
+            return "hidden"
+        inside = _inside_metro(location, target["city"])
+        return "unknown" if inside is None else ("near" if inside else "hidden")
     if localities & set(target.get("localities") or ()):
         return "exact"
     if postcodes & set(target.get("postcodes") or ()):

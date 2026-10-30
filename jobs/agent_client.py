@@ -19,6 +19,15 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import build_opener, HTTPRedirectHandler, Request
 
 MAX_RESPONSE = 16 * 1024 * 1024
+MAX_POST = 32 * 1024  # same bound as the server's label batch route
+WRITE_ERROR_CODES = frozenset({
+    'invalid_json', 'invalid_request', 'invalid_item', 'duplicate_uid',
+    'unknown_uid', 'duplicate_group', 'unauthorized', 'forbidden_origin_or_host',
+    'label_writes_disabled', 'method_not_allowed', 'invalid_query',
+    'request_timeout', 'length_required', 'payload_too_large',
+    'unsupported_media_type', 'label_not_effective', 'data_unavailable',
+    'schema_upgrade_required',
+})
 
 
 class ClientError(Exception):
@@ -43,7 +52,11 @@ def read_token(path):
 
 
 class APIClient:
-    """Shared authenticated GET transport for the exporter and MCP adapter."""
+    """Shared authenticated transport for the exporter and MCP adapter.
+
+    GET reads; `post` is a single bounded JSON write with no redirect following
+    and no retry. Errors never include the token, URL or request/response text.
+    """
 
     def __init__(self, base_url, token):
         parsed = urlsplit(base_url)
@@ -58,6 +71,43 @@ class APIClient:
     def get(self, path, params):
         request = Request(self.base + path + '?' + urlencode(params, doseq=True),
                           headers={'Authorization': 'Bearer '+self.token})
+        return self._send(
+            request,
+            lambda exc: 'API rejected request (HTTP '+str(exc.code)+'); restart the query if its snapshot expired',
+            'API unavailable or invalid JSON; export not completed')
+
+    def post(self, path, body):
+        """Send one JSON object; the server applies it atomically or not at all."""
+        try:
+            data = json.dumps(body, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')
+        except (TypeError, ValueError):
+            raise ClientError('Request body is not valid JSON') from None
+        if len(data) > MAX_POST:
+            raise ClientError('Request body exceeds the 32 KiB API limit')
+        request = Request(self.base + path, data=data, method='POST',
+                          headers={'Authorization': 'Bearer '+self.token,
+                                   'Content-Type': 'application/json'})
+        return self._send(
+            request,
+            lambda exc: 'API rejected write (HTTP '+str(exc.code)+self._code(exc)+'); nothing is reported as applied',
+            'API unavailable or invalid response; the write may or may not have been applied, '
+            'so read the current state before resending (not retried automatically)')
+
+    @staticmethod
+    def _code(exc):
+        # Fixed server vocabulary and an item position only; anything else
+        # (including a foreign server's text) is dropped.
+        try:
+            body = json.loads(exc.read(4096))
+            value, index = body.get('error'), body.get('index')
+        except (OSError, ValueError, AttributeError):
+            return ''
+        if not isinstance(value, str) or value not in WRITE_ERROR_CODES:
+            return ''
+        at = ' at item '+str(index) if type(index) is int and 0 <= index < 1000 else ''
+        return ': '+value+at
+
+    def _send(self, request, rejected, unavailable):
         try:
             with self.opener.open(request, timeout=30) as response:
                 if response.status != 200 or response.headers.get_content_type() != 'application/json':
@@ -71,9 +121,9 @@ class APIClient:
                 return value
         except HTTPError as exc:
             # No body/header/URL echo: error messages must not expose private data.
-            raise ClientError('API rejected request (HTTP '+str(exc.code)+'); restart the query if its snapshot expired') from None
+            raise ClientError(rejected(exc)) from None
         except (URLError, OSError, ValueError):
-            raise ClientError('API unavailable or invalid JSON; export not completed') from None
+            raise ClientError(unavailable) from None
 
 
 def read_jobs(base_url, token, query, *, max_records=10000):

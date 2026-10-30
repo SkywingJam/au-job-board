@@ -29,7 +29,7 @@ from . import i18n
 from . import labels as labels_mod
 from . import skills as skills_mod
 from .panel_data import (
-    FILTER_KEYS, FRESH_KEY, NONE_TOKEN, PRIORITY_KEY,
+    FILTER_KEYS, FRESH_KEY, INELIGIBLE_LAST_KEY, NONE_TOKEN, PRIORITY_KEY,
     QUERY_KEY, SINCE_KEY, SKILL_KEY, SKILL_PICK_TOP, SORT_KEYS, TIER_KEY, TIER_LABELS,
     ALL_FILTER_KEYS, VIEW_FILTER_KEYS, VIEWS,
     _link, _query, _resolve_since, age_days, AGE_WARN_DAYS, skill_tree,
@@ -294,8 +294,8 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     uid = row["uid"]
     label = row.get("_label") or {}
     # 推荐视图（有 since）里本次会话处理过的仍然留在列表里（保证翻页不跳），
-    # 变淡表示「已经处理过了」。其他视图本来就混着各种状态，不变淡。
-    done = bool(since and label.get("action"))
+    # 仅已投/跳过变淡，想投保持正常亮度。其他视图不变淡。
+    done = bool(since and label.get("action") in ("applied", "skipped"))
 
     # 卡片只用三类强调：状态（挂出 N 天 / 已排除）、资格线索、薪资。
     # 层级并进分数徽章；加减分移到详情的「为什么是 …」；技能是中性文字。
@@ -332,10 +332,17 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     state = _card_state(uid, label, lang)
     tail = f'<span class="card-tail">{skills_html}{state}</span>' if skills else state
     # 搜索已挪到服务端（见 _search_text），这里不再拼 data-text
+    title = row.get("title") or ""
+    # 卡片自身不再是 role=button：按钮的子节点对辅助技术是展示性的，里面的
+    # 多选圆框就读不到。圆框是真按钮 + role=checkbox，卡片退为带名称的分组。
     return "".join([
         f'<div class="card{" done" if done else ""}" data-uid="{_e(uid)}" '
-        f'role="button" tabindex="0" '
+        f'role="group" aria-label="{_e(title)}" tabindex="0" '
         f'onclick="openJob(\'{_e(uid)}\')" onkeydown="cardKeys(event,\'{_e(uid)}\')">',
+        f'<button type="button" class="card-check" role="checkbox" aria-checked="false" tabindex="-1" aria-hidden="true" '
+        f'data-check-uid="{_e(uid)}" aria-label="{_e(i18n.t(lang, "sel.check", title=title))}">'
+        '<svg class="card-tick" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+        '<path d="m6 12 4 4 8-8"/></svg></button>',
         '<div class="card-top">',
         f'<p class="t">{_e(row.get("title"))}</p>',
         f'<span class="score" title="{_e(badge_title)}">{badge}</span>',
@@ -711,9 +718,11 @@ def _select(key: str, label: str, options: list[tuple[str, str]], current: str, 
     )
 
 
-def _toggle(key: str, label: str, checked: bool) -> str:
+def _toggle(key: str, label: str, checked: bool, value: str | None = None) -> str:
+    # 无 value 的复选框会以 "on" 进 URL；严格取值的开关（如资格不符置后）显式给 "1"。
+    value_attr = f' value="{_e(value)}"' if value is not None else ""
     return (f'<label class="ctl tog{" on" if checked else ""}">'
-            f'<input type="checkbox" data-fkey="{key}"{" checked" if checked else ""} '
+            f'<input type="checkbox" data-fkey="{key}"{value_attr}{" checked" if checked else ""} '
             f'onchange="filterChanged()"> {_e(label)}</label>')
 
 
@@ -781,6 +790,9 @@ def _control(key: str, filters: dict, skill_counts: dict, lang: str, skill_label
         return _toggle(FRESH_KEY, T("filter.fresh"), bool(filters.get(FRESH_KEY)))
     if key == PRIORITY_KEY:
         return _toggle(PRIORITY_KEY, T("filter.priority"), bool(filters.get(PRIORITY_KEY)))
+    if key == INELIGIBLE_LAST_KEY:
+        return _toggle(INELIGIBLE_LAST_KEY, T("filter.ineligible_last"),
+                       bool(filters.get(INELIGIBLE_LAST_KEY)), "1")
     if key == SKILL_KEY:
         return _skill_picker(filters, skill_counts, lang, skill_labels)
     if key == TIER_KEY:
@@ -809,11 +821,42 @@ def _chip_text(key: str, filters: dict, lang: str, skill_labels=None) -> str:
         return T("filter.fresh")
     if key == PRIORITY_KEY:
         return T("filter.priority")
+    if key == INELIGIBLE_LAST_KEY:
+        return T("filter.ineligible_last")
     if key == TIER_KEY:
         return T("filter.tier") + colon + str(value)
     if key == SKILL_KEY:
         return T("filter.skill") + colon + ", ".join((skill_labels or {}).get(name, name) for name in value or [])
     return key
+
+
+def _selection_bar(lang: str) -> str:
+    """多选操作栏：与搜索筛选行叠在同一格里，有选择时 CSS 切换显示（panel.js selRender）。
+    筛选行的 DOM 与控件值一概不动，所以取消后原样恢复。"""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    # “标记为…”复用筛选器同一套自绘下拉（choicepick：键盘、展开层、点外面关闭都现成）。
+    # 它没有 data-fkey，不会被当成筛选条件；选中一项由 choicePick 转给 selMark，
+    # 每次选择都是一次写入，所以没有“当前值”，也不会有勾选态。无选中项/保存中由 JS 禁用。
+    options = "".join(
+        f'<button type="button" class="choiceopt" role="option" tabindex="-1" data-choice-value="{action}" '
+        f'aria-selected="false" onclick="choicePick(this)" onkeydown="choiceOptionKeys(event,this)">'
+        f'<span class="choice-label">{_e(i18n.value_label(lang, "action", action))}</span></button>'
+        for action in ("saved", "applied", "skipped"))
+    return (f'<div class="selbar" id="selbar" role="toolbar" aria-label="{_e(T("sel.bar"))}">'
+            '<span class="selbar-count" id="selbar-count" role="status" aria-live="polite"></span>'
+            '<div class="choicepick selpick" data-sel-mark>'
+            f'<button type="button" class="selbtn selmark" id="selbar-mark" data-choice-trigger data-sel-write disabled '
+            f'aria-haspopup="listbox" aria-expanded="false" aria-controls="selbar-marks" aria-label="{_e(T("sel.mark"))}" '
+            'onclick="choiceToggle(event,this)" onkeydown="choiceTriggerKeys(event,this)">'
+            f'<span class="v">{_e(T("sel.mark_ph"))}</span><span class="caret" aria-hidden="true">▾</span></button>'
+            f'<div class="choicepanel" id="selbar-marks" role="listbox" aria-label="{_e(T("sel.mark"))}" hidden>'
+            f'{options}</div></div>'
+            f'<button type="button" class="selbtn selstar" data-sel-star data-sel-write disabled onclick="selApply(\'star\')">'
+            f'<span aria-hidden="true">★</span> {_e(T("sel.star"))}</button>'
+            f'<button type="button" class="selbtn selcancel" data-sel-cancel onclick="selCancel()">'
+            f'{_e(T("sel.cancel"))}</button>'
+            '<span class="selbar-msg" id="selbar-msg" role="status" aria-live="polite" hidden></span>'
+            '</div>')
 
 
 def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", skill_labels=None) -> str:
@@ -834,7 +877,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
                if k not in TOOLBAR_FIXED and k not in INTERFACE_HIDDEN_KEYS]
     total_active = sum(1 for k in counted if _is_active(k, filters))
 
-    out = ['<div class="toolbar">']
+    out = ['<div class="toolzone"><div class="toolbar">']
     if QUERY_KEY in allowed:
         out.append(
             f'<label class="search">{ICON_SEARCH}'
@@ -868,6 +911,8 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
     if any(k != SINCE_KEY for k in filters):
         out.append(f'<a class="clear" href="#" onclick="clearFilter();return false;">'
                    f'{_e(T("filter.clear_all"))}</a>')
+    out.append("</div>")
+    out.append(_selection_bar(lang))
     out.append("</div>")
 
     # 「更多筛选」面板：桌面是工具栏下方的展开区，竖屏是底部抽屉。
@@ -1120,17 +1165,17 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
                  f'<button type="button" class="btn" onclick="removeFilter(\'geo\')">'
                  f'{_e(T("location.clear_geo"))}</button></div>')
     elif page:
-        if filters.get("geo"):
-            parts, previous = [], None
-            for row in page:
-                tier = row.get("_geo_match") or "unknown"
-                if previous is not None and tier != previous:
-                    parts.append('<hr class="geo-divider" aria-hidden="true">')
-                parts.append(_card(row, since, lang))
-                previous = tier
-            cards = "".join(parts)
-        else:
-            cards = "".join(_card(r, since, lang) for r in page)
+        # One divider wherever the displayed block changes: the location tier
+        # and/or the "ineligible last" zone. Neither option: no dividers.
+        parts, previous = [], None
+        for row in page:
+            block = (row.get("_ineligible_last"),
+                     (row.get("_geo_match") or "unknown") if filters.get("geo") else None)
+            if previous is not None and block != previous:
+                parts.append('<hr class="geo-divider" aria-hidden="true">')
+            parts.append(_card(row, since, lang))
+            previous = block
+        cards = "".join(parts)
     elif has_filters:
         cards = (f'<div class="empty"><b>{_e(T("list.empty_filtered"))}</b>'
                  f'<span>{_e(T("list.empty_hint"))}</span>'
