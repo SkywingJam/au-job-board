@@ -2040,12 +2040,25 @@ async function testMultiSelect() {
     box.closestMap = { ".card-check": box, ".card": card };
     t.document.activeElement = box;
     t.click("box", "B");
-    eq("最后一项取消（圆框有焦点）：焦点交给这张卡片", [t.mode(), t.document.activeElement === card], [false, true]);
+    eq("鼠标取消最后一项：不把焦点环留给这张卡片", [t.mode(), t.document.activeElement === t.document.body], [false, true]);
     t.enter("B"); t.cancel.closestMap = { "#selbar": t.bar }; t.document.activeElement = t.cancel;
+    t.docEvent("keydown", { key: "Tab", target: t.cancel, preventDefault() {} });
     t.api.selCancel();
     eq("键盘按取消：焦点回到刚操作的卡片", t.document.activeElement === card, true);
     t.enter("B"); t.document.activeElement = t.document.body; t.api.selCancel();
     eq("焦点不在圆框/操作栏时不动它", t.document.activeElement === t.document.body, true);
+  }
+  {
+    const t = selPanel(); await t.api.openJob("A"); t.enter("B");
+    t.cancel.closestMap = { "#selbar": t.bar }; t.document.activeElement = t.cancel;
+    t.docEvent("pointerdown", { pointerType: "mouse", target: t.cancel }); t.api.selCancel();
+    eq("鼠标退出多选：当前JD保持，最后点选项不获得焦点", [t.api.state().uid, t.document.activeElement === t.document.body, t.mode()], ["A", true, false]);
+    t.enter("B"); t.document.activeElement = t.cancel;
+    t.docEvent("keydown", { key: "Tab", target: t.cancel, preventDefault() {} }); t.api.selCancel();
+    eq("键盘退出多选：有当前JD时焦点回到当前卡片", t.document.activeElement === t.cards[0], true);
+    t.enter("B"); t.cards[1].closestMap = { ".card": t.cards[1] }; t.document.activeElement = t.cards[1];
+    t.click("blank", "A");
+    eq("鼠标点空白退出：清理最后点选卡片自身的焦点", t.document.activeElement === t.document.body, true);
   }
 
   console.log("\n-- 竖屏（手机）多选：模式独立于选中数，只有“取消”退出 --");

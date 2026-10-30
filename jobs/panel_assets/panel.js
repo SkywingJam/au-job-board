@@ -518,7 +518,8 @@ const SEL_MAX=100;
 const HOLD={ms:500,slop:10,clickMs:800};
 const HOLD_SKIP='a[href],button,input,textarea,select,option,summary,label,[contenteditable]';
 const SEL=new Set();
-let SEL_MODE=false, SEL_BUSY=null, SEL_LAST='', HOLD_TRACK=null, HOLD_CLICK=null;
+let SEL_MODE=false, SEL_BUSY=null, SEL_LAST='', SEL_KEYBOARD=true, HOLD_TRACK=null, HOLD_CLICK=null;
+document.addEventListener('keydown',()=>{SEL_KEYBOARD=true;},true);
 // 手机（竖屏）多选：模式只由“取消”结束
 function selSticky(){ return SEL_MODE && document.body.classList.contains('portrait'); }
 function dataOf(el,key){ return el && el.dataset ? el.dataset[key] : undefined; }
@@ -544,11 +545,14 @@ function selControls(){
 function selCard(uid){
   return Array.from(document.querySelectorAll('.list .card')).find(c=>c.dataset.uid===uid) || null;
 }
-// 模式结束后焦点不能留在随即隐藏的圆框或操作栏里：交给刚操作的那张卡片（不滚动、不触发导航）
+// 鼠标/触摸退出不制造新的卡片焦点环；键盘退出优先回当前JD，否则回列表操作位置。
 function selReleaseFocus(){
   const ae=document.activeElement;
-  if(!ae || !ae.closest || !(ae.closest('.card-check') || ae.closest('#selbar'))) return;
-  const card=ae.closest('.card') || selCard(SEL_LAST);
+  if(!ae || !ae.closest) return;
+  const focusedCard=ae.closest('.card');
+  if(!focusedCard && !ae.closest('#selbar')) return;
+  if(!SEL_KEYBOARD){ if(ae.blur) ae.blur(); return; }
+  const card=selCard(OPEN_UID) || focusedCard || selCard(SEL_LAST);
   if(card && card.focus) card.focus({preventScroll:true}); else if(ae.blur) ae.blur();
 }
 function selRender(anchorUid){
@@ -712,6 +716,7 @@ function holdReady(){
     && !detailOverlayOpen() && !hasTextSelection();
 }
 function holdStart(ev){
+  SEL_KEYBOARD=false;
   HOLD_CLICK=null; holdCancel();
   if(ev.touches.length!==1 || !holdReady()) return;
   const target=ev.target, uid=dataOf(target && target.closest && target.closest('.card'),'uid');
@@ -754,7 +759,10 @@ function holdRelease(){
 document.addEventListener('touchend',holdRelease,HOLD_OPT);
 document.addEventListener('touchcancel',holdRelease,HOLD_OPT);
 document.addEventListener('scroll',holdCancel,true);
-document.addEventListener('pointerdown',ev=>{ if(ev.pointerType==='mouse') HOLD_CLICK=null; },true);
+document.addEventListener('pointerdown',ev=>{
+  SEL_KEYBOARD=false;
+  if(ev.pointerType==='mouse') HOLD_CLICK=null;
+},true);
 document.addEventListener('contextmenu',ev=>{
   const uid=dataOf(ev.target && ev.target.closest && ev.target.closest('.card'),'uid');
   if(!uid) return;
@@ -764,6 +772,8 @@ document.addEventListener('contextmenu',ev=>{
 },true);
 // 点击分流（捕获阶段，先于卡片自己的 onclick）
 document.addEventListener('click',ev=>{
+  // 键盘/辅助技术的 click.detail 为0；鼠标及触摸则保留指针退出语义。
+  if(ev.detail===0) SEL_KEYBOARD=true; else if(ev.detail>0) SEL_KEYBOARD=false;
   if(holdClickGuard(ev)) return;
   const t=ev.target; if(!t || !t.closest) return;
   const boxUid=SEL_MODE ? dataOf(t.closest('.card-check'),'checkUid') : undefined;
@@ -1719,6 +1729,7 @@ if(window.visualViewport){
 
 /* ---- 卡片键盘可达 ---------------------------------------------------- */
 function cardKeys(ev,uid){
+  SEL_KEYBOARD=true;
   // 多选圆框是卡片里的真按钮：它自己的回车/空格不能被当成“打开卡片”
   if(ev.target && ev.target.closest && ev.target.closest('.card-check')) return;
   // 键盘进入/切换多选（对应 Cmd/Ctrl+点击）；竖屏模式里 Enter/空格也是切换
