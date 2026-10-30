@@ -583,7 +583,8 @@ body.settings{background:var(--paper)}
 /* Draw selected edges inside the control, clear of the settings scroll clips. */
 .set-nav-item.on{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--line)}
 /* 右栏是 flex 列但不滚：标题、说明、新增条固定，只让下面的列表滚。 */
-.set-pane{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:0 6px 20px 0}
+/* 左右各留 6px 给输入框外扩的焦点环；负外边距让内容仍对齐原来的左缘。 */
+.set-pane{display:flex;flex-direction:column;min-height:0;overflow:hidden;margin-left:-6px;padding:0 6px 20px}
 .set-pane-scroll{overflow-y:auto}
 .set-pane h2,.set-hint,.set-add,.set-tools,.sk-headrow,.set-foot{flex:0 0 auto}
 .set-pane h2{margin:0 0 4px;font-size:var(--fs-xl)}
@@ -817,6 +818,8 @@ body.portrait .detail.swap>*{animation:none}
 body.selecting .toolbar{opacity:0;visibility:hidden;transition:opacity 90ms var(--ease-in),visibility 0s linear 90ms}
 body.selecting .selbar{position:relative;opacity:1;visibility:visible;transform:none;
  transition:opacity var(--t) var(--ease) 90ms,transform var(--t-slow) var(--ease) 90ms,visibility 0s linear 90ms}
+/* 操作栏与筛选芯片同底色：把芯片行下方留白挪一部分到上方，总高不变，列表不跳。 */
+body.selecting .chips{padding-top:6px;padding-bottom:4px}
 .selbtn{transition:background-color var(--t) var(--ease),border-color var(--t) var(--ease),opacity var(--t) var(--ease),
  transform var(--t-fast) var(--ease)}
 .selbtn:active{transform:scale(.96)}
@@ -1011,6 +1014,9 @@ body.portrait .more-panel .skillpick>button.ctl .v{font-size:16px}   /* 与旁�
 .geo-control .geo-apply{flex-shrink:0;min-height:36px;padding:0 12px;border-top-left-radius:0;
  border-bottom-left-radius:0;color:var(--accent-ink)}
 .geo-control .ctl{border-right-width:0}
+/* 输入框没有右边框，生效/报错时由按钮左边框补上同色的一边。 */
+.geo-control .ctl.on+.geo-apply{border-left-color:var(--accent)}
+.geo-control.invalid .ctl+.geo-apply{border-left-color:var(--bad-line)}
 .geo-control .ctl:focus-within,.geo-control .geo-apply:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .geo-control.invalid .ctl{border-color:var(--bad-line);background:var(--bad-tint)}
 .geo-empty b{overflow-wrap:anywhere}

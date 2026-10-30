@@ -126,6 +126,26 @@ def test_card() -> None:
     check("卡片原文沿用报告的截断，悬停给完整原文", "…" in visible(capped) and long_raw in capped)
 
 
+def test_layout_clearances() -> None:
+    print("\n== 布局留白：芯片、设置焦点环、地点接缝 ==")
+    css = (ROOT / "jobs" / "panel_assets" / "panel.css").read_text(encoding="utf-8")
+    base = re.search(r'(?m)^\.chips\{[^}]*padding:0 20px 10px\}', css)
+    selecting = re.search(r'(?m)^body\.selecting \.chips\{padding-top:(\d+)px;padding-bottom:(\d+)px\}', css)
+    check("多选时芯片与操作栏分开，且芯片行总高不变（列表不跳）",
+          base is not None and selecting is not None and int(selecting[1]) > 0
+          and int(selecting[1]) + int(selecting[2]) == 10, str(selecting))
+    ring = re.search(r'(?m)^:focus-visible\{outline:(\d+)px solid var\(--accent\);outline-offset:(\d+)px\}', css)
+    pane = re.search(r'(?m)^\.set-pane\{[^}]*margin-left:-(\d+)px;padding:0 (\d+)px 20px\}', css)
+    check("设置窗格左右留白容得下外扩焦点环，内容左缘不变",
+          ring is not None and pane is not None and pane[1] == pane[2]
+          and int(pane[2]) >= int(ring[1]) + int(ring[2]), str(pane))
+    check("地点框无右边框：生效/报错时由应用按钮补同色接缝",
+          ".geo-control .ctl{border-right-width:0}" in css
+          and ".geo-control .ctl.on+.geo-apply{border-left-color:var(--accent)}" in css
+          and ".geo-control.invalid .ctl+.geo-apply{border-left-color:var(--bad-line)}" in css
+          and css.index(".geo-control .ctl.on+.geo-apply") < css.index(".geo-control.invalid .ctl+.geo-apply"))
+
+
 def test_detail() -> None:
     print("\n== 详情：完整原文 + 「为什么是 …」折叠区 ==")
     for lang in ("zh", "en"):
@@ -259,6 +279,7 @@ def test_settings_sections() -> None:
 def main() -> int:
     test_shared_tags_unchanged()
     test_card()
+    test_layout_clearances()
     test_detail()
     test_page_controls()
     test_settings_sections()
