@@ -1080,6 +1080,28 @@ async function testMenuPlacement() {
     check("上方不足且下方更大：放下方，不顶出屏幕上沿", nearTop.top >= 0, `top=${nearTop.top}`);
     check("可用空间不足一行时：菜单仍不越过可见窗口下沿", nearTop.bottom <= 116, `bottom=${nearTop.bottom}`);
   }
+  {
+    const t = loadPanel({ portrait: true });
+    const sheet = new El("div"); t.ids.set("label-sheet", sheet);
+    let inputTop = 900;
+    const input = new El("input");
+    input.getBoundingClientRect = () => ({ left: 18, top: inputTop, bottom: inputTop + 38, width: 354 });
+    const menu = new El("div"); menu.offsetHeight = 216; menu.classList.add("open");
+    t.ids.set("note-menu", menu); t.reg[".note input"] = [input];
+    input.focus();
+    t.docEvent("scroll", { target: t.document.body });
+    const movingTop = menu.style.top;
+    inputTop = 400; // Drawer finishes moving without a viewport/scroll event.
+    t.docEvent("transitionend", { target: new El("div"), propertyName: "transform" });
+    t.docEvent("transitionend", { target: sheet, propertyName: "opacity" });
+    eq("无关过渡不会重新定位备注候选", menu.style.top, movingTop);
+    t.docEvent("transitionend", { target: sheet, propertyName: "transform" });
+    eq("标注抽屉停止移动后，候选跟随输入框最终位置", menu.style.top, "442px");
+    check("抽屉重定位保留候选，不触发保存", menu.classList.contains("open") && t.calls.length === 0);
+    t.document.activeElement = t.document.body;
+    t.docEvent("transitionend", { target: sheet, propertyName: "transform" });
+    check("抽屉动画结束时已失焦，不重开候选", !menu.classList.contains("open"));
+  }
 }
 
 async function testIneligibleLast() {

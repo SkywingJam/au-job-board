@@ -1281,6 +1281,13 @@ document.addEventListener('scroll',ev=>{
   if(t && menus.some(el=>el===t || el.contains(t))) return;
   syncMenusOnScroll();
 },true);
+// The note input moves while its sheet slides in. Focus can arrive before
+// that movement ends, without a scroll/viewport event at its final position.
+document.addEventListener('transitionend',ev=>{
+  if(ev.target===document.getElementById('label-sheet') && ev.propertyName==='transform'){
+    syncMenusOnScroll();
+  }
+});
 window.addEventListener('resize',()=>{
   skillMenuClose(); noteClose(); skillPanelClose(); choicePanelClose(null,false); geoPanelClose(); fitLayout();
 });

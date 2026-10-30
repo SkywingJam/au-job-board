@@ -426,7 +426,8 @@ def serve(config: dict, config_path=None, rules_path=None, skills_path=None) -> 
           f"{time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("  Ctrl-C 停止")
     if mcp:
-        print(f"  只读 MCP：{mcp.url}")
+        mode = "MCP（含标注写入）" if mcp.api.api.allow_label_writes else "只读 MCP"
+        print(f"  {mode}：{mcp.url}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
