@@ -33,7 +33,8 @@
   独立星标与「想投」共同组成优先投递队列；可选的资格纠正会保留原分析证据。
 - **报告**：输出 CSV 与 Markdown 报告，其中包含用于核查硬过滤的排除清单。
 - **与 agent 共用记录**：可选的认证 HTTP API 和 MCP 提供同一批岗位、筛选与只读查询，
-  供你的 agent 取数或制作报告；这些接口不会抓取、改标注或提交申请。
+  供你的 agent 取数或制作报告；这些接口不会抓取或提交申请，默认也不改标注
+  （可显式开启仅限进度与星标的批量更新）。
 
 面板支持中文和英文界面、浅色和深色主题，适配桌面与手机宽度。
 
@@ -164,8 +165,8 @@ AU Job Board 未在 PyPI 发布 Python 包。macOS 推荐从 `https://github.com
 | [使用指南](docs/usage.md) | 流程、命令、本地数据、备注、语言 |
 | [抓取设置与更新](docs/manual-updates.md) | 下次运行配置编辑、面板后台更新、失败与并发限制（英文） |
 | [地点与人工记录](docs/location-workflow.md) | 展示代表、离线地点搜索与组级人工记录（英文） |
-| [只读 agent API](docs/agent-api.md) | 回环认证读取、稳定分页、精确批次与外部日报取数（英文） |
-| [可选 MCP](docs/mcp.md) | 随面板启动的四个只读 MCP 工具（英文） |
+| [agent API](docs/agent-api.md) | 默认只读：回环认证读取、稳定分页、精确批次与外部日报取数；可选批量标注（英文） |
+| [可选 MCP](docs/mcp.md) | 随面板启动的四个只读 MCP 工具；另有需显式开启的批量标注工具（英文） |
 | [配置说明](docs/public-configuration.md) | 配置文件、路径、来源、面板设置 |
 | [规则 profile](docs/legacy-rule-profiles.md) | 六个 profile、逐条规则开关、如何让改动生效 |
 | [资格快照](docs/eligibility-profiles.md) | 独立的只读 `eligibility` 配置段 |

@@ -1,7 +1,11 @@
-"""Authenticated loopback HTTP reads for external agents; no writer is mounted.
+"""Authenticated loopback HTTP reads for external agents.
 
 Run ``python -m jobs.agent_api --help``. The normal application must upgrade the
-DB first. This process only opens existing databases with mode=ro/query_only.
+DB first. Reads open existing databases with mode=ro/query_only. The only write
+route, ``POST /api/v1/labels/batch``, is mounted but refused unless
+``agent_api.allow_label_writes`` is true; it opens an existing DB with mode=rw
+(no creation, migration or journal-mode change) and only after the request is
+fully validated.
 """
 from __future__ import annotations
 
@@ -33,6 +37,10 @@ from . import locations, migrations, panel_data, report, run_state, skills
 UTC = dt.timezone.utc
 DAY_ZONE = 'Australia/Melbourne'
 PREFIX = '/api/v1'
+LABEL_BATCH_PATH = PREFIX + '/labels/batch'
+MAX_LABEL_BODY = 32 * 1024  # fits the 64 KiB MCP request envelope
+BODY_DEADLINE = 15  # seconds for a whole request body
+DRAIN_LIMIT = 256 * 1024  # unread bytes consumed before an early rejection
 
 
 class APIError(Exception):
@@ -52,6 +60,35 @@ def read_connection(path):
     try:
         conn.execute('PRAGMA query_only=ON')
         conn.execute('BEGIN')
+        if conn.execute('PRAGMA user_version').fetchone()[0] != migrations.SCHEMA_VERSION:
+            raise APIError('schema_upgrade_required', 503)
+        return conn
+    except BaseException:
+        conn.close()
+        raise
+
+
+def label_writes_enabled(config):
+    """Strict opt-in: only a literal true in agent_api enables label writes."""
+    section = config.get('agent_api', {})
+    if not isinstance(section, dict):
+        raise ValueError('agent_api must be an object')
+    value = section.get('allow_label_writes', False)
+    if type(value) is not bool:
+        raise ValueError('agent_api.allow_label_writes must be boolean')
+    return value
+
+
+def write_connection(path):
+    """Existing DB only: mode=rw, no mkdir, migration or journal-mode change.
+
+    The write transaction starts here so the schema check and every later read
+    and write share one BEGIN IMMEDIATE; closing without commit rolls back.
+    """
+    conn = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=rw', uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute('BEGIN IMMEDIATE')
         if conn.execute('PRAGMA user_version').fetchone()[0] != migrations.SCHEMA_VERSION:
             raise APIError('schema_upgrade_required', 503)
         return conn
@@ -324,6 +361,7 @@ class AgentAPI:
         self.db_path = config_mod.db_path(config)
         self.panel_base = _panel_base(panel_url)
         self.store = store if store is not None else snapshot_store(config)
+        self.allow_label_writes = label_writes_enabled(config)
 
     def _candidates(self, conn, query):
         scope, batch = query['scope'], None
@@ -419,6 +457,17 @@ class AgentAPI:
                     conn.close()
         return {'api_version': 1, 'as_of': as_of, 'snapshot_id': sid, 'item': result}
 
+    def label_batch(self, raw_items):
+        """Absolute action/priority assignment for exact UIDs, all or nothing."""
+        if not self.allow_label_writes:
+            raise APIError('label_writes_disabled', 403)
+        items = labels.parse_progress_items(raw_items)  # before any DB access
+        with closing(write_connection(self.db_path)) as conn:
+            results = labels.set_progress_batch(conn, items, source='api')
+        updated = sum(1 for result in results if result['changed'])
+        return {'api_version': 1, 'updated': updated, 'unchanged': len(results) - updated,
+                'items': [{**result, 'human_scope': 'group'} for result in results]}
+
     def batches(self, batch_id, qs):
         from . import batches
         with closing(read_connection(self.db_path)) as conn:
@@ -442,7 +491,7 @@ class AgentAPI:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'jobs-readonly'
+    server_version = 'jobs-agent'
     protocol_version = 'HTTP/1.1'
 
     def setup(self):
@@ -516,7 +565,115 @@ class Handler(BaseHTTPRequestHandler):
         if self._authorized():
             self._json({'error': 'method_not_allowed'}, 405)
 
-    do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = do_TRACE = do_CONNECT = _not_allowed
+    def _read_chunks(self, size):
+        deadline = time.monotonic() + BODY_DEADLINE
+        chunks = []
+        timeout = self.connection.gettimeout()
+        try:
+            while size > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError()
+                self.connection.settimeout(min(timeout, remaining) if timeout is not None else remaining)
+                chunk = self.rfile.read1(min(size, 8192))
+                if not chunk:
+                    raise APIError('invalid_request')  # connection ended early
+                chunks.append(chunk)
+                size -= len(chunk)
+                self._unread -= len(chunk)
+        finally:
+            self.connection.settimeout(timeout)
+        return b''.join(chunks)
+
+    def _label_body(self):
+        types = self.headers.get_all('Content-Type') or []
+        if len(types) != 1 or self.headers.get_content_type() != 'application/json' or (
+                (self.headers.get_param('charset') or 'utf-8').lower() != 'utf-8'):
+            raise APIError('unsupported_media_type', 415)
+        lengths = self.headers.get_all('Content-Length') or []
+        if self.headers.get('Transfer-Encoding') is not None:
+            raise APIError('invalid_request')
+        if len(lengths) != 1 or not (lengths[0].isascii() and lengths[0].isdigit()):
+            raise APIError('length_required', 411)
+        size = int(lengths[0])
+        if size > MAX_LABEL_BODY:
+            raise APIError('payload_too_large', 413)
+        text = self._read_chunks(size).decode('utf-8')
+
+        def keys_once(pairs):
+            value = dict(pairs)
+            if len(value) != len(pairs):
+                raise ValueError('duplicate key')
+            return value
+
+        def finite_only(_name):
+            raise ValueError('non-finite number')
+
+        body = json.loads(text, object_pairs_hook=keys_once, parse_constant=finite_only)
+        if not isinstance(body, dict) or set(body) != {'items'}:
+            raise APIError('invalid_request')
+        return body['items']
+
+    def do_POST(self):
+        if not self._authorized():
+            return
+        self._unread = self._declared_length()
+        try:
+            parsed = urlsplit(self.path)
+            if parsed.scheme or parsed.netloc or parsed.fragment or len(self.path) > 4096:
+                raise APIError('invalid_request')
+            if parsed.path != LABEL_BATCH_PATH:
+                raise APIError('method_not_allowed', 405)
+            if parsed.query:
+                raise APIError('invalid_query')
+            if not self.server.api.allow_label_writes:
+                raise APIError('label_writes_disabled', 403)
+            items = self._label_body()
+            result = self.server.api.label_batch(items)
+        except labels.BatchLabelError as exc:
+            self._drain()
+            body = {'error': exc.code}
+            if exc.index is not None:
+                body['index'] = exc.index
+            self._json(body, 409 if exc.code == 'label_not_effective' else 400)
+            return
+        except APIError as exc:
+            self._drain()
+            self._json({'error': exc.code}, exc.status)
+            return
+        except TimeoutError:
+            self._json({'error': 'request_timeout'}, 408)
+            return
+        except (ValueError, UnicodeError, RecursionError):
+            self._drain()
+            self._json({'error': 'invalid_json'}, 400)
+            return
+        except (sqlite3.Error, OSError, KeyError, TypeError):
+            self._drain()
+            self._json({'error': 'data_unavailable'}, 503)
+            return
+        self._json(result)
+
+    def _declared_length(self):
+        try:
+            return max(int(self.headers.get('Content-Length', '0')), 0)
+        except ValueError:
+            return 0
+
+    def _drain(self):
+        """Consume a bounded unread body so the rejection is not lost to a reset."""
+        deadline = time.monotonic() + 5
+        remaining = min(getattr(self, '_unread', 0), DRAIN_LIMIT)
+        try:
+            while remaining > 0 and time.monotonic() < deadline:
+                chunk = self.rfile.read1(min(remaining, 8192))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
+
+    do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = do_TRACE = do_CONNECT = _not_allowed
 
 
 def make_server(config, token, *, host='127.0.0.1', port=8091, panel_url='http://127.0.0.1:8090/', store=None):
@@ -563,9 +720,10 @@ def main(argv=None):
         conn = read_connection(config_mod.db_path(config)); conn.close()
         server = make_server(config, token, host=args.host, port=args.port, panel_url=args.panel_url)
     except (OSError, ValueError, APIError, sqlite3.Error):
-        parser.exit(2, 'Cannot start read-only API: check host (wildcard requires JOBS_CONTAINER=1), '
+        parser.exit(2, 'Cannot start API: check host (wildcard requires JOBS_CONTAINER=1), '
                     'config, owner-only token file and upgraded database.\n')
-    print(f'Read-only API listening on {args.host}:{server.server_port}', flush=True)
+    mode = 'label writes ENABLED' if server.api.allow_label_writes else 'read-only'
+    print(f'API ({mode}) listening on {args.host}:{server.server_port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

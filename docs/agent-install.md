@@ -58,7 +58,8 @@ alone does not authorize replacing an existing installation.
 > do not offer or configure an unverified scheduler by default. Also ask whether
 > I want you, the installing agent, connected to this installation through its
 > optional read-only MCP; it stays off unless I choose it, and you must not edit
-> any other client's configuration. Do not expose the panel or push anything to
+> any other client's configuration. Never enable its label-write option for me
+> unless I ask for it explicitly. Do not expose the panel or push anything to
 > GitHub.
 
 ## Getting the source
@@ -215,7 +216,8 @@ configured as an MCP client of this installation. Explain briefly that MCP:
   (already included in the Docker image),
 - enables `mcp` in their `config.yaml` and creates an owner-only token file,
 - listens with the panel on the same address and the panel port plus one,
-- is read-only, but plain HTTP beyond loopback sends the token and job data in
+- is read-only by default (label writes are a separate opt-in that you must not
+  enable unasked), but plain HTTP beyond loopback sends the token and job data in
   clear text unless TLS is configured.
 
 If the user agrees, prepare the chosen installation first:

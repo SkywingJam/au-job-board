@@ -99,7 +99,11 @@ docker compose restart panel
 Connect your MCP client to `http://127.0.0.1:8091/mcp` using its private secret
 configuration. Verify discovery of the four [read-only tools](mcp.md#tools-and-a-first-read)
 and one `list_jobs` call. An empty successful snapshot is valid on a new DB.
-The server identifies itself as `AU Job Board (read-only)`.
+The server identifies itself as `AU Job Board (read-only)`. The optional batch
+label tool is off by default; to enable it, add `allow_label_writes: true`
+under `agent_api` in `/app/config/config.yaml` and restart the services that read
+it (see [MCP](mcp.md#optional-batch-label-tool)). Both Compose services mount the
+same writable data volume.
 
 The HTTP API is independent of MCP. After the panel has initialized/upgraded the
 database and the token exists, start it with:

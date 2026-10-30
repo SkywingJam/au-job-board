@@ -10,7 +10,7 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 42 checks: 37 Python tests
+be collected by accident. The entry currently has 43 checks: 38 Python tests
 plus five Node behavior tests.
 
 Run it from the project root with the project interpreter:
@@ -21,10 +21,10 @@ Run it from the project root with the project interpreter:
 ```
 
 The optional MCP adapter has two opt-in integration entries:
-`python tools/run_public_tests.py --with-mcp` (44 entries on macOS).
+`python tools/run_public_tests.py --with-mcp` (45 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default local command keeps
-42 entries. Release CI installs the optional SDK and runs all 44 entries.
+43 entries. Release CI installs the optional SDK and runs all 45 entries.
 See [MCP](mcp.md).
 
 It prints one line per test with the command, the exit status and the elapsed
@@ -53,6 +53,7 @@ nothing in the suite fetches listings.
 | `tools/test_file_security.py` | POSIX modes, Windows ACL dispatch/failures and native private/public token checks | all; native ACL case on Windows |
 | `tools/test_platform_install.py` | Melbourne DST, Git autocrlf byte stability, Chinese/space paths | all |
 | `tools/test_agent_api.py` | Authenticated read-only HTTP, frozen pagination/detail, scope and external client failures | all |
+| `tools/test_batch_labels.py` | Opt-in batch label write: gate and config, one-transaction group-aware action/priority assignment, explicit clears, no-op repeats, whole-batch rejection, rollback/retry, concurrent partial edits, schema/missing DB, HTTP boundaries and the client transport (the MCP tool is in the opt-in MCP entries) | all |
 | `tools/test_batches.py` | Exact fetch membership, source transactions and schema 3 recovery | all |
 | `tools/test_location_http.py` | Group-level writes, location query guidance and same-origin protection | all |
 | `tools/test_locations.py` | Offline Australian geography, ambiguity, three-tier matching and the ABS metropolitan-area reference | all |
@@ -107,7 +108,7 @@ published API/MCP port checks use a temporary bridge without fetching. See
 ## Windows coverage
 
 The same entry runs on native Windows x64 / Python 3.12. On Windows there are
-41 default entries or 43 with MCP; only the macOS LaunchAgent entry is
+42 default entries or 44 with MCP; only the macOS LaunchAgent entry is
 inapplicable. CI also runs it on GitHub-hosted `windows-2022` from the documented `.venv`,
 with `PYTHONUTF8=1` and Git for Windows' openssl; that job uses the runner's
 administrator account, so ordinary-account acceptance stays a separate native

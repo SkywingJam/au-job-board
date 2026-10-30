@@ -46,6 +46,8 @@ PYTHON_TESTS = (
     ("tools/test_file_security.py", "private save permissions and shared token ACL validation", None),
     ("tools/test_platform_install.py", "timezone data, LF resources and Unicode source paths", None),
     ("tools/test_agent_api.py", "authenticated read-only snapshots and external agent client", None),
+    ("tools/test_batch_labels.py",
+     "opt-in batch label write API: atomic group-aware progress/priority, gates and client", None),
     ("tools/test_batches.py", "exact fetch membership and schema 3 recovery", None),
     ("tools/test_location_http.py", "location HTTP scope and same-origin protection", None),
     ("tools/test_locations.py", "offline Australian location reference and matching", None),

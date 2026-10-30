@@ -95,7 +95,8 @@ class MCPHTTPService:
             # Internal API stays loopback-only and authenticated, with no fixed extra port.
             self.api = agent_api.make_server(config, token, port=0,
                 panel_url=f'http://{configured_host}:{port}/')
-            server = make_server(APIClient(f'http://127.0.0.1:{self.api.server_port}', token))
+            server = make_server(APIClient(f'http://127.0.0.1:{self.api.server_port}', token),
+                                 allow_label_writes=self.api.api.allow_label_writes)
             authority = f'{configured_host}:{self.port}'
             security = TransportSecuritySettings(allowed_hosts=[authority], allowed_origins=[])
             app = BearerGuard(server.streamable_http_app(json_response=True, stateless_http=True,

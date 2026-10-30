@@ -15,8 +15,8 @@ English.
 | [manual-updates.md](manual-updates.md) | Editable next-run fetch settings, background updates, configuration timing and failure states |
 | [location-workflow.md](location-workflow.md) | Group representative choice, one-box location search, block ordering and limits |
 | [location-data.md](location-data.md) | Offline Australian reference data, attribution, precision and matching limits |
-| [agent-api.md](agent-api.md) | Authenticated read-only HTTP snapshots, exact batches and external report clients |
-| [mcp.md](mcp.md) | Optional read-only MCP over app-owned Streamable HTTP or local stdio |
+| [agent-api.md](agent-api.md) | Authenticated HTTP snapshots (read-only by default), exact batches, external report clients and the opt-in batch label write |
+| [mcp.md](mcp.md) | Optional MCP over app-owned Streamable HTTP or local stdio: four read tools, plus an opt-in batch label tool |
 | [public-configuration.md](public-configuration.md) | The configuration file, paths, sources and which files stay private |
 | [legacy-rule-profiles.md](legacy-rule-profiles.md) | The six rule profiles, per-rule switches and how to apply a change |
 | [eligibility-profiles.md](eligibility-profiles.md) | The separate, read-only `eligibility` section and command |
