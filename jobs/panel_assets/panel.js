@@ -573,45 +573,46 @@ function noteClosed(v){
 /* typed=true 表示是「打字」触发的，此时用输入内容过滤；
    点一下只是聚焦时（typed=false）显示**全部**候选 —— 否则已经写了备注的岗位
    一聚焦就只剩「无匹配候选」，等于候选表白做。 */
-/* 下拉菜单定位。**必须用 visualViewport**：iOS 弹键盘时 layout viewport 不变
-   （window.innerHeight 也不变），屏幕下沿已经被键盘盖住；用 innerHeight 算
-   「下方够不够」会以为够，菜单就排到键盘背后 —— 现象正是「闪一下没了 /
-   被上推遮住输入框」。visualViewport 给的是真正可见的那块，按它选上/下，
-   两边都不够时压缩高度，始终不盖住输入框。 */
+/* 下拉菜单定位。可见区域必须按 visualViewport 算：iOS 弹键盘时 layout viewport
+   不变（window.innerHeight 也不变），屏幕下沿已经被键盘盖住；用 innerHeight 算
+   「下方够不够」会以为够，菜单就排到键盘背后。
+   **坐标系只有一个：layout viewport。** getBoundingClientRect() 和 position:fixed
+   的 top/left 在本机浏览器中以它为原点；visualViewport.offsetLeft/Top 是
+   「可见窗口的左上角在 layout viewport 里的位置」。所以 offset 只用来划定可见范围
+   [offset, offset+size]，**不能从要写进 fixed 的 top/left 里再减一次**：减了之后
+   菜单被整体上推 offset，与输入框的间隙恰好多出 offset，键盘弹出、页面被推上去
+   （offsetTop 很大）时菜单就跑出屏幕上沿。桌面无键盘、未缩放时 offset 恒为 0，
+   行为与原先相同。两边都放不下时压缩高度并贴着输入框，不盖住输入框。 */
 function placeMenu(input,menu,opts){
   opts=opts||{};
   const gap=opts.gap||4;
   const minWidth=opts.minWidth||200;
   const vv=window.visualViewport;
-  // 统一换算到 **可见视口坐标**。iOS 弹键盘时 fixed 元素按可见视口定位，而
-  // getBoundingClientRect 给的是 layout 坐标，差值就是 offsetTop/offsetLeft。
-  // 页面在顶部时 iOS 只能平移可见视口，差值最大 —— 不换算就会整体上移盖住
-  // 输入框；先手动下滑过之后差值归 0，所以那种情况看着正常。桌面无键盘时
-  // offset 恒为 0，退化成原来的行为。
   const ox=vv?vv.offsetLeft:0, oy=vv?vv.offsetTop:0;
   const viewW=vv?vv.width:window.innerWidth;
   const viewH=vv?vv.height:window.innerHeight;
+  const visLeft=ox, visTop=oy, visRight=ox+viewW, visBottom=oy+viewH;
   const r=input.getBoundingClientRect();
-  const left=r.left-ox, top=r.top-oy, bottom=r.bottom-oy;
-  menu.style.left=Math.max(4,left)+'px';
-  menu.style.width=Math.min(Math.max(minWidth,r.width),viewW-8)+'px';
+  const width=Math.min(Math.max(minWidth,r.width),viewW-8);
+  menu.style.left=Math.max(visLeft+4,Math.min(r.left,visRight-4-width))+'px';
+  menu.style.width=width+'px';
   menu.style.maxHeight='';                 // 恢复 CSS 上限，才能量到真实高度
   menu.classList.add('open');              // 先显示才能量高度
   const h=menu.offsetHeight;
-  const below=viewH-bottom-gap;
-  const above=top-gap;
+  const below=visBottom-r.bottom-gap;
+  const above=r.top-visTop-gap;
   if(h<=below){                            // 下方够：放下面
-    menu.style.top=(bottom+gap)+'px';
+    menu.style.top=(r.bottom+gap)+'px';
   } else if(h<=above){                     // 上方够：放上面
-    menu.style.top=(top-h-gap)+'px';
-  } else if(below>=above){                 // 两边都不够：挑大的一侧并压缩高度
-    const avail=Math.max(96,below);
+    menu.style.top=(r.top-h-gap)+'px';
+  } else if(below>=above){                 // 两边都不够：挑大的一侧并压缩高度（与屏幕边缘也留 gap）
+    const avail=Math.max(0,below-gap);
     menu.style.maxHeight=avail+'px';
-    menu.style.top=Math.min(bottom+gap,viewH-avail)+'px';
+    menu.style.top=(r.bottom+gap)+'px';
   } else {
-    const avail=Math.max(96,above);
+    const avail=Math.max(0,above-gap);
     menu.style.maxHeight=avail+'px';
-    menu.style.top=Math.max(gap,top-avail-gap)+'px';
+    menu.style.top=(r.top-avail-gap)+'px';
   }
 }
 function noteRender(input,typed){

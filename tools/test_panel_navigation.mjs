@@ -1029,6 +1029,59 @@ async function testSkillCandidates() {
   }
 }
 
+/* 候选菜单定位：getBoundingClientRect 与 position:fixed 的 top/left 同属 layout viewport，
+   visualViewport.offset* 只划定可见范围，不能再从写入的坐标里减去（否则键盘/缩放把
+   可见窗口推离原点时，菜单会整体上移 offset、与输入框拉开同样大的间隙）。 */
+async function testMenuPlacement() {
+  console.log("\n-- 候选菜单定位：visualViewport 偏移（模拟坐标，不是真机键盘）--");
+  const place = (rect, vv, height = 216) => {
+    const t = loadPanel({ skills: [{ name: "Python", display_name: "Python", aliases: [] }], owners: [["python", "Python"]] });
+    if (vv) t.sandbox.visualViewport = vv;
+    const input = new El("input"); input.id = "skill-q"; input.value = "py";
+    input.getBoundingClientRect = () => ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height });
+    const menu = new El("div"); menu.offsetHeight = height;
+    t.ids.set("skill-q", input); t.ids.set("skill-menu", menu);
+    t.api.skillRender();
+    const top = parseFloat(menu.style.top), left = parseFloat(menu.style.left);
+    const shown = menu.style.maxHeight ? parseFloat(menu.style.maxHeight) : height;
+    return { top, left, bottom: top + shown, width: parseFloat(menu.style.width), maxHeight: menu.style.maxHeight, open: menu.classList.contains("open") };
+  };
+  const rect = { left: 29, top: 273, width: 332, height: 35 };      // bottom 308
+  {
+    const base = place(rect, undefined);
+    eq("无 visualViewport（桌面）：放在输入框下方，间隙 4", [base.top, base.left, base.open], [312, 29, true]);
+    const zero = place(rect, { offsetLeft: 0, offsetTop: 0, width: 390, height: 664 });
+    eq("offset 为 0 与无 visualViewport 一致", [zero.top, zero.left], [base.top, base.left]);
+  }
+  {
+    // 缩放/键盘把可见窗口推到 layout 的 (73,109)：菜单仍紧贴输入框下沿，且在可见窗口内
+    const vv = { offsetLeft: 73, offsetTop: 109, width: 244, height: 415 };
+    const m = place(rect, vv);
+    eq("可见窗口偏移：top 仍是输入框下沿 + gap，没有再减 offsetTop", m.top, 312);
+    check("可见窗口偏移：菜单不越过可见窗口下沿", m.bottom <= vv.offsetTop + vv.height, `bottom=${m.bottom}`);
+    check("可见窗口偏移：水平留在可见窗口内", m.left >= vv.offsetLeft + 4 && m.left + m.width <= vv.offsetLeft + vv.width - 4, `left=${m.left} width=${m.width}`);
+  }
+  {
+    // 键盘形态：输入框在布局视口底部（备注抽屉），可见窗口被推上去 300，只剩 300 高
+    const low = { left: 18, top: 600, width: 354, height: 38 };
+    const vv = { offsetLeft: 0, offsetTop: 300, width: 390, height: 300 };
+    const m = place(low, vv);
+    eq("键盘形态：下方放不下，放到输入框上方并紧贴（间隙 4）", m.bottom, 596);
+    check("键盘形态：菜单整体在可见窗口内（不在屏幕上沿之外）", m.top >= vv.offsetTop, `top=${m.top} visibleTop=${vv.offsetTop}`);
+  }
+  {
+    // 上下都放不下：选大的一侧、压缩高度，并且不盖住输入框、不越过可见窗口
+    const vv = { offsetLeft: 0, offsetTop: 0, width: 390, height: 300 };
+    const tight = { left: 29, top: 150, width: 332, height: 38 };    // 上 146 / 下 108
+    const m = place(tight, vv);
+    check("两边都不够：压缩高度并贴着输入框，不盖住它", m.maxHeight !== "" && (m.bottom <= tight.top - 4 + 0.01 || m.top >= tight.top + tight.height + 4 - 0.01), `top=${m.top} bottom=${m.bottom}`);
+    check("两边都不够：不越过可见窗口", m.top >= 0 && m.bottom <= vv.height, `top=${m.top} bottom=${m.bottom}`);
+    const nearTop = place({ left: 29, top: 40, width: 332, height: 38 }, { offsetLeft: 0, offsetTop: 0, width: 390, height: 120 });
+    check("上方不足且下方更大：放下方，不顶出屏幕上沿", nearTop.top >= 0, `top=${nearTop.top}`);
+    check("可用空间不足一行时：菜单仍不越过可见窗口下沿", nearTop.bottom <= 116, `bottom=${nearTop.bottom}`);
+  }
+}
+
 async function testIneligibleLast() {
   console.log("\n-- v1.3.1：资格不符置后的按视图记忆与纠正后的列表连续性 --");
   const t = loadPanel();
@@ -1097,6 +1150,7 @@ async function main() {
   await testDetailOpenRefreshesLabel();
   await testFilterDrawer();
   await testSkillCandidates();
+  await testMenuPlacement();
   await testIneligibleLast();
   console.log();
   if (failures.length) {

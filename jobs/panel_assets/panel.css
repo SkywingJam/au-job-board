@@ -700,8 +700,12 @@ a.apply,.achip button,.skillopt,.note-item,.dchip,.danger-btn,.search,.note inpu
 .skeleton .sk-box{height:150px;border-radius:var(--r-box);margin:6px 0}.skeleton .sk-l.short{width:60%}
 
 /* 展开 / 收起的面板 */
-.more-panel.entering,.skill-edit.entering{animation:drop-in var(--t) var(--ease)}
-.more-panel.leaving,.skill-edit.leaving{animation:drop-out var(--t-fast) var(--ease-in) forwards}
+.more-panel.entering{animation:drop-in var(--t) var(--ease)}
+.more-panel.leaving{animation:drop-out var(--t-fast) var(--ease-in) forwards}
+/* 技能编辑框里有 position:fixed 的候选菜单。祖先在 transform 动画期间会成为 fixed
+   的包含块，菜单会按它的原点定位、动画结束后再跳回，所以这里只做透明度动画。 */
+.skill-edit.entering{animation:fade-in var(--t) var(--ease)}
+.skill-edit.leaving{animation:fade-out var(--t-fast) var(--ease-in) forwards}
 .skillpanel.open,.choicepanel.open,.geo-suggest-panel.open{animation:pop-in var(--t-fast) var(--ease);transform-origin:top left}
 .note-menu.open{animation:fade-in var(--t-fast) var(--ease)}
 .achip{animation:pop-in var(--t) var(--ease) backwards}
