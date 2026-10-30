@@ -97,6 +97,8 @@ PYTHON_TESTS = (
      "panel English / Chinese text", None),
     ("tools/test_panel_stats_http.py",
      "read-only header counts endpoint, same-origin boundary and navigation hooks (loopback)", None),
+    ("tools/test_panel_multiselect.py",
+     "panel multi-select bulk marking endpoint, same-origin boundary and rendered hooks (loopback)", None),
     ("tools/test_panel_display.py",
      "panel display layer: evidence moved not removed, shared tags unchanged", None),
     ("tools/test_skills_and_search.py",

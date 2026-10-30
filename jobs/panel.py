@@ -46,6 +46,9 @@ from .panel_views import (  # noqa: F401
 
 FORBIDDEN_HOSTS = {"0.0.0.0", "::", ""}
 EDIT_MAX_BYTES = 64 * 1024  # Complete JSON body; allow notes larger than update requests.
+# 100 items x (512-char uid + fields) stays well below this.
+LABEL_BATCH_MAX_BYTES = 128 * 1024
+LABEL_BATCH_PATH = "/api/labels/batch"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -185,6 +188,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/update":
             self._post_update(started)
             return
+        if self.path == LABEL_BATCH_PATH:
+            self._post_labels_batch(started)
+            return
         if self.path not in ("/api/label", "/api/skills"):
             self._send(b"not found", 404, "text/plain", started)
             return
@@ -285,8 +291,11 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
         self._json({key: summary[name] for key, name in STAT_KEYS.items()}, 200, started)
 
-    def _local_json(self, started: float, max_bytes=4096):
-        """Validate local-origin JSON writes before reaching any mutable state."""
+    def _local_json(self, started: float, max_bytes=4096, strict: bool = False):
+        """Validate local-origin JSON writes before reaching any mutable state.
+
+        `strict` additionally rejects duplicate object keys and NaN/Infinity,
+        which the lenient default silently accepts."""
         try:
             host_ok = self._same_origin()
             length = int(self.headers.get("Content-Length", "0"))
@@ -301,14 +310,54 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "invalid_request"}, 400, started)
             return
         try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, ValueError):
+            raw = self.rfile.read(length).decode("utf-8")
+            payload = json.loads(raw, object_pairs_hook=_unique_keys,
+                                 parse_constant=_no_constant) if strict else json.loads(raw)
+        except (UnicodeDecodeError, ValueError, RecursionError):
             self._json({"error": "invalid_request"}, 400, started)
             return
         if not isinstance(payload, dict):
             self._json({"error": "invalid_request"}, 400, started)
             return None
         return payload
+
+    def _post_labels_batch(self, started: float):
+        """Panel multi-select: absolute action/priority for several cards, all or nothing.
+
+        Same-origin and body checks are the panel's own (`_local_json`); this does
+        not depend on `agent_api.allow_label_writes`, which only gates the token
+        API. Validation and the single transaction are `labels.parse_progress_items`
+        / `labels.set_progress_batch` unchanged; nothing is looped per item here.
+        """
+        payload = self._local_json(started, LABEL_BATCH_MAX_BYTES, strict=True)
+        if payload is None:
+            return
+        if set(payload) != {"items"}:
+            self._json({"error": "invalid_request"}, 400, started)
+            return
+        conn = None
+        try:
+            items = labels_mod.parse_progress_items(payload["items"])  # before any DB access
+            conn = database.connect(_db_path(self.config))
+            results = labels_mod.set_progress_batch(conn, items, source="panel")
+        except labels_mod.BatchLabelError as exc:
+            body = {"error": exc.code}
+            if exc.index is not None:
+                body["index"] = exc.index
+            self._json(body, 409 if exc.code == "label_not_effective" else 400, started)
+            return
+        except ValueError:
+            self._json({"error": "invalid_request"}, 400, started)
+            return
+        except (sqlite3.Error, OSError):
+            self._json({"error": "write_failed"}, 503, started)
+            return
+        finally:
+            if conn is not None:
+                conn.close()
+        updated = sum(1 for result in results if result["changed"])
+        self._json({"ok": True, "updated": updated, "unchanged": len(results) - updated,
+                    "items": results}, 200, started)
 
     def _config_settings(self, payload, started):
         from .config_edit import ConfigEditError
@@ -367,6 +416,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, **result}, 200, started)
         finally:
             conn.close()
+
+
+def _unique_keys(pairs):
+    value = dict(pairs)
+    if len(value) != len(pairs):
+        raise ValueError("duplicate key")
+    return value
+
+
+def _no_constant(_name):
+    raise ValueError("non-finite number")
 
 
 def _find(conn, config, uid: str, filters=None):

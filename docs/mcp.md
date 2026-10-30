@@ -280,6 +280,6 @@ python -B tools/test_mcp.py
 python -B tools/run_public_tests.py --with-mcp
 ```
 
-The default public suite runs 43 entries; `--with-mcp` adds two
+The default public suite runs 44 entries; `--with-mcp` adds two
 entries and fails if its SDK is missing. A passing SDK client test proves the
 protocol/HTTP path, not that a particular desktop agent has installed the tools.

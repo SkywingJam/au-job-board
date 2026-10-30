@@ -332,10 +332,15 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     state = _card_state(uid, label, lang)
     tail = f'<span class="card-tail">{skills_html}{state}</span>' if skills else state
     # 搜索已挪到服务端（见 _search_text），这里不再拼 data-text
+    title = row.get("title") or ""
+    # 卡片自身不再是 role=button：按钮的子节点对辅助技术是展示性的，里面的
+    # 多选圆框就读不到。圆框是真按钮 + role=checkbox，卡片退为带名称的分组。
     return "".join([
         f'<div class="card{" done" if done else ""}" data-uid="{_e(uid)}" '
-        f'role="button" tabindex="0" '
+        f'role="group" aria-label="{_e(title)}" tabindex="0" '
         f'onclick="openJob(\'{_e(uid)}\')" onkeydown="cardKeys(event,\'{_e(uid)}\')">',
+        f'<button type="button" class="card-check" role="checkbox" aria-checked="false" '
+        f'data-check-uid="{_e(uid)}" aria-label="{_e(i18n.t(lang, "sel.check", title=title))}"></button>',
         '<div class="card-top">',
         f'<p class="t">{_e(row.get("title"))}</p>',
         f'<span class="score" title="{_e(badge_title)}">{badge}</span>',
@@ -823,6 +828,26 @@ def _chip_text(key: str, filters: dict, lang: str, skill_labels=None) -> str:
     return key
 
 
+def _selection_bar(lang: str) -> str:
+    """多选操作栏：与搜索筛选行叠在同一格里，有选择时 CSS 切换显示（panel.js selRender）。
+    筛选行的 DOM 与控件值一概不动，所以取消后原样恢复。"""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    marks = "".join(
+        f'<button type="button" class="selbtn" data-sel-action="{action}" '
+        f'onclick="selApply(\'{action}\')">{_e(i18n.value_label(lang, "action", action))}</button>'
+        for action in ("saved", "applied", "skipped"))
+    return (f'<div class="selbar" id="selbar" role="toolbar" aria-label="{_e(T("sel.bar"))}">'
+            '<span class="selbar-count" id="selbar-count" role="status" aria-live="polite"></span>'
+            f'<div class="selbar-marks" role="group" aria-label="{_e(T("sel.mark"))}">'
+            f'<span class="selbar-lbl" aria-hidden="true">{_e(T("sel.mark"))}</span>{marks}</div>'
+            f'<button type="button" class="selbtn selstar" data-sel-star onclick="selApply(\'star\')">'
+            f'<span aria-hidden="true">★</span> {_e(T("sel.star"))}</button>'
+            f'<button type="button" class="selbtn selcancel" data-sel-cancel onclick="selCancel()">'
+            f'{_e(T("sel.cancel"))}</button>'
+            '<span class="selbar-msg" id="selbar-msg" role="status" aria-live="polite" hidden></span>'
+            '</div>')
+
+
 def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", skill_labels=None) -> str:
     """工具栏 + 「更多筛选」面板 + 生效条件。
 
@@ -841,7 +866,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
                if k not in TOOLBAR_FIXED and k not in INTERFACE_HIDDEN_KEYS]
     total_active = sum(1 for k in counted if _is_active(k, filters))
 
-    out = ['<div class="toolbar">']
+    out = ['<div class="toolzone"><div class="toolbar">']
     if QUERY_KEY in allowed:
         out.append(
             f'<label class="search">{ICON_SEARCH}'
@@ -875,6 +900,8 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
     if any(k != SINCE_KEY for k in filters):
         out.append(f'<a class="clear" href="#" onclick="clearFilter();return false;">'
                    f'{_e(T("filter.clear_all"))}</a>')
+    out.append("</div>")
+    out.append(_selection_bar(lang))
     out.append("</div>")
 
     # 「更多筛选」面板：桌面是工具栏下方的展开区，竖屏是底部抽屉。

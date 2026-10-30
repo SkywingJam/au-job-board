@@ -114,7 +114,7 @@ class El {
   scrollIntoView() { this.scrolled = (this.scrolled || 0) + 1; }
 }
 
-function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], owners = [], portrait = false, keys = "" } = {}) {
+function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], owners = [], portrait = false, keys = "", i18n = {} } = {}) {
   const ids = new Map();
   const reg = {};
   const docListeners = new Map();
@@ -154,7 +154,7 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   };
   sandbox.window = sandbox;
   Object.assign(sandbox, {
-    __I18N__: {}, __LABELS__: {}, __NOTE_TAGS__: [], __NOTE_TAG_LABELS__: {}, __SKILLS__: skills,
+    __I18N__: i18n, __LABELS__: {}, __NOTE_TAGS__: [], __NOTE_TAG_LABELS__: {}, __SKILLS__: skills,
     __SKILL_OWNERS__: owners, __VIEW__: "all", __STALE_AFTER_DAYS__: 2, __RESULT_GENERATION__: "generation-1",
   });
   let reloads = 0;
@@ -191,6 +191,8 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   skillKeys, skillClean, skillOwner, choiceToggle, choicePick, choicePanelClose, choiceSetValue,
   choiceTriggerKeys, choiceOptionKeys, geoSuggest, geoFocus, geoInput, geoPanelClose, geoOptionPick,
   geoOptionKeys, fitLayout, navKeyIgnored, LABELS, SWIPE, SWIPE_SKIP,
+  SEL, HOLD, LABEL_WRITES, selToggle, selClear, selApply, selCancel, holdFire, cardKeys, applyLatestResults,
+  selState(){return {uids:[...SEL],busy:!!SEL_BUSY,hold:!!HOLD_TRACK,holdClick:!!HOLD_CLICK};},
   state(){return {uid:OPEN_UID,pending:UPDATE_PENDING,applying:UPDATE_APPLYING,gates:NAV_GATES,draft:!!FILTER_DRAFT};},
   setUpdate(v){OPEN_UID=v.uid||null;UPDATE_BASELINE=v.baseline||'';UPDATE_PENDING=v.pending||null;UPDATE_APPLYING=false;},
   addPendingNote(p){NOTE_REQUESTS.add(p);p.finally(()=>NOTE_REQUESTS.delete(p));} };
@@ -209,6 +211,8 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
     job: (uid) => ({ ok: true, json: async () => ({ html: "<detail " + uid + ">" }) }),
     label: (body) => ({ ok: true, json: async () => ({ ok: true, field: body.field, value: body.value }), text: async () => "" }),
     stats: () => ({ ok: true, json: async () => ({ labelled: 1, saved: 0, applied: 0 }) }),
+    batch: (body) => ({ ok: true, json: async () => ({ ok: true, updated: body.items.length, unchanged: 0,
+      items: body.items.map((i) => ({ uid: i.uid, action: "action" in i ? i.action : null, priority: "priority" in i ? i.priority : false, changed: true })) }) }),
     skills: () => ({ ok: true, json: async () => ({ ok: true }) }),
   };
   sandbox.fetch = async (url, opts) => {
@@ -217,6 +221,7 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
     t.calls.push(call);
     if (u.startsWith("/api/job")) return t.routes.job(decodeURIComponent(u.split("uid=")[1]));
     if (u === "/api/label") return t.routes.label(call.body);
+    if (u === "/api/labels/batch") return t.routes.batch(call.body);
     if (u === "/api/stats") return t.routes.stats();
     if (u === "/api/skills") return t.routes.skills(call.body);
     throw new Error("unexpected " + u);
@@ -312,6 +317,16 @@ async function testFrozenList() {
     eq("keyboard navigation suppresses stale hover", focusTest.reg[".list"][0].classList.contains("keyboard-nav"), true);
     focusTest.docEvent("pointermove", {});
     eq("pointer movement restores hover feedback", focusTest.reg[".list"][0].classList.contains("keyboard-nav"), false);
+  }
+  {
+    const t = loadPanel();
+    await t.api.openJob("A");
+    t.cards[0].classList.add("card"); t.cards[0].focus();
+    const waiting = manual(); t.routes.job = () => waiting.promise;
+    const moving = t.api.stepDetail(1); await tick();
+    eq("慢详情请求返回前，焦点与当前选中卡同步交接", [t.api.state().uid, t.document.activeElement], ["B", t.cards[1]]);
+    waiting.resolve({ ok: true, json: async () => ({ html: "<detail B>" }) }); await moving;
+    eq("慢详情完成后焦点仍在目的卡片", t.document.activeElement, t.cards[1]);
   }
 }
 
@@ -1584,6 +1599,389 @@ async function testSwipeBack() {
   }
 }
 
+
+/* ---- 卡片多选与批量标注 ---- */
+const I18N_SEL = {
+  "sel.count": "{n} selected", "sel.busy": "busy", "sel.limit": "limit {max}", "sel.saving": "saving",
+  "sel.failed": "failed", "sel.failed_unknown": "unknown", "sel.failed_group": "group", "sel.unconfirmed": "unconfirmed",
+  "sel.action_done": "marked {n} {status}", "sel.action_same": "same {n} {status}",
+  "sel.star_done": "star {n}", "sel.star_same": "star same {n}", "value.action.saved": "S", "value.action.applied": "A",
+  "value.action.skipped": "K",
+};
+function selPanel(opts = {}) {
+  const t = loadPanel({ i18n: I18N_SEL, ...opts });
+  const bar = new El("div"); const count = new El("span"); const msg = new El("span"); msg.hidden = true;
+  t.ids.set("selbar", bar); t.ids.set("selbar-count", count); t.ids.set("selbar-msg", msg);
+  t.bar = bar; t.count = count; t.msg = msg;
+  t.boxes = {};
+  t.cards.forEach((c) => { const box = new El("button"); box.dataset.checkUid = c.dataset.uid; c.q[".card-check"] = [box]; t.boxes[c.dataset.uid] = box; });
+  t.stat = new El("b"); t.reg["[data-stat]"] = [t.stat];
+  t.ids.set("update-start", new El("button")); t.ids.set("update-status", new El("span"));
+  t.target = (kind, uid) => {
+    const card = t.cards.find((c) => c.dataset.uid === uid);
+    const el = new El("span");
+    el.closest = (sel) => {
+      if (sel === ".card-check") return kind === "box" ? t.boxes[uid] : null;
+      if (sel === ".card") return kind === "box" || kind === "card" || kind === "inner" || kind === "control" ? card : null;
+      if (sel === "a[href],button,input,textarea,select,option,summary,label,[contenteditable]") return kind === "control" || kind === "btn" ? el : null;
+      if (sel === "a[href]") return kind === "link" ? el.link : null;
+      if (sel === "#selbar,#toast") return kind === "selbar" ? el : null;
+      return null;
+    };
+    return el;
+  };
+  t.click = (kind, uid, ev = {}) => {
+    const target = t.target(kind, uid);
+    if (kind === "link") target.link = { href: "http://localhost/?view=all", target: "", getAttribute: () => ev.href || "/?view=all" };
+    const event = { type: "click", target, button: 0, detail: 1, clientX: 100, clientY: 100, stopped: false,
+      preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; }, ...ev };
+    t.docEvent("click", event);
+    return event;
+  };
+  t.sel = () => t.api.selState().uids;
+  t.selecting = () => t.api.state && document_is(t, "selecting");
+  return t;
+}
+function document_is(t, cls) { return t.document.body.classList.contains(cls); }
+const manual = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+
+async function testMultiSelect() {
+  console.log("\n-- 卡片多选：进入 / 圆框 / 退出边界 --");
+  {
+    const t = selPanel();
+    const meta = t.click("card", "B", { metaKey: true });
+    eq("Cmd+左键选中卡片，不打开 JD、拦下卡片自身的点击", [t.sel(), meta.prevented, meta.stopped, t.api.state().uid, t.jobCalls()], [["B"], true, true, null, []]);
+    eq("进入多选：body.selecting、数量与 aria-checked", [document_is(t, "selecting"), t.count.textContent, t.boxes.B.attrs["aria-checked"], t.cards[1].classList.contains("msel")], [true, "1 selected", "true", true]);
+    t.click("card", "D", { ctrlKey: true });
+    eq("Ctrl+左键追加", t.sel(), ["B", "D"]);
+    t.click("card", "A", { metaKey: true, altKey: true });
+    t.click("card", "A", { metaKey: true, button: 2 });
+    eq("Alt 组合或非主键不选", t.sel(), ["B", "D"]);
+    t.click("control", "A", { metaKey: true });
+    eq("修饰键点在卡片内的控件上不选", t.sel(), ["B", "D"]);
+    t.click("card", "B", { metaKey: true });
+    eq("Cmd+左键再点已选卡片 = 取消选择", t.sel(), ["D"]);
+    const circle = t.click("box", "C");
+    eq("圆框点击切换，不冒泡成打开 JD", [t.sel(), circle.prevented, circle.stopped, t.jobCalls()], [["D", "C"], true, true, []]);
+    t.click("box", "C");
+    eq("再点圆框取消", t.sel(), ["D"]);
+    eq("圆框的回车/空格不被卡片按键吞成“打开”", (() => { const ev = { key: " ", target: { closest: (s) => s === ".card-check" ? {} : null }, preventDefault() { this.p = true; } }; t.api.cardKeys(ev, "A"); return !ev.p; })(), true);
+    t.api.cardKeys({ key: "Enter", target: { closest: () => null }, preventDefault() {} }, "A"); await tick();
+    eq("卡片自身的回车仍打开 JD 并退出多选", [t.api.state().uid, t.sel()], ["A", []]);
+    eq("退出后恢复搜索筛选行（body.selecting 去掉）", [document_is(t, "selecting"), t.count.textContent], [false, ""]);
+  }
+  {
+    const t = selPanel();
+    t.click("box", "A");
+    eq("单个圆框进入多选", [t.sel(), document_is(t, "selecting")], [["A"], true]);
+    const click = t.click("selbar", "A");
+    eq("点批量栏内部不退出", [t.sel(), click.prevented], [["A"], undefined]);
+    t.click("card", "B");
+    eq("普通点卡片：捕获阶段不清，交给 openJob 放行后再退出", t.sel(), ["A"]);
+    t.click("link", "A");
+    eq("普通点导航链接：交给页面跳转，不先清", t.sel(), ["A"]);
+    t.click("link", "A", { metaKey: true });
+    eq("修饰键点链接（不离开本页）= 其他交互，退出", t.sel(), []);
+    t.click("box", "A");
+    t.click("link", "A", { href: "#" });
+    eq("锚点链接 = 其他交互，退出", t.sel(), []);
+    t.click("box", "A");
+    t.click("blank", "A");
+    eq("点空白退出", [t.sel(), document_is(t, "selecting")], [[], false]);
+    t.click("box", "A"); t.click("btn", "A");
+    eq("点卡片外的其他控件退出", t.sel(), []);
+    t.click("box", "A"); t.click("control", "A");
+    eq("点卡片内的控件不退出", t.sel(), ["A"]);
+    t.api.selClear();
+    t.click("box", "A");
+    t.api.selCancel();
+    eq("取消退出", t.sel(), []);
+    t.click("blank", "A");
+    eq("没有选择时点空白无任何作用", [t.sel(), t.api.selClear()], [[], false]);
+  }
+  {
+    const t = selPanel();
+    t.click("box", "A");
+    const esc = { key: "Escape", target: t.document.body, preventDefault() { this.p = true; } };
+    t.docEvent("keydown", esc);
+    eq("Esc 退出多选", [t.sel(), esc.p], [[], true]);
+    t.click("box", "A");
+    t.ids.set("drawer", new El("div"));
+    t.docEvent("keydown", { key: "Escape", target: t.document.body, preventDefault() {} });
+    eq("抽屉开着时 Esc 归抽屉，不动选择", t.sel(), ["A"]);
+    t.ids.delete("drawer");
+    t.docEvent("keydown", { key: "Escape", target: new El("input"), preventDefault() {} });
+    eq("输入框里的 Esc 不退出选择", t.sel(), ["A"]);
+    t.winEvent("pagehide", {});
+    eq("离开页面（pagehide）清除选择", t.sel(), []);
+    t.click("box", "A");
+    t.winEvent("pageshow", { persisted: false });
+    eq("普通 pageshow 不清选择", t.sel(), ["A"]);
+    t.winEvent("pageshow", { persisted: true });
+    eq("bfcache 恢复的页面不带着旧选择", t.sel(), []);
+  }
+  {
+    const cards = Array.from({ length: 105 }, (_, i) => "U" + i);
+    const t = selPanel({ cards });
+    for (let i = 0; i < 100; i++) t.click("box", "U" + i);
+    eq("选满 100 项", t.sel().length, 100);
+    t.click("box", "U100");
+    eq("第 101 项：明确提示、不加入", [t.sel().length, t.ids.get("toast").textContent], [100, "limit 100"]);
+    t.click("box", "U0");
+    t.click("box", "U100");
+    eq("取消一项后可再选", [t.sel().length, t.sel().includes("U100")], [100, true]);
+  }
+
+  console.log("\n-- 卡片多选：批量标注、保存门与竞态 --");
+  {
+    const t = selPanel();
+    t.api.LABELS.A = { action: null, priority: 0 };
+    const prog = new El("span"); const star = new El("span"); star.hidden = true;
+    t.reg['.prog[data-prog-uid="A"]'] = [prog]; t.reg['.card-star[data-star-uid="A"]'] = [star];
+    const segSaved = new El("button"); segSaved.dataset.uid = "A"; segSaved.dataset.field = "action"; segSaved.dataset.value = "saved";
+    const segApplied = new El("button"); segApplied.dataset.uid = "A"; segApplied.dataset.field = "action"; segApplied.dataset.value = "applied"; segApplied.classList.add("on");
+    const starBtn = new El("button"); starBtn.dataset.uid = "A"; starBtn.dataset.field = "priority"; starBtn.dataset.value = "1";
+    t.reg['[data-uid="A"][data-field]'] = [segSaved, segApplied, starBtn];
+    t.click("box", "A"); t.click("box", "C");
+    const hold = manual();
+    let seen = null;
+    t.routes.batch = (body) => { seen = body; return hold.promise; };
+    const run = t.api.selApply("saved");
+    eq("发送前就登记：所选 uid 进 LABEL_WRITES、选择忙", [[...t.api.LABEL_WRITES.keys()].sort(), t.api.selState().busy], [["A", "C"], true]);
+    eq("详情里同岗位按钮被锁", [segSaved.disabled, segApplied.disabled, starBtn.disabled, segSaved.attrs["aria-busy"]], [true, true, true, "true"]);
+    eq("提示保存中", [t.msg.textContent, t.msg.hidden], ["saving", false]);
+    await tick();
+    eq("单次请求体：绝对赋值 action，不含 priority", seen, { items: [{ uid: "A", action: "saved" }, { uid: "C", action: "saved" }] });
+    eq("路径与方法", [t.calls.at(-1).url, t.calls.at(-1).opts.method, t.calls.at(-1).opts.headers["Content-Type"]], ["/api/labels/batch", "POST", "application/json"]);
+    const again = t.api.selApply("applied"); await tick();
+    eq("忙时重复点另一动作：不发第二个请求、提示", [t.calls.filter((c) => c.url === "/api/labels/batch").length, t.ids.get("toast").textContent], [1, "busy"]);
+    const single = t.api.setLabel("A", "action", "applied", segApplied); await tick();
+    eq("忙时对同一岗位的单条标注：不发 /api/label", t.calls.filter((c) => c.url === "/api/label").length, 0);
+    t.click("box", "B");
+    eq("忙时不能改选择集合", t.sel(), ["A", "C"]);
+    const unload = { preventDefault() { this.p = true; } }; t.winEvent("beforeunload", unload);
+    eq("在途时 beforeunload 保护", unload.p, true);
+    t.api.setUpdate({ uid: null, baseline: "generation-1", pending: "generation-2" });
+    t.api.renderUpdateState({ state: "idle", generation: "generation-2" });
+    eq("在途/选择中：新结果信号保留、不重载", [t.reloads(), t.api.state().pending], [0, "generation-2"]);
+    hold.resolve({ ok: true, json: async () => ({ ok: true, updated: 2, unchanged: 0, items: [
+      { uid: "A", action: "saved", priority: false, changed: true }, { uid: "C", action: "saved", priority: false, changed: true }] }) });
+    await run; await again; await single; await tick();
+    eq("成功：选择保留、不再忙", [t.sel(), t.api.selState().busy, t.api.LABEL_WRITES.size], [["A", "C"], false, 0]);
+    eq("成功：卡片进度/详情按钮/LABELS 更新", [prog.textContent, prog.hidden, t.api.LABELS.A.action, segSaved.classList.contains("on"), segApplied.classList.contains("on"),
+      segSaved.attrs["aria-pressed"], segSaved.disabled], ["value.action.saved" === "x" ? "" : "S", false, "saved", true, false, "true", false]);
+    eq("成功后重拉统计", t.calls.some((c) => c.url === "/api/stats"), true);
+    eq("成功提示用数量与状态名", t.ids.get("toast").textContent, "marked 2 S");
+    eq("成功不清提示行", [t.msg.hidden, t.msg.textContent], [true, ""]);
+    eq("仍在多选中：新结果继续推迟", t.reloads(), 0);
+    t.api.selCancel();
+    eq("选择清空后载入一次推迟的新结果", t.reloads(), 1);
+  }
+  {
+    // 星标是绝对 true，只写 priority；状态不被带上
+    const t = selPanel(); t.click("box", "B");
+    await t.api.selApply("star");
+    eq("星标请求体只含 priority:true", t.calls.at(-2).body, { items: [{ uid: "B", priority: true }] });
+    eq("星标成功提示", t.ids.get("toast").textContent, "star 1");
+    t.routes.batch = (body) => ({ ok: true, json: async () => ({ ok: true, items: body.items.map((i) => ({ uid: i.uid, action: null, priority: true, changed: false })) }) });
+    await t.api.selApply("star");
+    eq("相同值：提示未改动", t.ids.get("toast").textContent, "star same 1");
+  }
+  for (const [name, route, want] of [
+    ["503", () => ({ ok: false, status: 503, json: async () => ({ error: "write_failed" }) }), "failed"],
+    ["未知 UID", () => ({ ok: false, status: 400, json: async () => ({ error: "unknown_uid", index: 1 }) }), "unknown"],
+    ["同组重复", () => ({ ok: false, status: 400, json: async () => ({ error: "duplicate_group", index: 1 }) }), "group"],
+    ["非 JSON 错误体：提交状态未知", () => ({ ok: false, status: 502, json: async () => { throw new Error("x"); } }), "unconfirmed"],
+    ["网络失败：可能已提交，不声称没有写入", () => { throw new Error("offline"); }, "unconfirmed"],
+    ["200 但回传与请求不符", () => ({ ok: true, json: async () => ({ ok: true, items: [{ uid: "A", action: "applied", priority: false, changed: true }] }) }), "unconfirmed"],
+    ["200 缺项", () => ({ ok: true, json: async () => ({ ok: true, items: [] }) }), "unconfirmed"],
+    ["200 非对象", () => ({ ok: true, json: async () => null }), "unconfirmed"],
+  ]) {
+    const t = selPanel(); t.api.LABELS.A = { action: null };
+    const prog = new El("span"); t.reg['.prog[data-prog-uid="A"]'] = [prog];
+    t.click("box", "A");
+    t.routes.batch = route;
+    const saved = await t.api.selApply("saved");
+    eq("失败（" + name + "）：不假装成功、选择保留、可重试", [saved, t.sel(), t.api.LABELS.A.action, prog.textContent, t.msg.textContent, t.msg.hidden, t.api.LABEL_WRITES.size, t.api.selState().busy],
+      [false, ["A"], null, "", want, false, 0, false]);
+    eq("失败（" + name + "）：提示只留在栏上（栏可见时不再重复 toast）", t.ids.get("toast").textContent, "");
+    t.routes.batch = (body) => ({ ok: true, json: async () => ({ ok: true, items: body.items.map((i) => ({ uid: i.uid, action: i.action, priority: false, changed: true })) }) });
+    eq("失败（" + name + "）：重试成功", await t.api.selApply("saved"), true);
+    eq("失败（" + name + "）：成功后提示行清空", [t.msg.hidden, t.api.LABELS.A.action], [true, "saved"]);
+  }
+  {
+    // 在途中退出选择：请求不被撤销；迟到的成功只更新标注、迟到的失败不重开选择
+    const t = selPanel(); t.api.LABELS.A = {}; const prog = new El("span"); t.reg['.prog[data-prog-uid="A"]'] = [prog];
+    t.click("box", "A");
+    const hold = manual(); t.routes.batch = () => hold.promise;
+    const run = t.api.selApply("applied"); await tick();
+    t.api.selCancel();
+    eq("在途退出：选择清空，但写入仍登记", [t.sel(), t.api.LABEL_WRITES.has("A"), t.api.selState().busy], [[], true, true]);
+    t.click("box", "B");
+    eq("在途退出后新选择被挡住（避免与旧请求交叠）", [t.sel(), t.ids.get("toast").textContent], [[], "busy"]);
+    hold.resolve({ ok: true, json: async () => ({ ok: true, items: [{ uid: "A", action: "applied", priority: false, changed: true }] }) });
+    await run;
+    eq("迟到成功：标注更新、选择不重开", [prog.textContent, t.sel(), document_is(t, "selecting")], ["A", [], false]);
+    t.click("box", "B");
+    eq("结束后可正常重新选择", t.sel(), ["B"]);
+  }
+  {
+    const t = selPanel(); t.click("box", "A");
+    const hold = manual(); t.routes.batch = () => hold.promise;
+    const run = t.api.selApply("saved"); await tick();
+    t.api.selCancel();
+    hold.resolve({ ok: false, status: 503, json: async () => ({ error: "write_failed" }) });
+    await run;
+    eq("迟到失败：不重开选择、不残留忙状态", [t.sel(), document_is(t, "selecting"), t.api.selState().busy, t.api.LABEL_WRITES.size], [[], false, false, 0]);
+    eq("迟到失败：栏已收起，用 toast 告知", t.ids.get("toast").textContent, "failed");
+    t.click("box", "B");
+    eq("迟到失败的提示不带进下一次选择", [t.msg.hidden, t.msg.textContent], [true, ""]);
+  }
+  {
+    // 在途中取消选择 + 新结果信号：信号保留，写入结束且无选择后载入一次（不提前、不丢）
+    const t = selPanel(); t.click("box", "A");
+    const hold = manual(); t.routes.batch = () => hold.promise;
+    const run = t.api.selApply("saved"); await tick();
+    t.api.setUpdate({ uid: null, baseline: "generation-1", pending: "generation-2" });
+    t.api.selCancel();
+    t.api.renderUpdateState({ state: "idle", generation: "generation-2" });
+    eq("在途中取消：写入未结束，不提前载入", [t.reloads(), t.api.state().pending], [0, "generation-2"]);
+    hold.resolve({ ok: true, json: async () => ({ ok: true, items: [{ uid: "A", action: "saved", priority: false, changed: true }] }) });
+    await run;
+    eq("写入结束且无选择：载入一次，信号未丢", t.reloads(), 1);
+  }
+  {
+    // 查看新 JD：批量在途时等待（含没有打开的 JD）；失败被保存门拦下，选择与原目的地保留
+    const t = selPanel(); t.click("box", "A");
+    const hold = manual(); t.routes.batch = () => hold.promise;
+    const run = t.api.selApply("saved"); await tick();
+    const opening = t.api.openJob("B"); await tick();
+    eq("在途时点开 JD：等待，不先取旧详情", [t.jobCalls(), t.api.state().uid, t.sel()], [[], null, ["A"]]);
+    hold.resolve({ ok: false, status: 503, json: async () => ({ error: "write_failed" }) });
+    await run; eq("失败：打开被拦下、选择保留", [await opening, t.api.state().uid, t.sel(), t.jobCalls()], [false, null, ["A"], []]);
+    t.routes.batch = (body) => ({ ok: true, json: async () => ({ ok: true, items: body.items.map((i) => ({ uid: i.uid, action: i.action, priority: false, changed: true })) }) });
+    await t.api.selApply("saved");
+    eq("重试成功后再打开：放行并退出选择", [await t.api.openJob("B"), t.api.state().uid, t.sel(), t.jobCalls()], [true, "B", [], ["B"]]);
+  }
+  {
+    // 草稿确认：取消 = 留在原 JD 且选择保留；确认后才退出
+    const t = selPanel(); await t.api.openJob("A");
+    const input = new El("input"); input.dataset.noteLoaded = "saved"; input.value = "draft"; t.reg[".note input"] = [input];
+    let asked = 0; t.sandbox.confirm = () => { asked++; return false; };
+    t.click("box", "C");
+    eq("打开着 JD 时选卡不触发草稿确认", [asked, t.api.state().uid, t.sel()], [0, "A", ["C"]]);
+    eq("草稿确认取消：留在 A、选择保留", [await t.api.openJob("B"), asked, t.api.state().uid, t.sel()], [false, 1, "A", ["C"]]);
+    t.sandbox.confirm = () => true;
+    eq("草稿确认通过：进入 B 并退出选择", [await t.api.openJob("B"), t.api.state().uid, t.sel()], [true, "B", []]);
+  }
+  {
+    // 待应用新结果 + 多选：点开 JD 放行后整页载入并带上目标 uid
+    const t = selPanel(); t.click("box", "A");
+    t.api.setUpdate({ uid: null, baseline: "generation-1", pending: "generation-2" });
+    t.api.renderUpdateState({ state: "idle", generation: "generation-2" });
+    eq("多选中信号保留", [t.reloads(), t.api.state().pending], [0, "generation-2"]);
+    t.click("box", "A");
+    eq("最后一项取消：载入推迟的新结果一次", t.reloads(), 1);
+  }
+  {
+    const t = selPanel(); t.click("box", "A");
+    t.api.setUpdate({ uid: "A", baseline: "generation-1", pending: "generation-2" });
+    t.api.selCancel();
+    eq("有打开的 JD 时退出选择不载入新结果（仍等离开 JD）", [t.reloads(), t.api.state().pending], [0, "generation-2"]);
+  }
+
+  console.log("\n-- 卡片多选：手机长按 --");
+  {
+    const t = selPanel({ portrait: true });
+    t.api.HOLD.ms = 25;
+    const pt = (x, y) => ({ clientX: x, clientY: y });
+    const down = (uid, x = 100, y = 200, extra = {}) => t.docEvent("touchstart", { target: t.target("card", uid), touches: [pt(x, y)], changedTouches: [pt(x, y)], ...extra });
+    const up = () => t.docEvent("touchend", { target: t.document.body, touches: [], changedTouches: [pt(100, 200)] });
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    down("B"); await wait(60);
+    eq("长按到时：选中并进入多选", [t.sel(), document_is(t, "selecting"), t.api.selState().holdClick], [["B"], true, true]);
+    const compat = { type: "click", target: t.target("card", "B"), button: 0, detail: 1, clientX: 102, clientY: 203, pointerType: "touch",
+      preventDefault() { this.p = true; }, stopPropagation() { this.s = true; } };
+    up(); t.docEvent("click", compat);
+    eq("同次长按补发的 click：被吞（不打开 JD）", [compat.p, compat.s, t.jobCalls(), t.api.selState().holdClick], [true, true, [], false]);
+    const second = { type: "click", target: t.target("card", "B"), button: 0, detail: 1, clientX: 102, clientY: 203, pointerType: "touch",
+      preventDefault() { this.p = true; }, stopPropagation() {} };
+    t.docEvent("click", second);
+    eq("只吞一次：之后的点击照常（普通点卡片不被捕获阶段拦截）", second.p, undefined);
+    // 新触摸清除窗口
+    down("C"); await wait(60); up();
+    down("D", 300, 400); up();
+    const next = { type: "click", target: t.target("card", "D"), button: 0, detail: 1, clientX: 300, clientY: 400, pointerType: "touch", preventDefault() { this.p = true; }, stopPropagation() { this.s = true; } };
+    t.docEvent("click", next);
+    eq("长按后紧接的新触摸点击不受影响", [next.p, next.s], [undefined, undefined]);
+    eq("新触摸不取消已有选择", t.sel(), ["B", "C"]);
+    // 窗口外 / 远处 / 键盘 / 鼠标 都不吞
+    for (const [label, ev] of [
+      ["远离落点", { clientX: 200, clientY: 300 }], ["键盘点击 detail=0", { detail: 0 }], ["鼠标 pointerType", { pointerType: "mouse" }],
+      ["非主键", { button: 1 }], ["非触摸来源", { sourceCapabilities: { firesTouchEvents: false } }]]) {
+      down("A"); await wait(60); up();
+      const e = { type: "click", target: t.target("blank", "A"), button: 0, detail: 1, clientX: 100, clientY: 200, pointerType: "touch", preventDefault() { this.p = true; }, stopPropagation() { this.s = true; }, ...ev };
+      t.docEvent("click", e);
+      eq("长按补发 click 的守卫不误吞：" + label, e.s, undefined);
+      t.click("box", "A");   // 还原：A 已选 -> 取消
+    }
+    t.docEvent("pointerdown", { pointerType: "mouse" });
+    t.api.selClear();
+    // contextmenu：计时前系统菜单先到 = 视为长按；到点后同次长按的菜单被抑制；鼠标右键不受影响
+    const cm = { target: t.target("card", "A"), pointerType: "touch", preventDefault() { this.p = true; } };
+    down("A"); t.docEvent("contextmenu", cm);
+    eq("系统长按菜单抢先：阻止菜单并立即进入多选", [cm.p, t.sel()], [true, ["A"]]);
+    const cm2 = { target: t.target("card", "A"), pointerType: "touch", preventDefault() { this.p = true; } };
+    t.docEvent("contextmenu", cm2);
+    eq("长按后窗口内的菜单也被抑制", cm2.p, true);
+    const cm3 = { target: t.target("card", "A"), pointerType: "mouse", preventDefault() { this.p = true; } };
+    t.docEvent("contextmenu", cm3);
+    eq("鼠标右键菜单不受影响", cm3.p, undefined);
+    t.api.selClear();
+    const cm4 = { target: t.target("card", "A"), pointerType: "mouse", preventDefault() { this.p = true; } };
+    t.docEvent("contextmenu", cm4);
+    eq("没有长按时右键菜单不受影响", cm4.p, undefined);
+    // 取消条件
+    down("A"); up(); await wait(60);
+    eq("短按：不选择", t.sel(), []);
+    down("A", 100, 200); t.docEvent("touchmove", { touches: [pt(100, 230)], changedTouches: [pt(100, 230)] }); await wait(60);
+    eq("手指纵向移动超过 slop（滚动）：不选择", t.sel(), []);
+    down("A", 100, 200); t.docEvent("touchmove", { touches: [pt(104, 205)], changedTouches: [pt(104, 205)] }); await wait(60);
+    eq("手指抖动在 slop 内：仍算长按", t.sel(), ["A"]);
+    t.api.selClear();
+    down("A"); t.docEvent("touchstart", { target: t.target("card", "A"), touches: [pt(100, 200), pt(150, 200)], changedTouches: [pt(150, 200)] }); await wait(60);
+    eq("第二指落下：取消", t.sel(), []);
+    down("A", 100, 200, { touches: [pt(100, 200), pt(150, 200)] }); await wait(60);
+    eq("多指起手：不开始", t.sel(), []);
+    down("A"); t.docEvent("touchcancel", {}); await wait(60);
+    eq("touchcancel：取消", t.sel(), []);
+    down("A"); t.docEvent("scroll", { target: t.document.body }); await wait(60);
+    eq("滚动事件：取消", t.sel(), []);
+    t.docEvent("touchstart", { target: t.target("control", "A"), touches: [pt(1, 1)], changedTouches: [pt(1, 1)] }); await wait(60);
+    eq("按钮/链接/输入等控件上起手：不开始", t.sel(), []);
+    t.docEvent("touchstart", { target: t.target("blank", "A"), touches: [pt(1, 1)], changedTouches: [pt(1, 1)] }); await wait(60);
+    eq("卡片外起手：不开始", t.sel(), []);
+    t.ids.set("drawer", new El("div")); down("A"); await wait(60); t.ids.delete("drawer");
+    eq("覆盖层打开：不开始", t.sel(), []);
+    t.sandbox.document.getSelection = () => ({ rangeCount: 1, isCollapsed: false, toString: () => "abc" });
+    down("A"); await wait(60); delete t.sandbox.document.getSelection;
+    eq("已有文字选区：不开始", t.sel(), []);
+    const hold = manual(); t.routes.batch = () => hold.promise; t.click("box", "B");
+    const run = t.api.selApply("saved"); await tick(); down("C"); await wait(60);
+    eq("批量在途：长按不改选择", t.sel(), ["B"]);
+    hold.resolve({ ok: true, json: async () => ({ ok: true, items: [{ uid: "B", action: "saved", priority: false, changed: true }] }) }); await run;
+    t.api.selClear();
+    // 长按切换已选卡片；最后一项取消即退出
+    down("A"); await wait(60); up(); down("A"); await wait(60); up();
+    eq("长按已选卡片 = 取消选择；最后一项取消即退出", [t.sel(), document_is(t, "selecting")], [[], false]);
+    // 不广泛吞手势：长按后之前的守卫窗口 800ms 过期
+    down("A"); await wait(60); up(); await wait(880);
+    const late = { type: "click", target: t.target("card", "A"), button: 0, detail: 1, clientX: 100, clientY: 200, pointerType: "touch", preventDefault() { this.p = true; }, stopPropagation() { this.s = true; } };
+    t.docEvent("click", late);
+    eq("窗口过期后的点击不被吞", late.s, undefined);
+  }
+}
+
 async function main() {
   console.log("== v1.2.2 PR-B 面板导航与异步（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
@@ -1604,6 +2002,7 @@ async function main() {
   await testMenuOriginsAndLateLayout();
   await testIneligibleLast();
   await testSwipeBack();
+  await testMultiSelect();
   console.log();
   if (failures.length) {
     console.log(`失败 ${failures.length} 项：\n  - ${failures.join("\n  - ")}`);
