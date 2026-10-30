@@ -15,7 +15,7 @@ container check. Docker Desktop on macOS runs Linux containers in a VM.
 
 The published image supports `linux/amd64` and `linux/arm64`. Docker selects the
 matching platform. Use a version tag for a specific release (for example
-`v1.3.0.2`), `sha-<full-main-commit>` for a specific main build, or `latest` for
+`v1.3.1`), `sha-<full-main-commit>` for a specific main build, or `latest` for
 the most recently published main build. A digest pins the exact image content.
 Publication requires the synthetic container smoke test on each native platform;
 it does not test real job sources or other operating systems.
@@ -23,7 +23,7 @@ it does not test real job sources or other operating systems.
 From a source checkout, use the image overlay with the existing Compose file:
 
 ```bash
-export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.0.2
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.1
 docker compose -f compose.yaml -f compose.image.yaml pull
 docker compose -f compose.yaml -f compose.image.yaml up -d --no-build
 docker compose -f compose.yaml -f compose.image.yaml logs panel
@@ -204,7 +204,7 @@ For a published-image installation, after updates have finished, select the
 new version and recreate the panel without building:
 
 ```bash
-export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.0.2
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.1
 docker compose -f compose.yaml -f compose.image.yaml pull
 docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --force-recreate
 # If the API was enabled, recreate it from the same image too:
