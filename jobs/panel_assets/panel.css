@@ -523,7 +523,8 @@ body.settings{background:var(--paper)}
  grid-template-rows:minmax(0,1fr);gap:28px;align-items:stretch;overflow:hidden}
 .set-nav{display:flex;flex-direction:column;gap:4px;overflow-y:auto;padding-bottom:24px}
 .set-nav-item{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:var(--r-ctl);text-decoration:none;color:var(--ink2);font-size:var(--fs-md)}
-.set-nav-item.on{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 0 0 1px var(--line)}
+/* Draw selected edges inside the control, clear of the settings scroll clips. */
+.set-nav-item.on{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--line)}
 /* 右栏是 flex 列但不滚：标题、说明、新增条固定，只让下面的列表滚。 */
 .set-pane{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:0 6px 20px 0}
 .set-pane-scroll{overflow-y:auto}
@@ -568,7 +569,8 @@ body.settings{background:var(--paper)}
 .opts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .opt{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--line);border-radius:var(--r-box);
  cursor:pointer;background:var(--surface);text-align:left}
-.opt.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.opt.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.set-nav-item:focus-visible,.opt:focus-visible{outline-offset:-3px}
 .opt b{display:block}
 .opt small{display:block;font-size:var(--fs-sm);color:var(--ink2)}
 .radio{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--ink4);margin-top:2px;flex:0 0 auto}
