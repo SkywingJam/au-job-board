@@ -157,8 +157,12 @@ def test_filters() -> None:
     row = {"uid": "synthetic:card", "title": "Synthetic", "reasons": [],
            "total_score": 3, "processed": True,
            "_label": {"action": "saved", "labeled_at": "2000-01-01T00:00:00+00:00"}}
-    check("已有 action 的卡片算已处理，不依赖最近修改时间",
-          'class="card done"' in panel._card(row, SINCE))
+    check("想投仍是已处理状态，但卡片保持正常亮度",
+          'class="card done"' not in panel._card(row, SINCE))
+    for action in ("applied", "skipped"):
+        row["_label"]["action"] = action
+        check(f"{action} 卡片淡化，不依赖最近修改时间",
+              'class="card done"' in panel._card(row, SINCE))
     row["processed"] = False
     row["_label"] = {"note": "优先投递；", "priority": True,
                      "labeled_at": "2000-06-15T13:00:00+00:00"}

@@ -182,10 +182,20 @@ async function openJob(uid){
   }
   try{
     const params=new URLSearchParams({uid});
-    const r=await fetch('/api/job?'+params);
-    if(!r.ok) throw new Error(await r.text());
-    const d=await r.json();
-    if(seq!==OPEN_SEQ) return;                      // 连点时只认最后一次
+    let d;
+    for(;;){
+      const version=LABEL_VERSIONS.get(uid)||0;
+      const r=await fetch('/api/job?'+params);
+      if(!r.ok) throw new Error(await r.text());
+      d=await r.json();
+      if(seq!==OPEN_SEQ) return;                    // 连点时只认最后一次
+      // 详情可能早于随后发起的标注读取。写入中或版本已变化时，等提交再重取，
+      // 不让旧 HTML / scope label 覆盖已确认的单条或批量状态。
+      const writing=LABEL_WRITES.get(uid);
+      if(writing) await writing;
+      if(seq!==OPEN_SEQ) return;
+      if(!writing && version===(LABEL_VERSIONS.get(uid)||0)) break;
+    }
     clearTimeout(slow);
     pane.innerHTML=d.html;
     const scope=detailScope();
@@ -213,6 +223,7 @@ let OPEN_SEQ=0, OPEN_UID=null;
 const NOTE_REQUESTS=new Set();
 const NOTE_WRITES=new Map();
 const LABEL_WRITES=new Map();
+const LABEL_VERSIONS=new Map();
 function showSkeleton(pane){
   pane.innerHTML='<div class="skeleton" aria-busy="true" aria-label="'+T('js.loading')+'">'
     +'<i class="sk-t"></i><i class="sk-m"></i><i class="sk-chips"></i><i class="sk-box"></i>'
@@ -254,6 +265,7 @@ async function setLabel(uid,field,value,btn){
   let release;
   const locked=new Promise(resolve=>{release=resolve;});
   LABEL_WRITES.set(uid,locked);
+  LABEL_VERSIONS.set(uid,(LABEL_VERSIONS.get(uid)||0)+1);
   let saved=false;
   try{
     if(NOTE_WRITES.has(uid)) await NOTE_WRITES.get(uid);
@@ -653,6 +665,7 @@ async function selApply(kind){
   SEL_BUSY=locked;
   uids.forEach(uid=>{
     LABEL_WRITES.set(uid,locked);
+    LABEL_VERSIONS.set(uid,(LABEL_VERSIONS.get(uid)||0)+1);
     // 打开着的详情里同一岗位的状态/星标按钮也锁住，与单条标注在途时一样
     labelButtons(uid).forEach(b=>{b.disabled=true;b.setAttribute('aria-busy','true');});
   });

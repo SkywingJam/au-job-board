@@ -732,6 +732,46 @@ async function testInterleavedLabelNotes() {
   }
 }
 
+async function testLateDetailAfterLabelWrite() {
+  console.log("\n-- 在途详情不能覆盖较新的标注 --");
+  for (const batch of [false, true]) {
+    for (const arrivesDuringWrite of [false, true]) {
+      const t = selPanel(), detail = manual(), write = manual(), scope = new El("div");
+      const stale = { action: "skipped", priority: false, note: "Synthetic note；" };
+      const fresh = { ...stale, action: "saved" };
+      let requests = 0;
+      t.routes.job = () => {
+        if (++requests === 1) return detail.promise;
+        scope.dataset.scopeLabel = JSON.stringify(fresh);
+        t.reg['#detail [data-label-scope]'] = [scope];
+        return { ok: true, json: async () => ({html: "fresh saved detail"}) };
+      };
+      const opening = t.api.openJob("A");
+      t.enter("A");
+      const button = new El("button"); button.dataset.field = "action"; button.dataset.value = "saved";
+      button.dataset.uid = "A"; t.reg['[data-uid="A"][data-field]'] = [button];
+      t.routes.batch = () => write.promise; t.routes.label = () => write.promise;
+      const saving = batch ? t.api.selApply("saved") : t.api.setLabel("A", "action", "saved", button);
+      await tick();
+      const deliverOld = () => {
+        scope.dataset.scopeLabel = JSON.stringify(stale);
+        t.reg['#detail [data-label-scope]'] = [scope];
+        detail.resolve({ok: true, json: async () => ({html: "stale skipped detail"})});
+      };
+      if (arrivesDuringWrite) { deliverOld(); await tick(); }
+      write.resolve({ok: true, json: async () => batch
+        ? {ok: true, items: [{uid: "A", action: "saved", priority: false, changed: true}]}
+        : {ok: true, value: "saved", label: fresh}});
+      await saving;
+      if (!arrivesDuringWrite) deliverOld();
+      await opening;
+      const key = `${batch ? "批量" : "单条"} ${arrivesDuringWrite ? "写入中" : "写入后"}`;
+      eq(key + "迟到详情重取新状态", [t.api.LABELS.A.action, t.pane.innerHTML, requests], ["saved", "fresh saved detail", 2]);
+      eq(key + "不取消选择或改变目的地", [t.mode(), t.sel(), t.api.state().uid], [true, ["A"], "A"]);
+    }
+  }
+}
+
 async function testDetailOpenRefreshesLabel() {
   console.log("\n-- opening a detail adopts its fresh server label --");
   const t=loadPanel(), scope=new El("div");
@@ -2223,6 +2263,7 @@ async function main() {
   await testActionBrightness();
   await testInterleavedLabelNotes();
   await testDetailOpenRefreshesLabel();
+  await testLateDetailAfterLabelWrite();
   await testFilterDrawer();
   await testSkillCandidates();
   await testMenuPlacement();
