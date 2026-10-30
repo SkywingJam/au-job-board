@@ -91,7 +91,7 @@ nothing in the suite fetches listings.
 | `tools/test_fixture_boundary.py` | Test-data boundary and export contract | all |
 | `tools/test_launchd_examples.py` | macOS LaunchAgent templates and renderer | macOS |
 | `tools/test_panel_note_separators.mjs` | Panel note separators, default labels (UI-02, UI-03) and generation-based refresh, draft protection and destination navigation, update confirmation, card progress text and the unknown-outcome status line | all |
-| `tools/test_panel_navigation.mjs` | Detail previous/next and profile keys over the frozen list (save/draft gate, pending result version, repeated keys, ignored keys), mobile label sheet, header-count refresh, mobile filter drawer apply/discard, per-view memory of the ineligible-last option, unchanged list/detail targets after a qualification correction, and skill candidates writing canonical names | all |
+| `tools/test_panel_navigation.mjs` | Detail previous/next and profile keys over the frozen list (save/draft gate, pending result version, repeated keys, ignored keys), mobile label sheet, the portrait swipe-back gesture (accepted right swipe, rejected gestures and controls, identity changes, repeated events, save/draft/new-result gates, click suppression), header-count refresh, mobile filter drawer apply/discard, per-view memory of the ineligible-last option, unchanged list/detail targets after a qualification correction, and skill candidates writing canonical names | all |
 
 The fixture-boundary test also guards that a private label export is not used
 by default; it is part of keeping the public test data synthetic. Its output

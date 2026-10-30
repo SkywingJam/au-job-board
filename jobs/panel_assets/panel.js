@@ -213,11 +213,13 @@ function swapIn(pane){
   if(REDUCED.matches) return;
   pane.classList.remove('swap'); void pane.offsetWidth; pane.classList.add('swap');
 }
-async function closeDetail(){
+async function closeDetail(expect){
   if(!await allowDetailNavigation()){
     if(OPEN_UID)history.replaceState(null,"",location.pathname+location.search+detailHash(OPEN_UID));
     return;
   }
+  // 手势等保存/确认期间换了岗位（或已被别处关掉）：这次返回只属于当时那条，不关新的。
+  if(expect && (OPEN_UID!==expect.uid || OPEN_SEQ!==expect.seq)) return;
   OPEN_UID=null;
   history.replaceState(null,"",location.pathname+location.search);
   if(UPDATE_PENDING){applyLatestResults("");return;}
@@ -385,7 +387,10 @@ function navKeyIgnored(ev){
     if(el.closest && el.closest('[role="separator"],[role="slider"],[role="tablist"],[role="listbox"],[role="menu"],[role="radiogroup"],[role="dialog"]'))return true;
     if(el.closest && el.closest('.choicepick,.skillpick,.geo-control')) return true;
   }
-  // 抽屉、筛选面板和对话浮层开着时按键属于它们
+  return detailOverlayOpen();
+}
+// 抽屉、筛选面板和对话浮层开着时，按键和触摸手势都属于它们
+function detailOverlayOpen(){
   const detail=document.getElementById('detail');
   return shown(document.getElementById('drawer')) || shown(document.getElementById('more-panel'))
     || !!document.querySelector('.choicepanel.open,.skillpanel.open,.geo-suggest-panel.open')
@@ -404,6 +409,82 @@ document.addEventListener('keydown',ev=>{
 document.addEventListener('pointermove',()=>{
   document.querySelector('.list')?.classList.remove('keyboard-nav');
 });
+/* ---- 竖屏：详情内右滑返回 -----------------------------------------------
+   只识别「完成的」单指右滑，然后走与「返回」按钮同一条 closeDetail（保存中等待、
+   未保存确认、失败保护、新结果延后都在它里面）；不跟手移动详情，也不 preventDefault。
+   用被动的 touch 事件：touchend 在浏览器接管滚动后仍会送达，不需要 touch-action 约束，
+   纵向滚动、横向滚动、缩放、长按选字都留给浏览器。桌面鼠标不产生 touch 事件。
+   起手不必在边缘，但左侧 SWIPE.edge 内留给浏览器自己的边缘手势。
+   阈值（CSS px）：右移 ≥ minDx，横向 ≥ ratio 倍纵向，纵向偏移始终 ≤ maxDy，
+   全程 ≤ maxMs；途中左移超过 backMove、详情纵向滚动超过 scroll、出现第二指/选区/
+   缩放、岗位或版面变化，都作废本次识别。 */
+const SWIPE={edge:24,minDx:80,ratio:2,maxDy:48,verticalIntent:16,maxMs:800,backMove:24,scroll:12,clickMs:600};
+const SWIPE_SKIP='a[href],button,input,textarea,select,option,summary,label,[contenteditable],'
+  +'[role="button"],[role="link"],[role="slider"],[role="separator"],[role="textbox"]';
+let SWIPE_TRACK=null, SWIPE_CLICK=null;
+function swipeFieldActive(){
+  const a=document.activeElement;
+  return !!a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || !!a.isContentEditable);
+}
+function swipeReady(){
+  const pane=document.getElementById('detail');
+  return !!(OPEN_UID && pane && shown(pane) && pane.classList.contains('open')
+    && document.body.classList.contains('portrait')
+    && !NAV_GATES && !DETAIL_LEAVING && !UPDATE_APPLYING
+    && !detailOverlayOpen() && !shown(document.getElementById('skill-edit'))
+    && !swipeFieldActive() && !hasTextSelection()
+    && !(window.visualViewport && window.visualViewport.scale>1.01));
+}
+function swipeTargetOk(target,pane){
+  if(!target || !pane.contains(target)) return false;
+  if(target.closest && target.closest(SWIPE_SKIP)) return false;
+  for(let n=target; n && n!==pane; n=n.parentNode){
+    if(n.isContentEditable) return false;
+    if(n.scrollWidth>n.clientWidth+1 && /^(auto|scroll)$/.test(getComputedStyle(n).overflowX)) return false;
+  }
+  return true;
+}
+function swipeAlive(s){ return OPEN_UID===s.uid && OPEN_SEQ===s.seq && swipeReady(); }
+function swipeStart(ev){
+  SWIPE_CLICK=null;                                    // 新触摸的点击不能被上次手势拦住
+  SWIPE_TRACK=null;
+  if(ev.touches.length!==1) return;                      // 多指：缩放等，整次作废
+  const t=ev.touches[0], pane=document.getElementById('detail');
+  if(t.clientX<SWIPE.edge || !swipeReady() || !swipeTargetOk(ev.target,pane)) return;
+  SWIPE_TRACK={x:t.clientX,y:t.clientY,at:ev.timeStamp,uid:OPEN_UID,seq:OPEN_SEQ,top:pane.scrollTop};
+}
+function swipeMove(ev){
+  const s=SWIPE_TRACK; if(!s) return;
+  if(ev.touches.length!==1 || !swipeAlive(s)){ SWIPE_TRACK=null; return; }
+  const t=ev.touches[0], pane=document.getElementById('detail');
+  const dx=t.clientX-s.x, dy=Math.abs(t.clientY-s.y);
+  if(dy>SWIPE.maxDy || dx<-SWIPE.backMove || (dy>=SWIPE.verticalIntent && dy>Math.abs(dx))
+    || Math.abs(pane.scrollTop-s.top)>SWIPE.scroll) SWIPE_TRACK=null;
+}
+function swipeEnd(ev){
+  const s=SWIPE_TRACK; SWIPE_TRACK=null;
+  if(!s || ev.touches.length || !ev.changedTouches.length || !swipeAlive(s)) return;
+  const t=ev.changedTouches[0], dx=t.clientX-s.x, dy=Math.abs(t.clientY-s.y);
+  if(dx<SWIPE.minDx || dy>SWIPE.maxDy || dy*SWIPE.ratio>dx || ev.timeStamp-s.at>SWIPE.maxMs
+    || Math.abs(document.getElementById('detail').scrollTop-s.top)>SWIPE.scroll) return;
+  SWIPE_CLICK={until:ev.timeStamp+SWIPE.clickMs,x:t.clientX,y:t.clientY};
+  closeDetail({uid:s.uid,seq:s.seq});
+}
+const SWIPE_OPT={passive:true,capture:true};
+document.addEventListener('touchstart',swipeStart,SWIPE_OPT);
+document.addEventListener('touchmove',swipeMove,SWIPE_OPT);
+document.addEventListener('touchend',swipeEnd,SWIPE_OPT);
+document.addEventListener('touchcancel',()=>{SWIPE_TRACK=null;},SWIPE_OPT);
+// 只拦同次手势落点的一个兼容 click；键盘、鼠标、新触摸点击照常处理
+document.addEventListener('click',ev=>{
+  const s=SWIPE_CLICK; if(!s) return;
+  if(ev.timeStamp>=s.until){ SWIPE_CLICK=null; return; }
+  if(ev.detail===0 || ev.button!==0 || (ev.pointerType && ev.pointerType!=='touch')
+    || (ev.sourceCapabilities && !ev.sourceCapabilities.firesTouchEvents)
+    || Math.abs(ev.clientX-s.x)>24 || Math.abs(ev.clientY-s.y)>24) return;
+  SWIPE_CLICK=null;
+  ev.preventDefault(); ev.stopPropagation();
+},true);
 /* ---- 竖屏：标注抽屉 -----------------------------------------------------
    竖屏先读正文：「做标记 + 备注」这一块（同一组节点，不复制）变成底部抽屉，
    由底栏「标注 ▴」打开。收起时让抽屉里的焦点失焦 —— 备注照常走 noteBlur →

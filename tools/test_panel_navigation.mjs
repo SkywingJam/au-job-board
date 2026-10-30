@@ -16,6 +16,10 @@
   - UX-11：竖屏筛选抽屉只推迟 applyFilter：改动不跳转、按钮计数、关闭即按快照还原、
     「应用」一次跳转且不再自动展开；桌面即改即生效；有未应用草稿时新结果不整页载入、
     信号保留，关闭后载入一次；搜索防抖与抽屉内输入只进草稿；抽屉内「清除全部」只复位草稿
+  - 竖屏详情内右滑返回：普通阅读区非边缘起手的完成右滑走 closeDetail（去 hash、保留筛选）；
+    左滑/短滑/纵向为主/超时/多指/取消/边缘/选字/控件/覆盖层/横滚/活动输入/缩放/桌面不触发；
+    换岗位、切桌面、途中纵滚作废；保存中等待、未保存确认取消保留草稿、保存失败留在原岗位、
+    新结果信号不丢；重复手势不重复确认或排队；手势后的兼容 click 被吞
   - UX-10：固定新增首行、相似优先、完整字母表不按输入过滤；已占用提前提示且不发请求；
     大小写与空白口径与后端一致；点展示名写入规范名
 
@@ -186,7 +190,7 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   applyFilter, searchTyping, filterDraftCount, skillRows, skillRender, placeMenu,
   skillKeys, skillClean, skillOwner, choiceToggle, choicePick, choicePanelClose, choiceSetValue,
   choiceTriggerKeys, choiceOptionKeys, geoSuggest, geoFocus, geoInput, geoPanelClose, geoOptionPick,
-  geoOptionKeys, fitLayout, navKeyIgnored, LABELS,
+  geoOptionKeys, fitLayout, navKeyIgnored, LABELS, SWIPE, SWIPE_SKIP,
   state(){return {uid:OPEN_UID,pending:UPDATE_PENDING,applying:UPDATE_APPLYING,gates:NAV_GATES,draft:!!FILTER_DRAFT};},
   setUpdate(v){OPEN_UID=v.uid||null;UPDATE_BASELINE=v.baseline||'';UPDATE_PENDING=v.pending||null;UPDATE_APPLYING=false;},
   addPendingNote(p){NOTE_REQUESTS.add(p);p.finally(()=>NOTE_REQUESTS.delete(p));} };
@@ -1210,6 +1214,376 @@ async function testIneligibleLast() {
   eq("纠正后上一条仍回到 B", c.api.state().uid, "B");
 }
 
+/* ---- 竖屏详情内右滑返回 ------------------------------------------------- */
+function swipeTree(t) {
+  /* 带父链的最小元素：closest 按 panel.js 的 SWIPE_SKIP 逐项匹配，pane.contains 认全部后代。 */
+  const parts = t.api.SWIPE_SKIP.split(",");
+  const matches = (n, part) => {
+    let m = /^\[(\w+)(?:="([^"]*)")?\]$/.exec(part);
+    if (m) return n.attrs[m[1]] !== undefined && (m[2] === undefined || n.attrs[m[1]] === m[2]);
+    m = /^([a-z]+)(\[href\])?$/.exec(part);
+    return !!m && n.tagName === m[1].toUpperCase() && (!m[2] || n.attrs.href !== undefined);
+  };
+  const make = (tag, parent, attrs = {}, props = {}) => {
+    const el = new El(tag, props);
+    Object.assign(el.attrs, attrs);
+    el.parentNode = parent;
+    t.pane.inside.add(el);
+    el.closest = function (sel) {
+      for (let n = this; n && n !== t.pane; n = n.parentNode) if (sel.split(",").some((p) => matches(n, p))) return n;
+      return null;
+    };
+    return el;
+  };
+  t.sandbox.getComputedStyle = (el) => ({ overflowX: el.overflowX || "visible" });
+  t.pane.parentNode = null;
+  const body = make("p", t.pane);
+  return { make, body, title: make("h2", t.pane), jd: make("span", body) };
+}
+let SWIPE_TS = 1000;
+/* 一次完整触摸：start -> (moves) -> end；返回结束事件的时间戳。 */
+function touch(t, { target, from = [150, 300], to = [260, 305], via = [], ms = 200, touches, end = true } = {}) {
+  const pt = ([x, y]) => ({ clientX: x, clientY: y });
+  const t0 = SWIPE_TS; SWIPE_TS += 5000;
+  const ev = (extra) => ({ target, timeStamp: t0, ...extra });
+  t.docEvent("touchstart", ev({ touches: touches || [pt(from)], changedTouches: [pt(from)] }));
+  via.forEach((xy, i) => t.docEvent("touchmove", ev({ touches: [pt(xy)], changedTouches: [pt(xy)], timeStamp: t0 + 10 * (i + 1) })));
+  if (!end) return t0;
+  t.docEvent("touchend", ev({ touches: [], changedTouches: [pt(to)], timeStamp: t0 + ms }));
+  return t0 + ms;
+}
+const stay = (label, t, uid = "A") => eq(label, [t.api.state().uid, t.sandbox.location.hash], [uid, "#" + uid]);
+
+async function swipePanel(opts = {}) {
+  const t = loadPanel({ portrait: true, ...opts });
+  t.tree = swipeTree(t);
+  await t.api.openJob("A");
+  t.asked = 0; t.sandbox.confirm = () => { t.asked++; return t.confirmAnswer !== false; };
+  return t;
+}
+
+async function testSwipeBack() {
+  console.log("\n-- 竖屏详情内右滑返回 --");
+  {
+    const t = await swipePanel();
+    const search = t.sandbox.location.search;
+    touch(t, { target: t.tree.jd });
+    await tick();
+    eq("正文非边缘右滑：返回列表、去 hash、保留筛选 query",
+      [t.api.state().uid, t.sandbox.location.hash, t.sandbox.location.search, t.pane.classList.contains("open")], [null, "", search, false]);
+    eq("返回不请求其他岗位、不重载", [t.jobCalls(), t.reloads()], [["A"], 0]);
+  }
+  for (const [label, o] of [
+    ["标题起手", { target: "title" }],
+    ["留白（pane 自身）起手", { target: "pane" }],
+    ["起手 x=24（边界内侧）", { target: "jd", from: [24, 300], to: [140, 300] }],
+    ["恰好 dx=80", { target: "jd", to: [230, 300] }],
+    ["dx=80,dy=40 恰好 2:1", { target: "jd", to: [230, 340] }],
+    ["恰好 800ms", { target: "jd", ms: 800 }],
+    ["向左抖一下但未超 24px", { target: "jd", via: [[140, 300], [128, 300]], to: [260, 300] }],
+  ]) {
+    const t = await swipePanel();
+    touch(t, { ...o, target: o.target === "title" ? t.tree.title : o.target === "pane" ? t.pane : t.tree.jd });
+    await tick();
+    eq("应返回：" + label, t.api.state().uid, null);
+  }
+  const reject = [
+    ["左滑", { to: [30, 300], from: [250, 300] }],
+    ["短滑 dx=79", { to: [229, 300] }],
+    ["纵向为主", { to: [210, 420] }],
+    ["比例不足 dx=80,dy=41", { to: [230, 341] }],
+    ["横向够但纵向 >48", { to: [350, 355], via: [[200, 330]] }],
+    ["途中变纵向再横回", { via: [[170, 380], [220, 300]], to: [270, 300] }],
+    ["滚动边界先纵移24px再右滑", { via: [[150, 324], [210, 324]], to: [270, 324] }],
+    ["途中向左超 24px 再右滑", { via: [[110, 300]], to: [260, 300] }],
+    ["很长按后再滑 801ms", { ms: 801 }],
+    ["起手 x=23（浏览器边缘手势区）", { from: [23, 300], to: [200, 300] }],
+    ["无位移的点按", { to: [150, 300] }],
+  ];
+  for (const [label, o] of reject) {
+    const t = await swipePanel();
+    touch(t, { target: t.tree.jd, ...o });
+    await tick();
+    stay("不触发：" + label, t);
+    eq("不触发：" + label + "（无确认、无关闭）", [t.asked, t.api.state().gates, t.pane.classList.contains("open")], [0, 0, true]);
+  }
+  {
+    const t = await swipePanel();
+    const pt = (x, y) => ({ clientX: x, clientY: y });
+    // 多指：第二指落下后整次作废，即便稍后单指满足阈值
+    const t0 = SWIPE_TS; SWIPE_TS += 5000;
+    t.docEvent("touchstart", { target: t.tree.jd, timeStamp: t0, touches: [pt(150, 300)], changedTouches: [pt(150, 300)] });
+    t.docEvent("touchstart", { target: t.tree.jd, timeStamp: t0 + 20, touches: [pt(150, 300), pt(200, 300)], changedTouches: [pt(200, 300)] });
+    t.docEvent("touchend", { target: t.tree.jd, timeStamp: t0 + 60, touches: [pt(150, 300)], changedTouches: [pt(200, 300)] });
+    t.docEvent("touchend", { target: t.tree.jd, timeStamp: t0 + 120, touches: [], changedTouches: [pt(300, 300)] });
+    await tick(); stay("多指缩放：不触发", t);
+    // 两指同时落下，随后一次性抬起
+    const b = await swipePanel();
+    const b0 = SWIPE_TS; SWIPE_TS += 5000;
+    b.docEvent("touchstart", { target: b.tree.jd, timeStamp: b0, touches: [pt(150, 300), pt(210, 300)], changedTouches: [pt(150, 300), pt(210, 300)] });
+    b.docEvent("touchend", { target: b.tree.jd, timeStamp: b0 + 100, touches: [], changedTouches: [pt(300, 300)] });
+    await tick(); stay("两指同时落下：不触发", b);
+    // 单指起手后途中加指
+    const u = await swipePanel();
+    const u0 = SWIPE_TS; SWIPE_TS += 5000;
+    u.docEvent("touchstart", { target: u.tree.jd, timeStamp: u0, touches: [pt(150, 300)], changedTouches: [pt(150, 300)] });
+    u.docEvent("touchmove", { target: u.tree.jd, timeStamp: u0 + 30, touches: [pt(200, 300), pt(260, 300)], changedTouches: [pt(260, 300)] });
+    u.docEvent("touchend", { target: u.tree.jd, timeStamp: u0 + 100, touches: [], changedTouches: [pt(300, 300)] });
+    await tick(); stay("途中加指：不触发", u);
+    // 系统取消
+    const c = await swipePanel();
+    const c0 = touch(c, { target: c.tree.jd, end: false });
+    c.docEvent("touchmove", { target: c.tree.jd, timeStamp: c0 + 50, touches: [pt(220, 300)], changedTouches: [pt(220, 300)] });
+    c.docEvent("touchcancel", { target: c.tree.jd, timeStamp: c0 + 80, touches: [], changedTouches: [pt(220, 300)] });
+    c.docEvent("touchend", { target: c.tree.jd, timeStamp: c0 + 90, touches: [], changedTouches: [pt(300, 300)] });
+    await tick(); stay("touchcancel 后的残余 touchend：不触发", c);
+    // 重复 touchend（同一手势）只关一次
+    const d = await swipePanel();
+    d.confirmAnswer = true;
+    const e0 = SWIPE_TS; SWIPE_TS += 5000;
+    d.docEvent("touchstart", { target: d.tree.jd, timeStamp: e0, touches: [pt(150, 300)], changedTouches: [pt(150, 300)] });
+    const endEv = { target: d.tree.jd, timeStamp: e0 + 100, touches: [], changedTouches: [pt(300, 300)] };
+    d.docEvent("touchend", endEv); d.docEvent("touchend", endEv);
+    await tick();
+    eq("重复 touchend：只关一次", [d.api.state().uid, d.api.state().gates], [null, 0]);
+    // 关闭后再次滑动没有可关闭的详情
+    touch(d, { target: d.tree.jd });
+    await tick();
+    eq("已在列表：再滑不触发任何事", [d.api.state().uid, d.asked], [null, 0]);
+  }
+
+  console.log("  -- 控件、编辑、覆盖层、横滚、缩放、桌面不接管 --");
+  const blocked = [
+    ["按钮", (T) => T.make("button", T.body)],
+    ["链接 a[href]", (T) => T.make("a", T.body, { href: "https://example.invalid/x" })],
+    ["input", (T) => T.make("input", T.body)],
+    ["textarea", (T) => T.make("textarea", T.body)],
+    ["select", (T) => T.make("select", T.body)],
+    ["summary", (T) => T.make("summary", T.body)],
+    ["label", (T) => T.make("label", T.body)],
+    ["contenteditable 容器", (T) => T.make("div", T.body, { contenteditable: "true" })],
+    ["contenteditable 继承的子节点", (T) => T.make("span", T.make("div", T.body, {}, { isContentEditable: true }), {}, { isContentEditable: true })],
+    ["role=slider", (T) => T.make("div", T.body, { role: "slider" })],
+    ["按钮内部的图标", (T) => T.make("i", T.make("button", T.body))],
+    ["可横向滚动区域（表格/代码块）", (T) => T.make("code", T.make("pre", T.body, {}, { overflowX: "auto", scrollWidth: 600, clientWidth: 300 }))],
+  ];
+  for (const [label, build] of blocked) {
+    const t = await swipePanel();
+    touch(t, { target: build(t.tree) });
+    await tick();
+    stay("不接管：" + label, t);
+  }
+  {
+    // overflow:auto 但内容没溢出的块不算横滚，仍可返回
+    const t = await swipePanel();
+    touch(t, { target: t.tree.make("div", t.tree.body, {}, { overflowX: "auto", scrollWidth: 300, clientWidth: 300 }) });
+    await tick();
+    eq("overflow:auto 但无溢出：可返回", t.api.state().uid, null);
+  }
+  const overlays = [
+    ["标注抽屉", (t) => t.pane.classList.add("label-open")],
+    ["菜单抽屉", (t) => t.ids.set("drawer", new El("div"))],
+    ["筛选面板", (t) => t.ids.set("more-panel", new El("div"))],
+    ["技能编辑器", (t) => t.ids.set("skill-edit", new El("div"))],
+    ["更新确认窗", (t) => t.ids.set("update-confirm", new El("div"))],
+    ["复制弹层", (t) => t.ids.set("copy-modal", new El("div"))],
+    ["显示弹出层", (t) => t.ids.set("display-pop", new El("div"))],
+    ["候选面板", (t) => { t.reg[".choicepanel.open,.skillpanel.open,.geo-suggest-panel.open"] = [new El("div")]; }],
+  ];
+  for (const [label, open] of overlays) {
+    const t = await swipePanel();
+    open(t);
+    touch(t, { target: t.tree.jd });
+    await tick();
+    stay("覆盖层打开不接管：" + label, t);
+  }
+  {
+    const t = await swipePanel();
+    t.document.activeElement = new El("input");
+    touch(t, { target: t.tree.jd }); await tick();
+    stay("活动输入框（键盘在）不接管", t);
+    t.document.activeElement = t.document.body;
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("输入框失焦后恢复可返回", t.api.state().uid, null);
+  }
+  {
+    const t = await swipePanel();
+    t.document.getSelection = () => ({ rangeCount: 1, isCollapsed: false, toString: () => "selected words" });
+    touch(t, { target: t.tree.jd }); await tick();
+    stay("已有选中文字不接管", t);
+    // 长按选字发生在手势中途：结束时选区已出现
+    const u = await swipePanel();
+    const t0 = touch(u, { target: u.tree.jd, end: false });
+    u.document.getSelection = () => ({ rangeCount: 1, isCollapsed: false, toString: () => "word" });
+    u.docEvent("touchend", { target: u.tree.jd, timeStamp: t0 + 100, touches: [], changedTouches: [{ clientX: 300, clientY: 300 }] });
+    await tick(); stay("手势中途出现选区：作废", u);
+    const z = await swipePanel();
+    z.sandbox.visualViewport = { scale: 1.6 };
+    touch(z, { target: z.tree.jd }); await tick();
+    stay("页面已被捏合放大：右滑是平移，不接管", z);
+    const s = await swipePanel();
+    const s0 = touch(s, { target: s.tree.jd, end: false });
+    s.pane.scrollTop = 60;
+    s.docEvent("touchmove", { target: s.tree.jd, timeStamp: s0 + 30, touches: [{ clientX: 220, clientY: 330 }], changedTouches: [{ clientX: 220, clientY: 330 }] });
+    s.docEvent("touchend", { target: s.tree.jd, timeStamp: s0 + 100, touches: [], changedTouches: [{ clientX: 300, clientY: 330 }] });
+    await tick(); stay("详情已纵向滚动：作废", s);
+    const lateScroll = await swipePanel();
+    const lateTs = touch(lateScroll, { target: lateScroll.tree.jd, end: false });
+    lateScroll.pane.scrollTop = 60;
+    lateScroll.docEvent("touchend", { target: lateScroll.tree.jd, timeStamp: lateTs + 100, touches: [], changedTouches: [{ clientX: 300, clientY: 300 }] });
+    await tick(); stay("最后move后仍发生纵滚：结束时再次核对", lateScroll);
+    const d = loadPanel({ portrait: false });
+    d.tree = swipeTree(d);
+    await d.api.openJob("A");
+    touch(d, { target: d.tree.jd }); await tick();
+    stay("桌面（非 portrait）：触摸也不返回", d);
+    const m = await swipePanel();
+    for (const type of ["mousedown", "mousemove", "mouseup", "pointerdown", "pointermove", "pointerup"]) m.docEvent(type, { target: m.tree.jd, clientX: 300, clientY: 300, pointerType: "mouse", touches: [], changedTouches: [] });
+    await tick(); stay("鼠标/指针事件不触发返回", m);
+  }
+
+  console.log("  -- 身份变化与重复 --");
+  {
+    const t = await swipePanel();
+    t.api.setUpdate({ uid: "A" });          // 保持 A 打开
+    const t0 = touch(t, { target: t.tree.jd, end: false });
+    await t.api.openJob("B");                 // 手势途中换到 B
+    t.docEvent("touchend", { target: t.tree.jd, timeStamp: t0 + 100, touches: [], changedTouches: [{ clientX: 300, clientY: 300 }] });
+    await tick();
+    stay("途中换岗位：旧手势不关 B", t, "B");
+    const u = await swipePanel();
+    const u0 = touch(u, { target: u.tree.jd, end: false });
+    await u.api.openJob("A");                 // 同一 uid 重新打开也是新一次
+    u.docEvent("touchend", { target: u.tree.jd, timeStamp: u0 + 100, touches: [], changedTouches: [{ clientX: 300, clientY: 300 }] });
+    await tick(); stay("途中重开同一岗位：旧手势作废", u);
+    const v = await swipePanel();
+    const v0 = touch(v, { target: v.tree.jd, end: false });
+    v.document.body.classList.remove("portrait");
+    v.docEvent("touchend", { target: v.tree.jd, timeStamp: v0 + 100, touches: [], changedTouches: [{ clientX: 300, clientY: 300 }] });
+    await tick(); stay("途中切到桌面：作废", v);
+    const w = await swipePanel();
+    const w0 = touch(w, { target: w.tree.jd, end: false });
+    await w.api.closeDetail();                // 途中被别处关闭
+    w.docEvent("touchend", { target: w.tree.jd, timeStamp: w0 + 100, touches: [], changedTouches: [{ clientX: 300, clientY: 300 }] });
+    await tick();
+    eq("途中被关闭：不再动作", [w.api.state().uid, w.asked], [null, 0]);
+  }
+  {
+    // 等保存期间别处换成了另一条（浏览器前进/后退等）：旧手势的关闭不落到新岗位上
+    const t = await swipePanel();
+    let release; t.api.addPendingNote(new Promise((r) => { release = r; }));
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("备注保存中：手势在等待，仍在 A", [t.api.state().uid, t.api.state().gates], ["A", 1]);
+    t.api.setUpdate({ uid: "B" });
+    release(); await tick(); await tick();
+    eq("等待后岗位已是 B：不关闭 B", [t.api.state().uid, t.pane.classList.contains("open")], ["B", true]);
+  }
+
+  console.log("  -- 沿用 closeDetail 的保存、草稿与新结果保护 --");
+  {
+    const t = await swipePanel();
+    let release; t.api.addPendingNote(new Promise((r) => { release = r; }));
+    touch(t, { target: t.tree.jd }); await tick();
+    touch(t, { target: t.tree.jd }); await tick();     // 等待期间重复手势
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("备注保存中：等待，不关闭，重复手势不叠加", [t.api.state().uid, t.api.state().gates, t.asked], ["A", 1, 0]);
+    release(); await tick(); await tick();
+    eq("保存完成：只关闭一次、无确认、不排队后续岗位", [t.api.state().uid, t.api.state().gates, t.asked, t.jobCalls()], [null, 0, 0, ["A"]]);
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("之后再滑不会重新打开或导航", [t.api.state().uid, t.jobCalls()], [null, ["A"]]);
+  }
+  {
+    // 未保存草稿：取消保留岗位与草稿，再次手势才再次确认；确认放弃才离开
+    const t = await swipePanel();
+    const input = new El("input"); input.dataset.noteLoaded = "saved text"; input.value = "typed draft";
+    t.reg[".note input"] = [input];
+    t.confirmAnswer = false;
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("草稿：取消后仍在 A，hash 保留，草稿未动，只问一次",
+      [t.api.state().uid, t.sandbox.location.hash, input.value, t.asked, t.pane.classList.contains("open")], ["A", "#A", "typed draft", 1, true]);
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("取消后的新手势会再确认一次（不静默放弃）", [t.asked, t.api.state().uid, input.value], [2, "A", "typed draft"]);
+    t.confirmAnswer = true;
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("确认放弃：返回列表，共确认三次、未写任何备注", [t.api.state().uid, t.asked, t.calls.filter((c) => c.url.includes("note")).length], [null, 3, 0]);
+  }
+  {
+    // 标注保存失败：留在原岗位，不丢信号
+    const t = await swipePanel();
+    const btn = new El("button"); btn.dataset.uid = "A"; btn.dataset.field = "action"; btn.dataset.value = "saved";
+    t.reg['[data-uid="A"][data-field]'] = [btn];
+    let fail; t.routes.label = () => new Promise((r) => { fail = r; });
+    const write = t.api.setLabel("A", "action", "saved", btn); await tick();
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("标注保存中：手势等待", [t.api.state().uid, t.api.state().gates], ["A", 1]);
+    fail({ ok: false, text: async () => "synthetic failure" });
+    await write; await tick(); await tick();
+    eq("标注保存失败：留在原岗位、hash 恢复、门闩归零、无确认", [t.api.state().uid, t.sandbox.location.hash, t.api.state().gates, t.asked], ["A", "#A", 0, 0]);
+    t.routes.label = (body) => ({ ok: true, json: async () => ({ value: body.value }) });
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("失败后用户重试手势：可返回", t.api.state().uid, null);
+  }
+  {
+    // 新结果信号：无草稿时返回触发一次整页载入（去 hash）；有草稿且取消时信号保留
+    const t = await swipePanel();
+    t.api.setUpdate({ uid: "A", baseline: "generation-1", pending: "generation-2" });
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("有新结果：返回时整页载入一次且不带岗位 hash", [t.reloads(), t.sandbox.location.hash, t.api.state().pending, t.api.state().applying], [1, "", null, true]);
+    touch(t, { target: t.tree.jd }); await tick();
+    eq("载入中再滑：不再触发", [t.reloads(), t.asked], [1, 0]);
+    const u = await swipePanel();
+    const input = new El("input"); input.dataset.noteLoaded = ""; input.value = "draft";
+    u.reg[".note input"] = [input];
+    u.api.setUpdate({ uid: "A", baseline: "generation-1", pending: "generation-2" });
+    u.confirmAnswer = false;
+    touch(u, { target: u.tree.jd }); await tick();
+    eq("草稿取消：新结果信号保留、不载入、留在 A", [u.reloads(), u.api.state().pending, u.api.state().uid, input.value], [0, "generation-2", "A", "draft"]);
+    u.confirmAnswer = true;
+    touch(u, { target: u.tree.jd }); await tick();
+    eq("确认放弃后：信号落地为一次载入", [u.reloads(), u.api.state().pending], [1, null]);
+  }
+
+  console.log("  -- 手势后的兼容 click --");
+  {
+    const t = await swipePanel();
+    const endTs = touch(t, { target: t.tree.jd }); await tick();
+    const card = t.cards[1];
+    const click = (ts, extra = {}) => { const ev = { target: card, timeStamp: ts, button: 0, detail: 1, clientX: 260, clientY: 305, prevented: false, stopped: false, ...extra,
+      preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } }; t.docEvent("click", ev); return ev; };
+    eq("右滑后键盘或程序点击放行", click(endTs + 10, { detail: 0 }).prevented, false);
+    eq("右滑后明确鼠标点击放行", click(endTs + 12, { pointerType: "mouse" }).prevented, false);
+    eq("右滑后明确非触摸点击放行", click(endTs + 14, { sourceCapabilities: { firesTouchEvents: false } }).prevented, false);
+    eq("不同位置的新点击放行", click(endTs + 16, { clientX: 30, clientY: 100 }).prevented, false);
+    const early = click(endTs + 30);
+    eq("同次手势落点的兼容 click 被吞", [early.prevented, early.stopped], [true, true]);
+    eq("只吞一次兼容 click", click(endTs + 40).prevented, false);
+    const late = click(endTs + 700);
+    eq("600ms 之后的正常点击放行", [late.prevented, late.stopped], [false, false]);
+    const none = loadPanel({ portrait: true });
+    const ev = { target: card, timeStamp: 50, button: 0, preventDefault() { this.prevented = true; } };
+    none.docEvent("click", ev);
+    eq("没有手势时 click 不受影响", !!ev.prevented, false);
+    const u = await swipePanel();
+    const uEnd = touch(u, { target: u.tree.jd }); await tick();
+    u.docEvent("touchstart", { target: u.cards[1], timeStamp: uEnd + 20, touches: [{ clientX: 260, clientY: 305 }] });
+    const tap = { target: u.cards[1], timeStamp: uEnd + 40, button: 0, detail: 1, clientX: 260, clientY: 305,
+      preventDefault() { this.prevented = true; }, stopPropagation() {} };
+    u.docEvent("click", tap);
+    eq("返回后立即新触摸点击，即使同位置也放行", !!tap.prevented, false);
+    const v = await swipePanel();
+    const vEnd = touch(v, { target: v.tree.jd }); await tick();
+    const expired = { ...tap, prevented: false, timeStamp: vEnd + 700 };
+    v.docEvent("click", expired);
+    eq("未消费的兼容点击守卫会过期", expired.prevented, false);
+  }
+  {
+    // 返回按钮仍走同一 closeDetail
+    const t = await swipePanel();
+    await t.api.closeDetail();
+    eq("返回按钮路径不变", [t.api.state().uid, t.sandbox.location.hash], [null, ""]);
+  }
+}
+
 async function main() {
   console.log("== v1.2.2 PR-B 面板导航与异步（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
@@ -1229,6 +1603,7 @@ async function main() {
   await testMenuPlacement();
   await testMenuOriginsAndLateLayout();
   await testIneligibleLast();
+  await testSwipeBack();
   console.log();
   if (failures.length) {
     console.log(`失败 ${failures.length} 项：\n  - ${failures.join("\n  - ")}`);

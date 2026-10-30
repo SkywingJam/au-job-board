@@ -98,6 +98,16 @@ chosen set works, and the button hints show it. Keys typed in text fields,
 menus, the location search box and open dialogs or drawers never switch jobs, and
 unsaved or saving notes are protected as with the buttons.
 
+On a narrow (portrait) screen, a one-finger swipe to the right on the job text
+goes back to the list like the **Back** button: it does not need to start at the
+screen edge, but must travel at least 80 px, mostly sideways, in under 0.8 s,
+and not start in the leftmost 24 px (left to the browser's own back gesture).
+Vertical scrolling, left swipes, short or slow drags, pinch zoom, selected text,
+buttons, links, fields, horizontally scrolling content and open drawers or
+dialogs are never treated as a swipe back, and a mouse on a desktop layout is
+unaffected. Saving notes are awaited and unsaved notes ask first, exactly as
+with the button; the list keeps its filters and scroll position.
+
 **Copy job** in the detail header copies plain text for pasting into another
 tool such as an AI assistant: UID, title, company, listing location, listing
 link and the complete stored description, not the
