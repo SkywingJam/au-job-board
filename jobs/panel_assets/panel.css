@@ -1025,3 +1025,28 @@ body.portrait .more-panel .skillpick>button.ctl .v{font-size:16px}   /* 与旁�
 body.portrait .geo-control{width:100%}
 body.portrait .geo-control input{width:100%;min-width:0;max-width:100%;flex:1 1 auto}
 body.portrait .geo-suggest-panel{left:0;right:0;min-width:0;width:auto}
+
+/* Plugin management uses the settings page's existing type and theme. */
+.plugin-list{margin-top:12px;border-top:1px solid var(--line)}
+.plugin-row{display:flex;align-items:center;gap:12px;min-height:76px;border-bottom:1px solid var(--line);padding:12px 4px}
+.plugin-identity{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.plugin-identity b{overflow-wrap:anywhere;font-weight:600}
+.plugin-state,.plugin-fact-status{color:var(--ink2);font-size:var(--fs-sm)}
+.plugin-menu{position:relative;flex:0 0 auto}
+.plugin-menu summary,.plugin-open{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:var(--r-ctl);color:var(--ink2);cursor:pointer}
+.plugin-menu summary{list-style:none}.plugin-menu summary::-webkit-details-marker{display:none}
+.plugin-menu summary:hover,.plugin-open:hover{background:var(--surface);color:var(--ink)}
+.plugin-menu-items{position:absolute;right:0;top:46px;z-index:12;min-width:140px;padding:6px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--surface);box-shadow:0 4px 16px var(--shadow)}
+.plugin-menu-items button{width:100%;padding:10px 14px;text-align:left;background:none;border:0;color:var(--ink);border-radius:var(--r-ctl);cursor:pointer;font:inherit}
+.plugin-menu-items button:hover{background:var(--surface)}
+.plugin-menu-items button:disabled{opacity:.5;cursor:default}
+.plugin-back{align-self:flex-start;margin-bottom:20px;color:var(--ink2);text-decoration:none}
+.plugin-debug-btn{align-self:flex-start;margin:12px 0}
+.plugin-debug-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:55vh;overflow:auto;margin:8px 0;padding:16px;border:1px solid var(--line);border-radius:var(--r-ctl);font-size:var(--fs-sm);line-height:1.7;background:var(--surface)}
+.plugin-debug-output[hidden]{display:none}
+.plugin-facts{margin:16px 0;padding:14px 0;border-top:1px solid var(--line)}
+.plugin-facts h3{display:inline;font-size:var(--fs-md);margin-right:10px}
+.plugin-facts ul{margin:10px 0 0;padding-left:20px;color:var(--ink2);overflow-wrap:anywhere}
+.plugin-facts li+li{margin-top:6px}
+.plugin-menu summary:focus-visible,.plugin-open:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.plugin-debug-btn,.plugin-menu-items button{min-height:44px}

@@ -393,6 +393,54 @@ class ConfigEditor:
         finally:
             handle.close()
 
+    def plugin_config(self):
+        """Fresh plugin settings only; do not change the panel's frozen core config."""
+        _, _, _, plain = self._read()
+        return {**self.config, "plugins": copy.deepcopy(plain.get("plugins", {}))}
+
+    def read_plugins(self):
+        from . import plugin_host
+        raw, _, _, plain = self._read()
+        config = {**self.config, "plugins": plain.get("plugins", {})}
+        return {"ok": True, "digest": hashlib.sha256(raw).hexdigest(),
+                "plugins": plugin_host.list_plugins(config)}
+
+    def save_plugin(self, payload):
+        from . import plugin_host
+        from .run_state import acquire_lock
+        if (not isinstance(payload, dict) or set(payload) != {"digest", "id", "enabled"}
+                or not isinstance(payload["digest"], str) or len(payload["digest"]) != 64
+                or not isinstance(payload["id"], str) or type(payload["enabled"]) is not bool):
+            raise ConfigEditError("invalid_request")
+        try:
+            lock = acquire_lock(self.config)
+        except OSError as exc:
+            raise ConfigEditError("config_unavailable") from exc
+        if lock is None:
+            raise ConfigEditError("run_busy")
+        try:
+            raw, parser, document, plain = self._read()
+            if hashlib.sha256(raw).hexdigest() != payload["digest"]:
+                raise ConfigEditError("conflict")
+            items = plugin_host.list_plugins({**self.config, "plugins": plain.get("plugins", {})})
+            item = next((p for p in items if p["id"] == payload["id"]), None)
+            if item is None or (payload["enabled"] and item["status"] == "error"):
+                raise ConfigEditError("validation_failed")
+            path = "plugins." + item["id"] + ".enabled"
+            expected = copy.deepcopy(plain)
+            _set(expected, path, payload["enabled"])
+            _set(document, path, payload["enabled"])
+            stream = io.StringIO()
+            parser.dump(document, stream)
+            encoded = stream.getvalue().encode("utf-8")
+            if len(encoded) > MAX_BYTES or not _same_values(expected, _document(encoded)[2]):
+                raise ConfigEditError("config_invalid")
+            if encoded != raw:
+                self._replace(encoded, payload["digest"])
+            return self.read_plugins()
+        finally:
+            lock.close()
+
     def _replace(self, encoded, digest):
         temporary = None
         try:

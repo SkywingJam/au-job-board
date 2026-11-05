@@ -93,6 +93,16 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query, keep_blank_values=True)
         lang, theme = self._prefs()
+        if parsed.path in ("/api/plugins", "/api/plugins/debug"):
+            try:
+                allowed = self._same_origin()
+            except ValueError:
+                allowed = False
+            if not allowed:
+                self._json({"ok": False, "error": "forbidden"}, 403, started)
+                return
+            self._plugins(None, qs, started, debug=parsed.path.endswith("/debug"))
+            return
         if parsed.path == "/api/config-settings":
             self._config_settings(None, started)
             return
@@ -108,6 +118,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/stats":
             self._stats(started)
             return
+        config = self._plugin_config()
         conn = database.connect(_db_path(self.config))
         try:
             if parsed.path == "/api/job":
@@ -118,6 +129,8 @@ class Handler(BaseHTTPRequestHandler):
                 if row is None:
                     self._send(f"uid={uid} not found".encode(), 404, "text/plain; charset=utf-8", started)
                     return
+                from . import plugin_host
+                row["_plugin_view"] = plugin_host.presentation(config, uid, lang)
                 payload = json.dumps({"html": _detail_html(row, lang, i18n.resolve_keys(self.headers.get("Cookie")))},
                                      ensure_ascii=False)
                 self._send(payload.encode("utf-8"), 200,
@@ -130,9 +143,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if parsed.path == "/settings":
                 section = (qs.get("section") or [SETTINGS_SECTIONS[0]])[0]
-                page = render_settings(conn, self.config, lang, theme, section,
+                page = render_settings(conn, config, lang, theme, section,
                                        i18n.lang_pref(self.headers.get("Cookie")),
-                                       i18n.resolve_keys(self.headers.get("Cookie")))
+                                       i18n.resolve_keys(self.headers.get("Cookie")),
+                                       plugin_id=(qs.get("plugin") or [None])[0])
                 self._send(page.encode("utf-8"), 200,
                            "text/html; charset=utf-8", started)
                 return
@@ -165,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
                 filters.pop("mode", None)
             if view not in INELIGIBLE_LAST_VIEWS:
                 filters.pop(INELIGIBLE_LAST_KEY, None)
-            page = render_page(conn, self.config, view, offset, limit, started, filters,
+            page = render_page(conn, config, view, offset, limit, started, filters,
                                lang, theme, i18n.lang_pref(self.headers.get("Cookie")))
             self._send(page.encode("utf-8"), 200, "text/html; charset=utf-8", started)
         except ValueError as exc:
@@ -179,6 +193,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):                                  # noqa: N802
         started = time.perf_counter()
+        if self.path == "/api/plugins":
+            payload = self._local_json(started, strict=True)
+            if payload is not None:
+                self._plugins(payload, {}, started)
+            return
         if self.path == "/api/config-settings":
             from .config_edit import MAX_BYTES
             payload = self._local_json(started, MAX_BYTES)
@@ -358,6 +377,41 @@ class Handler(BaseHTTPRequestHandler):
         updated = sum(1 for result in results if result["changed"])
         self._json({"ok": True, "updated": updated, "unchanged": len(results) - updated,
                     "items": results}, 200, started)
+
+    def _plugin_config(self):
+        editor = getattr(self.server, "config_editor", None)
+        if editor is not None:
+            from .config_edit import ConfigEditError
+            try:
+                return editor.plugin_config()
+            except ConfigEditError:
+                return {**self.config, "plugins": {}}
+        return self.config
+
+    def _plugins(self, payload, qs, started, *, debug=False):
+        from . import plugin_host
+        from .config_edit import ConfigEditError
+        editor = getattr(self.server, "config_editor", None)
+        if "demo" in self.config or editor is None:
+            self._json({"ok": False, "error": "demo_disabled" if "demo" in self.config
+                        else "config_unavailable"}, 503, started)
+            return
+        try:
+            if debug:
+                plugin_id = (qs.get("id") or [""])[0]
+                config = editor.plugin_config()
+                if not any(p["id"] == plugin_id for p in plugin_host.list_plugins(config)):
+                    self._json({"ok": False, "error": "not_found"}, 404, started)
+                    return
+                result = {"ok": True, **plugin_host.read_debug(config, plugin_id)}
+            else:
+                result = editor.read_plugins() if payload is None else editor.save_plugin(payload)
+            self._json(result, 200, started)
+        except ConfigEditError as exc:
+            status = 409 if exc.code in ("conflict", "run_busy") else 400
+            if exc.code in ("config_unavailable", "write_failed", "demo_disabled"):
+                status = 503
+            self._json({"ok": False, "error": exc.code}, status, started)
 
     def _config_settings(self, payload, started):
         from .config_edit import ConfigEditError

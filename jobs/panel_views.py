@@ -313,6 +313,8 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
         tags += _tag_html("warn", i18n.cue_label(lang, row["eligibility_cue"]))
     tags += _correction_tag(row, label, lang)
     tags += _salary_chip(pairs, row, lang)
+    for badge in (row.get("_plugin_view") or {}).get("badges", [])[:4]:
+        tags += _tag_html("plugin-badge " + badge["level"], badge["text"], badge["tooltip"])
     skills = [text for kind, text in pairs if kind == "skill"]
     skills_html = ""
     if skills:
@@ -545,6 +547,11 @@ def _detail_html(row: dict, lang: str = "zh", keys: str = i18n.DEFAULT_KEYS) -> 
         f'<div class="hint">{_e(T("detail.skill_hint"))}</div>'
         '</div>',
     ]
+
+    for section in (row.get("_plugin_view") or {}).get("sections", [])[:6]:
+        out.append('<section class="plugin-facts"><h3>' + _e(section["title"]) + '</h3>'
+                   + '<span class="plugin-fact-status">' + _e(section["status"]) + '</span><ul>'
+                   + ''.join('<li>' + _e(item) + '</li>' for item in section["items"]) + '</ul></section>')
 
     if row.get("is_excluded"):
         rule_ids = ',<wbr>'.join(
@@ -1167,8 +1174,11 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     elif page:
         # One divider wherever the displayed block changes: the location tier
         # and/or the "ineligible last" zone. Neither option: no dividers.
+        from . import plugin_host
+        plugin_views = plugin_host.presentation_many(config, [row["uid"] for row in page], lang)
         parts, previous = [], None
         for row in page:
+            row["_plugin_view"] = plugin_views.get(row["uid"], {})
             block = (row.get("_ineligible_last"),
                      (row.get("_geo_match") or "unknown") if filters.get("geo") else None)
             if previous is not None and block != previous:
@@ -1266,13 +1276,13 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 
 # 「资格与规则」从「抓取与更新」里独立出来：它决定哪些岗位被排除，与抓取无关。
 # 未指定或未知分区时进入第一个分区：资格与规则。
-SETTINGS_SECTIONS = ("rules", "fetch", "skills", "display")
+SETTINGS_SECTIONS = ("rules", "fetch", "skills", "plugins", "display")
 # 配置编辑器（settings.js）按分区只显示自己的那几组；写入与冲突检测是同一套。
 CONFIG_GROUPS = {"rules": "rules", "fetch": "queries seek indeed linkedin"}
 
 def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = None,
                     section: str = SETTINGS_SECTIONS[0], lang_pref: str = "auto",
-                    keys: str = i18n.DEFAULT_KEYS) -> str:
+                    keys: str = i18n.DEFAULT_KEYS, plugin_id: str | None = None) -> str:
     """设置页：左分类、右详情，页面居中留白（LinkedIn 设置那种）。
 
     技术栈列表交给前端用 GET /api/skills 的数据渲染，服务端不重复写一套。
@@ -1286,7 +1296,49 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
         f'{_e(T("set.rules_tab" if key == "rules" else "set." + key))}</a>'
         for key in SETTINGS_SECTIONS)
 
-    if section == "skills":
+    if section == "plugins":
+        from . import plugin_host
+        plugins = plugin_host.list_plugins(config)
+        selected = next((p for p in plugins if p["id"] == plugin_id), None)
+        def plugin_name(item):
+            value = item["name"]
+            return value.get(lang) or value.get("en") or item["id"] if isinstance(value, dict) else value
+        if plugin_id is not None:
+            pane = f'<a class="plugin-back" href="/settings?section=plugins">‹ {_e(T("plugin.back"))}</a>'
+            if selected is None:
+                pane += f'<h2>{_e(T("plugin.missing"))}</h2>'
+            else:
+                pane += (f'<h2>{_e(plugin_name(selected))}</h2>'
+                         f'<p class="set-hint">{_e(T("plugin.debug_hint"))}</p>'
+                         f'<button type="button" class="btn plugin-debug-btn" data-plugin-debug="{_e(selected["id"])}" '
+                         f'aria-expanded="false" aria-controls="plugin-debug-output">{_e(T("plugin.debug"))}</button>'
+                         '<pre id="plugin-debug-output" class="plugin-debug-output" role="status" hidden></pre>')
+        else:
+            pane = (f'<h2>{_e(T("set.plugins"))}</h2>'
+                    f'<p class="set-hint">{_e(T("plugin.hint"))}</p><div class="plugin-list">')
+            for item in plugins:
+                name = plugin_name(item)
+                state = item["status"]
+                pane += (f'<div class="plugin-row" data-plugin-id="{_e(item["id"])}">'
+                         f'<div class="plugin-identity"><b>{_e(name)}</b>'
+                         f'<small class="plugin-state">{_e(T("plugin." + state))}</small></div>'
+                         '<details class="plugin-menu">'
+                         f'<summary aria-label="{_e(T("plugin.actions", name=name))}">'
+                         '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">'
+                         '<circle cx="4" cy="10" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="16" cy="10" r="1.5"/></svg></summary>'
+                         '<div class="plugin-menu-items">'
+                         f'<button type="button" data-plugin-toggle="{_e(item["id"])}" '
+                         f'data-enabled="{"true" if item["enabled"] else "false"}"'
+                         f'{" disabled" if state == "error" and not item["enabled"] else ""}>'
+                         f'{_e(T("plugin.disable" if item["enabled"] else "plugin.enable"))}</button></div></details>'
+                         f'<a class="plugin-open" href="/settings?section=plugins&amp;plugin={_e(item["id"])}" '
+                         f'aria-label="{_e(T("plugin.settings", name=name))}">'
+                         '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></a></div>')
+            if not plugins:
+                pane += f'<p class="set-hint">{_e(T("plugin.empty"))}</p>'
+            pane += '</div><p id="plugin-status" class="set-hint" role="status" aria-live="polite"></p>'
+        extra = {}
+    elif section == "skills":
         tree = skill_tree(conn, config.get("skills_path"))
         pane = "".join([
             f'<h2>{_e(T("set.skills_title"))}</h2>',

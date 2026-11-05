@@ -19,3 +19,8 @@
 !jobs/data/
 !jobs/data/au-postcodes.tsv
 !jobs/data/location-reference.json
+
+!plugins/
+!plugins/*/
+!plugins/*/manifest.json
+!plugins/*/*.py

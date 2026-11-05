@@ -144,6 +144,8 @@ def _cmd_fetch(args) -> int:
                     conn.rollback()
                     print("[fetch] 批次收尾失败，保留未完成状态。", file=sys.stderr)
             raise
+        from . import plugin_host
+        plugin_host.dispatch(config, "after_fetch")
         print(f"[fetch] 完成 -> {database.counts(conn)}")
         return 0
 
@@ -308,6 +310,9 @@ def _analyze_legacy(args, config: dict, rules: dict, selected_rules: dict,
                       "rule_profile": _rule_profile_stats(resolution),
                       "config_snapshot": public_config_snapshot(config, rules)})
     conn.commit()
+    # Optional input preparation is isolated too, and skipped when disabled.
+    from . import plugin_host
+    plugin_host.after_analyze(config, conn)
 
     disabled_ex = sum(1 for on in resolution["exclude"].values() if not on)
     disabled_ov = sum(1 for on in resolution["overrides"].values() if not on)

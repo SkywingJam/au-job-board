@@ -29,7 +29,7 @@ def lock_handle(lock):
 
 class WindowsJob:
     """Own a process tree; fail closed if Windows cannot contain the child."""
-    def __init__(self):
+    def __init__(self, *, memory_limit=None):
         import ctypes as c
         from ctypes import wintypes as w
         self.c, self.w = c, w
@@ -66,6 +66,9 @@ class WindowsJob:
             raise c.WinError(c.get_last_error())
         limits = Limits()
         limits.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE; no breakaway.
+        if memory_limit is not None:
+            limits.BasicLimitInformation.LimitFlags |= 0x200  # JOB_OBJECT_LIMIT_JOB_MEMORY
+            limits.JobMemoryLimit = memory_limit
         if not self.k.SetInformationJobObject(self.handle, 9, c.byref(limits), c.sizeof(limits)):
             error = c.WinError(c.get_last_error())
             self.close()
