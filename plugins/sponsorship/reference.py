@@ -286,5 +286,3 @@ class Companies:
         ato_level, ato_name = self.ato.match(company)
         return {"asx": asx_level, "asx_name": asx_name, "ato": ato_level, "ato_name": ato_name,
                 "ato_income": self.income.get(ato_name) if ato_name else None, "ato_year": self.ato_year}
-
-
