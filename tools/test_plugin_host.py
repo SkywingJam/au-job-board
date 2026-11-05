@@ -2,6 +2,7 @@
 """Offline synthetic coverage for plugin isolation and result generations."""
 import json
 import os
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import sys
@@ -19,7 +20,7 @@ class PluginTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.config = {'db_path': str(self.root / 'test.db'), 'plugins': {'sample': {'enabled': True}}}
-        with sqlite3.connect(self.config['db_path']) as conn:
+        with closing(sqlite3.connect(self.config['db_path'])) as conn, conn:
             conn.execute('CREATE TABLE runs (run_id INTEGER PRIMARY KEY, kind TEXT)')
             conn.execute("INSERT INTO runs VALUES (1, 'analyze')")
         self.plugin_root = self.root / 'plugins'
@@ -54,7 +55,7 @@ class PluginTests(unittest.TestCase):
         self.assertFalse(host.presentation(self.config, 'synthetic:1')['badges'])
         self.assertTrue(result_file.exists())
         self.config['plugins']['sample']['enabled'] = True
-        with sqlite3.connect(self.config['db_path']) as conn:
+        with closing(sqlite3.connect(self.config['db_path'])) as conn, conn:
             conn.execute("INSERT INTO runs VALUES (2, 'analyze')")
         self.assertFalse(host.presentation(self.config, 'synthetic:1')['badges'])
         self.dispatch()

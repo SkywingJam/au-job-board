@@ -2,6 +2,7 @@
 from __future__ import annotations
 import http.client
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import sys
@@ -22,12 +23,14 @@ class PluginPanelTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.config = {'db_path': str(self.root/'jobs.db'), 'queries': ['Synthetic'],
                        'skills_path': str(self.root/'skills.yaml'),
+                       'seek': {'enabled': False},
+                       'jobspy': {'indeed': {'enabled': False}, 'linkedin': {'enabled': False}},
                        'plugins': {'sponsorship': {'enabled': False, 'future': 'keep'}},
                        'unrelated': {'preserve': 'yes'}}
         self.path = self.root/'config.yaml'
         self.path.write_text('# keep this comment\n'+yaml.safe_dump(self.config))
         (self.root/'skills.yaml').write_text('version: 1\nskills: []\n')
-        with db.connect(self.config['db_path']) as conn:
+        with closing(db.connect(self.config['db_path'])) as conn, conn:
             db.upsert_job(conn, {'source': 'synthetic', 'source_id': 'one', 'title': 'Synthetic role',
                 'company': 'Imaginary Silver Fern', 'location': 'Hobart TAS', 'description': 'Python development',
                 'url': 'https://example.invalid/job/one'})
@@ -127,7 +130,7 @@ class PluginPanelTests(unittest.TestCase):
         self.toggle(True)
         view = {'badges': [{'text': '<b>Test</b>', 'level': 'info', 'tooltip': '<script>bad</script>'}],
                 'sections': [{'title': '<b>Facts</b>', 'status': 'Reference', 'items': ['<script>bad</script>']}]}
-        with sqlite3.connect(self.config['db_path']) as conn:
+        with closing(sqlite3.connect(self.config['db_path'])) as conn, conn:
             generation = conn.execute("SELECT MAX(run_id) FROM runs WHERE kind='analyze'").fetchone()[0]
         run_state.atomic_json(plugin_host._root(self.config)/'sponsorship'/'results.json',
                               {'analysis_id': generation, 'results': {'synthetic:one': {'zh': view, 'en': view}}})
@@ -158,14 +161,14 @@ class PluginPanelTests(unittest.TestCase):
 
     def test_cli_hooks_with_plugin_failure_preserve_core_and_manual_results(self):
         # Real fetch/analyze entrypoints, mock recruitment source, no real network.
-        with db.connect(self.config['db_path']) as conn:
+        with closing(db.connect(self.config['db_path'])) as conn, conn:
             labels.set_label(conn, 'synthetic:one', note='Keep this synthetic note', source='test')
             before_manual = {table: [tuple(r) for r in conn.execute('SELECT * FROM '+table)]
                              for table in ('labels', 'label_events')}
         args = ['--config', str(self.path), '--rules', str(ROOT/'rules.yaml'),
                 '--skills', str(self.root/'skills.yaml')]
         self.assertEqual(cli.main(args+['analyze']), 0)
-        with db.connect(self.config['db_path']) as conn:
+        with closing(db.connect(self.config['db_path'])) as conn, conn:
             before_scores = [tuple(r)[:-1] for r in conn.execute('SELECT * FROM scores ORDER BY uid')]
             before_decisions = [tuple(r)[:-1] for r in conn.execute('SELECT * FROM decisions ORDER BY uid')]
         self.toggle(True)
@@ -174,7 +177,8 @@ class PluginPanelTests(unittest.TestCase):
                    description='Python development', url='https://example.invalid/job/one')
         with patch.object(sources, 'iter_sources', return_value=iter([('synthetic', lambda config, queries: [job])])), \
              patch.object(plugin_host, '_run_worker', return_value={'errors': []}) as worker:
-            self.assertEqual(cli.main(args+['fetch']), 0)
+            # Keep the mock in this process; launcher/Job coverage lives in test_windows_runtime.
+            self.assertEqual(cli.main(args+['fetch', '--windows-worker']), 0)
             self.assertEqual(worker.call_args.args[2], 'after_fetch')
         with patch.object(plugin_host, '_run_worker', side_effect=ValueError('simulated corrupt plugin')):
             self.assertEqual(cli.main(args+['analyze']), 0)
@@ -183,7 +187,7 @@ class PluginPanelTests(unittest.TestCase):
         # A normal subsequent run succeeds and produces current-generation facts.
         self.assertEqual(cli.main(args+['analyze']), 0)
         self.assertTrue(plugin_host.presentation(config, 'synthetic:one')['sections'])
-        with db.connect(self.config['db_path']) as conn:
+        with closing(db.connect(self.config['db_path'])) as conn, conn:
             self.assertEqual([tuple(r)[:-1] for r in conn.execute('SELECT * FROM scores ORDER BY uid')], before_scores)
             self.assertEqual([tuple(r)[:-1] for r in conn.execute('SELECT * FROM decisions ORDER BY uid')], before_decisions)
             for table, before in before_manual.items():
@@ -202,7 +206,7 @@ class PluginPanelTests(unittest.TestCase):
                 self.assertEqual(cli.main(args), 0)
             config = self.server.config_editor.plugin_config()
             self.assertEqual(plugin_host.read_debug(config, 'sponsorship')['entries'][-1]['error'], type(error).__name__)
-            with db.connect(self.config['db_path']) as conn:
+            with closing(db.connect(self.config['db_path'])) as conn, conn:
                 self.assertTrue(conn.execute('SELECT COUNT(*) FROM scores').fetchone()[0])
         with patch.object(plugin_host, '_analysis_jobs', side_effect=RunTimeout()):
             with self.assertRaises(RunTimeout):
