@@ -349,6 +349,8 @@ def _run_isolated(config, plugin_id, hook, request, *, trusted_download=False):
                         os.set_handle_inheritable(raw, False)
             else:
                 environment = {key: value for key, value in os.environ.items() if key in ('SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL')}
+                # The worker exits if this process dies, even when killed outright.
+                environment['JOBS_PLUGIN_PARENT'] = str(os.getpid())
                 process = subprocess.Popen(command, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, env=environment)
             _wait_worker(process, hook)
             if process.returncode != 0:

@@ -120,6 +120,7 @@ PYTHON_TESTS = (
 NODE_TESTS = (
     ("tools/test_panel_shortcuts.mjs", "keyboard profiles, native selection and overlay guards", None),
     ("tools/test_panel_copy.mjs", "full JD clipboard, fallback and focus preservation", None),
+    ("tools/test_plugin_settings_race.mjs", "plugin switches survive a late initial settings read", None),
     ("tools/test_panel_locations.mjs", "group save identity and location search behavior", None),
     ("tools/test_panel_note_separators.mjs",
      "panel note separators / default labels (UI-02, UI-03)", None),

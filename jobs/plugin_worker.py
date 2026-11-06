@@ -50,6 +50,29 @@ def _file_policy(plugin_path, data_path, temporary):
     return check
 
 
+def _exit_with_parent():
+    """Stop as soon as the supervising host process is gone (POSIX).
+
+    Workers run in their own session so the host can kill the whole tree. If
+    the host itself is killed (SIGKILL, crash), nothing else would stop this
+    process, and it could keep writing plugin data after the run lock is
+    released. Windows workers are contained by a kill-on-close job instead.
+    """
+    if os.name == 'nt':
+        return
+    import threading
+    import time
+    expected = os.environ.get('JOBS_PLUGIN_PARENT', '')
+    parent = int(expected) if expected.isdigit() else os.getppid()
+
+    def watch():
+        while True:
+            if os.getppid() != parent:
+                os._exit(75)
+            time.sleep(0.05)
+    threading.Thread(target=watch, name='parent-watch', daemon=True).start()
+
+
 def _resource_limits():
     if os.name != 'nt':
         import resource
@@ -61,6 +84,7 @@ def _resource_limits():
 
 
 def main():
+    _exit_with_parent()
     _resource_limits()
     path, hook, input_path, output_path = sys.argv[1:]
     with open(input_path, encoding='utf-8') as stream:

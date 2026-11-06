@@ -115,7 +115,8 @@ def refresh(directory):
 if __name__ == '__main__':
     # Trusted host code, supervised by the same process/time/resource boundary
     # as plugin hooks. Never import an installed plugin in this process.
-    from .plugin_worker import _resource_limits
+    from .plugin_worker import _exit_with_parent, _resource_limits
+    _exit_with_parent()
     _resource_limits()
     input_path, output_path = map(Path, sys.argv[1:])
     request = json.loads(input_path.read_text(encoding='utf-8'))

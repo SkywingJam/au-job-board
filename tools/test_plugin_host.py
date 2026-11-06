@@ -146,6 +146,43 @@ class PluginTests(unittest.TestCase):
                          host.presentation(self.config, 'synthetic:39', 'en'))
         self.assertTrue(host.presentation(self.config, 'synthetic:7999', 'en')['sections'])
 
+    @unittest.skipIf(os.name == 'nt', 'Windows workers are contained by a kill-on-close job')
+    def test_worker_exits_when_its_host_is_killed(self):
+        import signal, subprocess, time
+        data = self.root / 'data'
+        self.code("import os, time\nfrom pathlib import Path\n"
+                  "def after_analyze_success(r):\n p=Path(r['data_dir']); p.mkdir(exist_ok=True)\n"
+                  " (p/'pid').write_text(str(os.getpid()))\n time.sleep(60)\n")
+        script = ("import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1])\n"
+                  "from jobs import plugin_host as h\n"
+                  "h.PLUGIN_ROOT = Path(sys.argv[2])\n"
+                  "h._run_worker({}, 'sample', 'after_analyze_success', "
+                  "{'data_dir': sys.argv[3], 'jobs': [], 'analysis_id': 1})\n")
+        host_process = subprocess.Popen([sys.executable, '-c', script, str(Path(__file__).resolve().parent.parent),
+                                         str(self.plugin_root), str(data)])
+        try:
+            deadline = time.monotonic() + 20
+            while not (data / 'pid').exists():
+                self.assertLess(time.monotonic(), deadline, 'worker did not start')
+                self.assertIsNone(host_process.poll())
+                time.sleep(0.05)
+            worker = int((data / 'pid').read_text())
+            host_process.send_signal(signal.SIGKILL)
+            host_process.wait()
+            deadline = time.monotonic() + 5
+            while True:
+                try:
+                    os.kill(worker, 0)
+                except ProcessLookupError:
+                    break
+                if time.monotonic() > deadline:
+                    os.kill(worker, signal.SIGKILL)
+                    self.fail('plugin worker outlived its killed host')
+                time.sleep(0.05)
+        finally:
+            if host_process.poll() is None:
+                host_process.kill(); host_process.wait()
+
     def test_manifest_config_and_storage_failure(self):
         self.manifest['compatibility'] = {'host_api': 2}
         self.write_manifest()

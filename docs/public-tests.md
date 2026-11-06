@@ -10,8 +10,8 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 48 checks: 43 Python tests
-plus five Node behavior tests.
+be collected by accident. The entry currently has 49 checks: 43 Python tests
+plus six Node behavior tests.
 
 Run it from the project root with the project interpreter:
 
@@ -21,10 +21,10 @@ Run it from the project root with the project interpreter:
 ```
 
 The optional MCP adapter has two opt-in integration entries:
-`python tools/run_public_tests.py --with-mcp` (50 entries on macOS).
+`python tools/run_public_tests.py --with-mcp` (51 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default local command keeps
-48 entries. Release CI installs the optional SDK and runs the platform-applicable inventory.
+49 entries. Release CI installs the optional SDK and runs the platform-applicable inventory.
 See [MCP](mcp.md).
 
 It prints one line per test with the command, the exit status and the elapsed
@@ -37,7 +37,7 @@ applicable" on a non-macOS system.
 
 - **Python 3.12** with the runtime dependencies:
   `python -m pip install -r requirements.txt`.
-- **Node.js 24.21.0** for the five panel behavior tests. Node is only
+- **Node.js 24.21.0** for the six panel behavior tests. Node is only
   needed to run the full public suite. It is **not** part of the product
   installation, the panel does not depend on it at runtime, and a normal
   install does not need it.
@@ -57,6 +57,7 @@ nothing in the suite fetches listings.
 | `tools/test_platform_install.py` | Melbourne DST, Git autocrlf byte stability, Chinese/space paths | all |
 | `tools/test_agent_api.py` | Authenticated read-only HTTP, frozen pagination/detail, scope and external client failures | all |
 | `tools/test_job_history.py` | Copy-job and API/MCP posting history: bounded related postings with locations, unknown vs zero, latest successful batch reference, frozen snapshots, no verdict wording | all |
+| `tools/test_plugin_settings_race.mjs` | A delayed initial plugin read cannot overwrite a switch saved on the page | all |
 | `tools/test_batch_labels.py` | Opt-in batch label write: gate and config, one-transaction group-aware action/priority assignment, explicit clears, no-op repeats, whole-batch rejection, rollback/retry, concurrent partial edits, schema/missing DB, HTTP boundaries and the client transport (the MCP tool is in the opt-in MCP entries) | all |
 | `tools/test_batches.py` | Exact fetch membership, source transactions and schema 3 recovery | all |
 | `tools/test_location_http.py` | Group-level writes, location query guidance and same-origin protection | all |

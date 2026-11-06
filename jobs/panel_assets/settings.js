@@ -458,6 +458,8 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
 (function pluginSettings(){
   const LANG=window.__LANG__==='en'?'en':'zh';
   const pending=new Set();
+  // Plugins changed on this page; the slower initial read must not overwrite them.
+  const touched=new Set();
   const message=code=>T('plugin.'+code)===('plugin.'+code)?T('plugin.failed'):T('plugin.'+code);
   const loc=value=>value&&typeof value==='object'?String(value[LANG]||value.en||value.zh||''):(typeof value==='string'?value:'');
   const nameOf=item=>loc(item.name)||item.id;
@@ -622,7 +624,7 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
   async function accept(){
     if(!dialog||dialog.busy||dialog.mode!=='consent')return;
     const {id,fingerprint}=dialog,errorLine=modal.querySelector('.plugin-consent-error');
-    errorLine.textContent='';setBusy(true,T('plugin.consent_accepting'));pending.add(id);
+    errorLine.textContent='';setBusy(true,T('plugin.consent_accepting'));pending.add(id);touched.add(id);
     try{
       const fresh=await readPlugins(),item=byId(fresh.plugins,id),c=consentOf(item);
       if(!item)throw new Error('not_found');
@@ -652,7 +654,7 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
     f.foot.append(ok);f.cancel.addEventListener('click',cancel);
     ok.addEventListener('click',async()=>{
       if(!dialog||dialog.busy)return;
-      f.error.textContent='';setBusy(true,T('plugin.revoking'));pending.add(id);
+      f.error.textContent='';setBusy(true,T('plugin.revoking'));pending.add(id);touched.add(id);
       try{
         const fresh=await readPlugins();
         const result=await post({digest:fresh.digest,id,action:'revoke'});
@@ -687,7 +689,7 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
       const id=button.dataset.pluginToggle;
       if(pending.has(id)||dialog||button.getAttribute('aria-disabled')==='true')return;
       const turningOn=button.dataset.enabled!=='true';
-      pending.add(id);button.setAttribute('aria-busy','true');button.setAttribute('aria-disabled','true');
+      pending.add(id);touched.add(id);button.setAttribute('aria-busy','true');button.setAttribute('aria-disabled','true');
       say(id,T('plugin.saving'),false);
       let review=null;
       try{
@@ -711,8 +713,9 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
   document.querySelectorAll('[data-plugin-revoke]').forEach(b=>b.addEventListener('click',()=>openRevoke(b.dataset.pluginRevoke,b)));
   /* Server markup may predate the consent fields; the API is the single source for them. */
   if(document.querySelector('[data-plugin-toggle],[data-plugin-detail]')){
-    readPlugins().then(data=>(data.plugins||[]).forEach(applyItem)).catch(error=>{
+    readPlugins().then(data=>(data.plugins||[]).forEach(item=>{if(!touched.has(item.id))applyItem(item);})).catch(error=>{
       document.querySelectorAll('[data-plugin-detail]').forEach(d=>{
+        if(touched.has(d.dataset.pluginDetail))return;
         const box=d.querySelector('[data-plugin-scope]');box.replaceChildren(node('p','plugin-row-message is-error',message(error.message)));
         setState(d.querySelector('[data-grant-state]'),T('plugin.consent_unknown_hint'),'is-bad','');
       });
