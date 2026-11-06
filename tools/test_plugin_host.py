@@ -170,10 +170,24 @@ class PluginTests(unittest.TestCase):
             host_process.send_signal(signal.SIGKILL)
             host_process.wait()
             deadline = time.monotonic() + 5
-            while True:
+            def gone():
+                # Without an init process (e.g. `docker run` with no --init) the
+                # orphan is reparented to this test process and stays a zombie.
+                try:
+                    if os.waitpid(worker, os.WNOHANG)[0] == worker:
+                        return True
+                except ChildProcessError:
+                    pass
                 try:
                     os.kill(worker, 0)
                 except ProcessLookupError:
+                    return True
+                try:
+                    return Path(f'/proc/{worker}/stat').read_text().rsplit(')', 1)[1].split()[0] == 'Z'
+                except OSError:
+                    return False
+            while True:
+                if gone():
                     break
                 if time.monotonic() > deadline:
                     os.kill(worker, signal.SIGKILL)
