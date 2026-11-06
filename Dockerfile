@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-mcp.txt \
     && chown jobs:jobs /app/config /app/data /app/out
 
 COPY jobs/ ./jobs/
+COPY plugins/ ./plugins/
 COPY config.example.yaml rules.yaml skills.yaml LICENSE ./
 COPY tools/docker-entrypoint.py /usr/local/bin/jobs-container
 

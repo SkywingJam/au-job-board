@@ -449,3 +449,296 @@ function bindConfigEditor(){
   load();
 }
 document.addEventListener('DOMContentLoaded',bindConfigEditor);
+
+/* Plugins: only validated data crosses this boundary, never installed code.
+   Consent: the review a user reads is built from the same GET /api/plugins
+   response whose fingerprint is submitted, and that fingerprint is rechecked
+   against a fresh read right before granting. Plugin-provided text is only
+   ever assigned with textContent; nothing from a plugin becomes HTML. */
+(function pluginSettings(){
+  const LANG=window.__LANG__==='en'?'en':'zh';
+  const pending=new Set();
+  // Plugins changed on this page; the slower initial read must not overwrite them.
+  const touched=new Set();
+  const message=code=>T('plugin.'+code)===('plugin.'+code)?T('plugin.failed'):T('plugin.'+code);
+  const loc=value=>value&&typeof value==='object'?String(value[LANG]||value.en||value.zh||''):(typeof value==='string'?value:'');
+  const nameOf=item=>loc(item.name)||item.id;
+  const consentOf=item=>{const c=item&&item.consent;return c&&typeof c==='object'&&['required','changed','granted'].includes(c.status)?c:null;};
+  const node=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;};
+  const byId=(list,id)=>(list||[]).find(p=>p&&p.id===id);
+  const rowOf=id=>Array.from(document.querySelectorAll('.plugin-row')).find(r=>r.dataset.pluginId===id);
+  const detailOf=id=>Array.from(document.querySelectorAll('[data-plugin-detail]')).find(d=>d.dataset.pluginDetail===id);
+  async function readPlugins(){
+    const response=await fetch('/api/plugins');let data={};
+    try{data=await response.json();}catch(_){}
+    if(!response.ok||!data.ok)throw new Error(data.error||'failed');
+    return data;
+  }
+  async function post(body){
+    const response=await fetch('/api/plugins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    let data={};try{data=await response.json();}catch(_){}
+    if(!response.ok||!data.ok)throw new Error(data.error||'failed');
+    return data;
+  }
+  /* The switch is the saved on/off setting; this line says whether it can actually run. */
+  function stateOf(item){
+    if(item.status==='error')return [T('plugin.unavailable_hint'),'is-bad',''];
+    const c=consentOf(item);if(!c)return ['','',''];
+    if(c.status==='granted')return [T('plugin.consent_granted_short'),'is-ok',T('plugin.consent_granted_hint')];
+    return [item.enabled?T('plugin.consent_pending_enabled'):T('plugin.consent_'+c.status+'_short'),'is-cue',T('plugin.consent_'+c.status+'_hint')];
+  }
+  function setState(el,text,tone,status){
+    if(!el)return;el.textContent=text;el.hidden=!text;el.dataset.consent=status||'';
+    el.classList.remove('is-ok','is-cue','is-bad');if(tone)el.classList.add(tone);
+  }
+  function renderScope(box,item){
+    if(!box)return;box.replaceChildren();
+    const c=consentOf(item);
+    if(!c){box.append(node('p','plugin-row-message is-error',T('plugin.consent_unavailable')));return;}
+    const perms=Array.isArray(c.permissions)?c.permissions:[];
+    if(perms.length){
+      const list=node('ul','plugin-perms');
+      perms.forEach(p=>{const li=node('li');li.append(node('b','plugin-perm-title',loc(p&&p.title)||String(p&&p.id||'')));
+        const d=loc(p&&p.description);if(d)li.append(node('p','plugin-perm-desc',d));list.append(li);});
+      box.append(list);
+    }else box.append(node('p','hint',T('plugin.consent_no_items')));
+    const limits=loc(c.limits);
+    if(limits){const s=node('div','plugin-limits');s.append(node('b',null,T('plugin.consent_limits')),node('p',null,limits));box.append(s);}
+    if(typeof c.fingerprint==='string'&&c.fingerprint)box.append(node('p','plugin-fp',T('plugin.consent_fingerprint',{fp:c.fingerprint.slice(0,12)})));
+  }
+  function applyItem(item){
+    const [text,tone,hint]=stateOf(item),c=consentOf(item),needs=!!c&&c.status!=='granted'&&item.status!=='error';
+    const row=rowOf(item.id);
+    if(row){
+      const button=row.querySelector('[data-plugin-toggle]');
+      button.dataset.enabled=String(!!item.enabled);button.dataset.unavailable=String(item.status==='error');
+      button.setAttribute('aria-checked',String(!!item.enabled));
+      if(!pending.has(item.id))button.setAttribute('aria-disabled',String(item.status==='error'&&!item.enabled));
+      setState(row.querySelector('.plugin-state'),text,tone,c&&c.status);
+      const errors=row.querySelector('.plugin-error-count');
+      if(errors){errors.hidden=!item.error_count;errors.textContent=item.error_count?T('plugin.error_count',{n:item.error_count}):'';}
+      const review=row.querySelector('[data-plugin-review]');if(review)review.hidden=!needs;
+    }
+    const detail=detailOf(item.id);
+    if(detail){
+      detail.dataset.enabled=String(!!item.enabled);detail.dataset.unavailable=String(item.status==='error');
+      detail.querySelector('[data-grant-switch]').textContent=T(item.enabled?'plugin.enabled':'plugin.disabled');
+      const state=detail.querySelector('[data-grant-state]');
+      setState(state,text||T('plugin.consent_unknown_hint'),text?tone:'is-bad',c&&c.status);
+      detail.querySelector('[data-grant-hint]').textContent=hint;
+      detail.querySelector('[data-plugin-review]').hidden=!needs;
+      detail.querySelector('[data-plugin-revoke]').hidden=!(c&&c.status!=='required');
+      renderScope(detail.querySelector('[data-plugin-scope]'),item);
+    }
+  }
+  function say(id,text,error){
+    const targets=[rowOf(id)&&rowOf(id).querySelector('.plugin-row-message'),detailOf(id)&&detailOf(id).querySelector('[data-grant-message]')];
+    targets.forEach(el=>{if(!el)return;el.classList.toggle('is-error',!!error);el.textContent=text;});
+  }
+
+  /* ---- one dialog for review/consent and for revoke ------------------------------- */
+  const modal=document.getElementById('plugin-consent');
+  let dialog=null;   // {mode,id,item,fingerprint,trigger,busy}
+  function focusables(){return Array.from(modal.querySelectorAll('button:not(:disabled),[href],[tabindex="0"]')).filter(n=>n.getClientRects().length);}
+  function frame(titleText,metaText){
+    modal.replaceChildren();
+    const box=node('div','dialog');box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');
+    box.setAttribute('aria-labelledby','plugin-consent-title');box.setAttribute('aria-describedby','plugin-consent-intro');
+    const head=node('div','dialog-head'),titles=node('div','plugin-consent-titles');
+    const h=node('h3',null,titleText);h.id='plugin-consent-title';h.tabIndex=-1;titles.append(h);
+    if(metaText)titles.append(node('p','plugin-meta',metaText));
+    head.append(titles);
+    const body=node('div','dialog-body plugin-consent-body');body.tabIndex=0;
+    const foot=node('div','dialog-foot');
+    const error=node('p','plugin-consent-error');error.setAttribute('role','alert');
+    const cancel=node('button','btn',T('plugin.consent_cancel'));cancel.type='button';cancel.dataset.consentCancel='';
+    foot.append(error,node('span','spacer'),cancel);
+    box.append(head,body,foot);modal.append(box);
+    return {box,h,body,foot,error,cancel};
+  }
+  function showModal(trigger,focusTarget){
+    if(modal.hidden||modal.classList.contains('leaving')){if(typeof reveal==='function')reveal(modal);else modal.hidden=false;}
+    if(dialog)dialog.trigger=dialog.trigger||trigger;
+    (focusTarget||modal.querySelector('h3')).focus();
+  }
+  function closeModal(announce){
+    if(!dialog)return;
+    const {id,trigger}=dialog;dialog=null;
+    const done=()=>{modal.replaceChildren();};
+    if(typeof conceal==='function')conceal(modal,done);else{modal.hidden=true;done();}
+    if(announce)say(id,announce,false);
+    // The review entry hides itself once granted; fall back to the plugin's switch or heading.
+    const usable=el=>el&&document.contains(el)&&el.getClientRects().length;
+    const row=rowOf(id),detail=detailOf(id);
+    const target=[trigger,row&&row.querySelector('[data-plugin-toggle]'),detail&&detail.querySelector('[data-plugin-review]:not([hidden]),[data-plugin-revoke]:not([hidden])'),detail&&detail.querySelector('#plugin-grant-title')].find(usable);
+    if(target){if(target.id==='plugin-grant-title')target.tabIndex=-1;target.focus();}
+  }
+  function setBusy(busy,label){
+    if(!dialog)return;dialog.busy=busy;
+    modal.querySelectorAll('.dialog-foot button').forEach(b=>{b.disabled=busy;});
+    const ok=modal.querySelector('[data-consent-ok]');
+    if(ok){ok.setAttribute('aria-busy',String(busy));ok.textContent=busy?label:ok.dataset.label;}
+  }
+  function renderConsent(item,notice){
+    const c=consentOf(item),name=nameOf(item);
+    const meta=[item.version?T('plugin.version',{version:item.version}):'',item.id].filter(Boolean).join(' · ');
+    const f=frame(T('plugin.consent_title',{name}),meta);
+    let noticeEl=null;
+    if(notice){noticeEl=node('p','plugin-consent-notice',notice);noticeEl.tabIndex=-1;f.body.append(noticeEl);}
+    const intro=node('p','plugin-consent-intro',T(c&&c.status==='changed'?'plugin.consent_intro_changed':'plugin.consent_intro_required'));
+    intro.id='plugin-consent-intro';f.body.append(intro);
+    const desc=loc(item.description);if(desc)f.body.append(node('p','plugin-consent-purpose',desc));
+    const scope=node('section','plugin-consent-scope');scope.append(node('h4',null,T('plugin.consent_permissions')));
+    const scopeBox=node('div');renderScope(scopeBox,item);scope.append(scopeBox);f.body.append(scope);
+    const after=node('section','plugin-consent-after');after.append(node('h4',null,T('plugin.consent_after')));
+    const ul=node('ul');['run','scope','channels','off'].forEach(k=>ul.append(node('li',null,T('plugin.consent_after_'+k))));
+    after.append(ul);f.body.append(after);
+    if(c){
+      const ok=node('button','primary-btn',T('plugin.consent_accept'));ok.type='button';ok.dataset.consentOk='';ok.dataset.label=ok.textContent;
+      f.foot.append(ok);ok.addEventListener('click',accept);
+    }else f.error.textContent=T('plugin.consent_unavailable');
+    f.cancel.addEventListener('click',cancel);
+    dialog={...(dialog||{}),mode:'consent',id:item.id,item,fingerprint:c&&c.fingerprint,busy:false};
+    return noticeEl;
+  }
+  async function openConsent(id,trigger,data,notice){
+    if(dialog||pending.has(id))return;
+    const request={mode:'consent',id,trigger,busy:true};dialog=request;
+    const f=frame(T('plugin.consent_loading'),'');f.cancel.addEventListener('click',cancel);
+    f.body.append(node('p','hint',T('plugin.consent_loading')));
+    showModal(trigger);
+    try{
+      data=data||await readPlugins();
+      const item=byId(data.plugins,id);
+      if(!item)throw new Error('not_found');
+      if(dialog!==request)return;   // cancelled or replaced while loading
+      const focus=renderConsent(item,notice||(consentOf(item)&&consentOf(item).status==='granted'?T('plugin.consent_already'):''));
+      applyItem(item);
+      showModal(trigger,focus);
+    }catch(error){
+      if(dialog!==request)return;dialog.busy=false;
+      modal.querySelector('.plugin-consent-error').textContent=message(error.message);
+      modal.querySelector('.dialog-body').replaceChildren(node('p','hint',T('plugin.consent_unavailable')));
+    }
+  }
+  async function accept(){
+    if(!dialog||dialog.busy||dialog.mode!=='consent')return;
+    const {id,fingerprint}=dialog,errorLine=modal.querySelector('.plugin-consent-error');
+    errorLine.textContent='';setBusy(true,T('plugin.consent_accepting'));pending.add(id);touched.add(id);
+    try{
+      const fresh=await readPlugins(),item=byId(fresh.plugins,id),c=consentOf(item);
+      if(!item)throw new Error('not_found');
+      if(!c||c.fingerprint!==fingerprint){   // scope changed while reading: show the new one, grant nothing
+        pending.delete(id);const focus=renderConsent(item,c?T('plugin.consent_refreshed'):'');applyItem(item);showModal(null,focus);return;
+      }
+      const result=await post({digest:fresh.digest,id,enabled:true,consent_fingerprint:fingerprint});
+      const saved=byId(result.plugins,id);if(!saved)throw new Error('failed');
+      pending.delete(id);applyItem(saved);closeModal(T('plugin.consent_granted_saved'));
+    }catch(error){
+      pending.delete(id);
+      if(!dialog)return;
+      if(error.message==='plugin_consent_required'){   // the server saw a different scope than we showed
+        try{const fresh=await readPlugins(),item=byId(fresh.plugins,id);if(item&&dialog){const focus=renderConsent(item,T('plugin.consent_refreshed'));applyItem(item);showModal(null,focus);return;}}catch(_){}
+      }
+      setBusy(false);
+      errorLine.textContent=message(error.message)+' '+T('plugin.consent_retry_hint');
+    }
+  }
+  function openRevoke(id,trigger){
+    if(dialog||pending.has(id))return;
+    const detail=detailOf(id),name=detail?detail.querySelector('h2').textContent:id;
+    dialog={mode:'revoke',id,trigger,busy:false};
+    const f=frame(T('plugin.revoke_title',{name}),'');
+    const intro=node('p','plugin-consent-intro',T('plugin.revoke_body'));intro.id='plugin-consent-intro';f.body.append(intro);
+    const ok=node('button','primary-btn danger-fill',T('plugin.revoke_confirm'));ok.type='button';ok.dataset.consentOk='';ok.dataset.label=ok.textContent;
+    f.foot.append(ok);f.cancel.addEventListener('click',cancel);
+    ok.addEventListener('click',async()=>{
+      if(!dialog||dialog.busy)return;
+      f.error.textContent='';setBusy(true,T('plugin.revoking'));pending.add(id);touched.add(id);
+      try{
+        const fresh=await readPlugins();
+        const result=await post({digest:fresh.digest,id,action:'revoke'});
+        const saved=byId(result.plugins,id);if(!saved)throw new Error('failed');
+        pending.delete(id);applyItem(saved);closeModal(T('plugin.revoked_saved'));
+      }catch(error){pending.delete(id);if(!dialog)return;setBusy(false);f.error.textContent=message(error.message);}
+    });
+    showModal(trigger,f.cancel);   // destructive: start on the safe choice
+  }
+  function cancel(){
+    if(!dialog||pending.has(dialog.id))return;   // a grant/revoke is in flight; its result decides
+    closeModal(dialog.mode==='consent'?T('plugin.consent_cancelled'):'');
+  }
+  if(modal){
+    modal.addEventListener('click',event=>{if(event.target===modal)cancel();});
+    document.addEventListener('keydown',event=>{
+      if(!dialog||modal.hidden)return;
+      if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();cancel();return;}
+      if(event.key==='Tab'){
+        const items=focusables(),first=items[0],last=items[items.length-1],active=document.activeElement;
+        if(!items.length){event.preventDefault();return;}
+        const atStart=!items.includes(active)||active===first,atEnd=!items.includes(active)||active===last;
+        if(event.shiftKey&&atStart){event.preventDefault();last.focus();}
+        else if(!event.shiftKey&&atEnd){event.preventDefault();first.focus();}
+      }
+    });
+  }
+
+  /* ---- switch, review and revoke entry points --------------------------------------- */
+  document.querySelectorAll('[data-plugin-toggle]').forEach(button=>{
+    button.addEventListener('click',async()=>{
+      const id=button.dataset.pluginToggle;
+      if(pending.has(id)||dialog||button.getAttribute('aria-disabled')==='true')return;
+      const turningOn=button.dataset.enabled!=='true';
+      pending.add(id);touched.add(id);button.setAttribute('aria-busy','true');button.setAttribute('aria-disabled','true');
+      say(id,T('plugin.saving'),false);
+      let review=null;
+      try{
+        const current=await readPlugins(),item=byId(current.plugins,id),c=consentOf(item);
+        if(!item)throw new Error('not_found');
+        if(turningOn&&c&&c.status!=='granted'){review=current;say(id,'',false);return;}   // enabling needs the review first
+        const result=await post({digest:current.digest,id,enabled:turningOn});
+        const saved=byId(result.plugins,id);if(!saved)throw new Error('failed');
+        applyItem(saved);say(id,T(saved.enabled?'plugin.enabled_saved':'plugin.disabled_saved'),false);
+      }catch(error){
+        if(turningOn&&error.message==='plugin_consent_required'){review=true;say(id,'',false);}
+        else say(id,message(error.message),true);
+      }finally{
+        pending.delete(id);button.removeAttribute('aria-busy');
+        button.setAttribute('aria-disabled',String(button.dataset.unavailable==='true'&&button.dataset.enabled!=='true'));
+        if(review)openConsent(id,button,review===true?null:review);
+      }
+    });
+  });
+  document.querySelectorAll('[data-plugin-review]').forEach(b=>b.addEventListener('click',()=>openConsent(b.dataset.pluginReview,b)));
+  document.querySelectorAll('[data-plugin-revoke]').forEach(b=>b.addEventListener('click',()=>openRevoke(b.dataset.pluginRevoke,b)));
+  /* Server markup may predate the consent fields; the API is the single source for them. */
+  if(document.querySelector('[data-plugin-toggle],[data-plugin-detail]')){
+    readPlugins().then(data=>(data.plugins||[]).forEach(item=>{if(!touched.has(item.id))applyItem(item);})).catch(error=>{
+      document.querySelectorAll('[data-plugin-detail]').forEach(d=>{
+        if(touched.has(d.dataset.pluginDetail))return;
+        const box=d.querySelector('[data-plugin-scope]');box.replaceChildren(node('p','plugin-row-message is-error',message(error.message)));
+        setState(d.querySelector('[data-grant-state]'),T('plugin.consent_unknown_hint'),'is-bad','');
+      });
+    });
+  }
+
+  const debug=document.querySelector('[data-plugin-debug]');
+  let debugBusy=false;
+  if(debug)debug.addEventListener('click',async()=>{
+    if(debugBusy)return;
+    const output=document.getElementById('plugin-debug-output'),status=document.getElementById('plugin-debug-status');
+    if(debug.getAttribute('aria-expanded')==='true'){
+      output.hidden=true;debug.setAttribute('aria-expanded','false');status.textContent='';return;
+    }
+    debugBusy=true;debug.setAttribute('aria-busy','true');debug.setAttribute('aria-disabled','true');output.hidden=false;
+    output.textContent='';status.textContent=T('plugin.loading');debug.setAttribute('aria-expanded','true');
+    try{
+      const response=await fetch('/api/plugins/debug?id='+encodeURIComponent(debug.dataset.pluginDebug));
+      const data=await response.json();
+      if(!response.ok||!data.ok)throw new Error(data.error||'failed');
+      output.textContent=data.entries.length?data.entries.map(e=>[e.time,e.stage,e.error,e.message].join('  ')).join('\n'):T('plugin.no_errors');
+      status.textContent=T('plugin.debug_loaded',{n:data.entries.length});
+    }catch(error){output.textContent=message(error.message);status.textContent=message(error.message);}
+    finally{debugBusy=false;debug.removeAttribute('aria-busy');debug.removeAttribute('aria-disabled');}
+  });
+})();

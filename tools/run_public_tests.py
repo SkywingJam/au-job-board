@@ -42,10 +42,14 @@ ROOT = Path(__file__).resolve().parent.parent
 # (relative path, one-line description, applicable sys.platform values)
 # platforms=None means every platform; a tuple restricts the entry.
 PYTHON_TESTS = (
+    ("tools/test_plugin_panel.py", "plugin settings, debug and presentation HTTP boundaries", None),
+    ("tools/test_plugin_host.py", "plugin process isolation and result generations", None),
+    ("tools/test_plugin_consent_backend.py", "plugin consent and trusted worker boundaries", None),
     ("tools/test_windows_runtime.py", "cross-platform lock ownership and Windows pipeline supervisor", None),
     ("tools/test_file_security.py", "private save permissions and shared token ACL validation", None),
     ("tools/test_platform_install.py", "timezone data, LF resources and Unicode source paths", None),
     ("tools/test_agent_api.py", "authenticated read-only snapshots and external agent client", None),
+    ("tools/test_job_history.py", "local posting history in copy text and API detail", None),
     ("tools/test_batch_labels.py",
      "opt-in batch label write API: atomic group-aware progress/priority, gates and client", None),
     ("tools/test_batches.py", "exact fetch membership and schema 3 recovery", None),
@@ -116,6 +120,7 @@ PYTHON_TESTS = (
 NODE_TESTS = (
     ("tools/test_panel_shortcuts.mjs", "keyboard profiles, native selection and overlay guards", None),
     ("tools/test_panel_copy.mjs", "full JD clipboard, fallback and focus preservation", None),
+    ("tools/test_plugin_settings_race.mjs", "plugin switches survive a late initial settings read", None),
     ("tools/test_panel_locations.mjs", "group save identity and location search behavior", None),
     ("tools/test_panel_note_separators.mjs",
      "panel note separators / default labels (UI-02, UI-03)", None),

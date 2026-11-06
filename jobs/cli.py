@@ -22,6 +22,7 @@ import json
 import sqlite3
 import os
 import signal
+import shlex
 import sys
 import time
 import threading
@@ -57,6 +58,32 @@ def _open(args):
     if config is None:
         config = load_config(getattr(args, "config", None))
     return config, database.connect(db_path(config))
+
+
+def _plugin_pending_notice(config, args):
+    """Keep unattended runs useful without granting or executing plugins."""
+    from . import plugin_host
+    from .config import ROOT
+    try:
+        pending = [item for item in plugin_host.list_plugins(config)
+                   if item['status'] == 'consent_required'] if plugin_host._configured(config) else []
+    except RunTimeout:
+        raise
+    except Exception:
+        return
+    for item in pending:
+        path = str(Path(getattr(args, 'config', None) or ROOT / 'config.yaml').resolve())
+        command_args = [sys.executable, '-m', 'jobs.cli', '--config', path,
+                        'plugin', 'review', item['id']]
+        if os.name == 'nt':
+            from subprocess import list2cmdline
+            command = list2cmdline(command_args)
+        else:
+            command = shlex.join(command_args)
+        reason = '权限声明已变化 / permissions changed' if item['consent']['status'] == 'changed' else '尚未授权 / consent required'
+        print(f"[plugin] {item['id']}: {reason}，已跳过 / skipped. "
+              f"请在设置 > 插件中审阅并确认 / Review and confirm in Settings > Plugins, "
+              f"或 / or: {command}", file=sys.stderr, flush=True)
 
 
 # --------------------------------------------------------------------------
@@ -144,6 +171,9 @@ def _cmd_fetch(args) -> int:
                     conn.rollback()
                     print("[fetch] 批次收尾失败，保留未完成状态。", file=sys.stderr)
             raise
+        from . import plugin_host
+        plugin_host.dispatch(config, "after_fetch")
+        _plugin_pending_notice(config, args)
         print(f"[fetch] 完成 -> {database.counts(conn)}")
         return 0
 
@@ -308,6 +338,10 @@ def _analyze_legacy(args, config: dict, rules: dict, selected_rules: dict,
                       "rule_profile": _rule_profile_stats(resolution),
                       "config_snapshot": public_config_snapshot(config, rules)})
     conn.commit()
+    # Optional input preparation is isolated too, and skipped when disabled.
+    from . import plugin_host
+    plugin_host.after_analyze(config, conn)
+    _plugin_pending_notice(config, args)
 
     disabled_ex = sum(1 for on in resolution["exclude"].values() if not on)
     disabled_ov = sum(1 for on in resolution["overrides"].values() if not on)
@@ -950,12 +984,53 @@ def cmd_run(args) -> int:
     return _execute_pipeline(args)
 
 
+def cmd_plugin(args):
+    from .config_edit import ConfigEditor, ConfigEditError
+    editor = ConfigEditor(load_config(args.config), config_path=args.config)
+    try:
+        result = editor.read_plugins()
+        item = next((p for p in result['plugins'] if p['id'] == args.plugin_id), None)
+        # Revoke must still work when a manifest became invalid: it only
+        # disables the plugin and deletes the stored grant.
+        if not item or ('consent' not in item and args.plugin_action != 'revoke'):
+            print('Plugin unavailable or manifest invalid.', file=sys.stderr)
+            return 1
+        print(json.dumps(item, ensure_ascii=False, indent=2))
+        if args.plugin_action == 'review':
+            return 0
+        payload = {'digest': result['digest'], 'id': args.plugin_id,
+                   'enabled': args.plugin_action == 'grant'}
+        if args.plugin_action == 'revoke':
+            payload['action'] = 'revoke'
+        elif args.plugin_action == 'grant':
+            current = item['consent']['fingerprint']
+            if args.fingerprint is None:
+                if not sys.stdin.isatty() or input('Grant the displayed permissions? Type yes: ').strip() != 'yes':
+                    print('No grant recorded.', file=sys.stderr)
+                    return 1
+                payload['consent_fingerprint'] = current
+            else:
+                payload['consent_fingerprint'] = args.fingerprint
+        editor.save_plugin(payload, channel='cli')
+        print('Plugin settings saved.')
+        return 0
+    except ConfigEditError as exc:
+        print('Plugin settings failed: ' + exc.code, file=sys.stderr)
+        return 1
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="jobs", description="澳洲求职聚合流水线")
     parser.add_argument("--config", help="config.yaml 路径")
     parser.add_argument("--rules", help="rules.yaml 路径")
     parser.add_argument("--skills", help="skills.yaml 路径（技能词表）")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_plugin = sub.add_parser('plugin', help='Review, grant or revoke plugin permissions')
+    p_plugin.add_argument('plugin_action', choices=('review', 'grant', 'revoke'))
+    p_plugin.add_argument('plugin_id')
+    p_plugin.add_argument('--fingerprint', help='Grant only this reviewed permission fingerprint')
+    p_plugin.set_defaults(func=cmd_plugin)
 
     p_fetch = sub.add_parser("fetch", help="抓列表（联网）")
     p_fetch.add_argument("--only", choices=["seek", "indeed", "linkedin"],

@@ -1,0 +1,38 @@
+{
+  "id": "sponsorship",
+  "name": {
+    "zh": "雇主担保信息",
+    "en": "Employer sponsorship facts"
+  },
+  "version": "1.0.0",
+  "compatibility": {
+    "host_api": 1
+  },
+  "entry": "plugin.py",
+  "hooks": [
+    "after_fetch",
+    "after_analyze_success"
+  ],
+  "network": "after_fetch",
+  "permissions": {
+    "job_fields": ["uid", "company"],
+    "files": ["plugin_data"],
+    "network": [{
+      "purpose": "sponsorship_reference",
+      "timing": "after_fetch",
+      "targets": ["www.abf.gov.au", "www.asx.com.au", "data.gov.au"],
+      "request_data": "no_job_data"
+    }],
+    "execution": ["python_worker"],
+    "display": ["job_badges", "job_details"]
+  },
+  "display": true,
+  "i18n": [
+    "zh",
+    "en"
+  ],
+  "description": {
+    "zh": "查看雇主在公开名单中的记录与来源。",
+    "en": "Employer records and sources from public lists."
+  }
+}

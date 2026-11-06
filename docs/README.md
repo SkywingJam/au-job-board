@@ -11,6 +11,8 @@ English.
 | [install.md](install.md) | Source installation for a new machine, and the license boundary |
 | [docker.md](docker.md) | Optional Docker / Compose deployment, persistent volumes, commands and backup; macOS still prefers source |
 | [agent-install.md](agent-install.md) | The same install steps for an AI coding agent |
+| [plugins.md](plugins.md) | Optional plugins, process isolation, settings and diagnostic output |
+| [sponsorship.md](sponsorship.md) | Employer reference facts and accredited-list import |
 | [usage.md](usage.md) | The fetch, analyze, report and panel workflow, commands, labels and notes, local data and provenance |
 | [manual-updates.md](manual-updates.md) | Editable next-run fetch settings, background updates, configuration timing and failure states |
 | [location-workflow.md](location-workflow.md) | Group representative choice, one-box location search, block ordering and limits |

@@ -31,7 +31,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
-from . import config as config_mod, labels, location_query
+from . import config as config_mod, history, labels, location_query
 from . import locations, migrations, panel_data, report, run_state, skills
 
 UTC = dt.timezone.utc
@@ -202,7 +202,7 @@ def _human(value):
     return {k: value.get(k) for k in keys}
 
 
-def serialize(conn, row, panel_base, filters):
+def serialize(conn, row, panel_base, filters, history_facts=None):
     keys = ('uid', 'source', 'title', 'company', 'location', 'url', 'salary', 'work_type',
             'listing_date', 'first_seen_at', 'last_seen_at', 'dedupe_group', 'tier', 'total_score',
             'skills', 'tags', 'is_excluded', 'rule_id', 'rule_kind', 'matched_text', 'reasons',
@@ -213,7 +213,8 @@ def serialize(conn, row, panel_base, filters):
                location_match=row.get('_geo_match'),
                human_scope='group',
                human=_human(row.get('_label') or {}),
-               panel_url=panel_link(panel_base, row['uid'], filters))
+               panel_url=panel_link(panel_base, row['uid'], filters),
+               history=history_facts if history_facts is not None else history.for_job(conn, row))
     return out
 
 
@@ -329,7 +330,7 @@ class SnapshotStore:
         limit = item.metadata['query']['limit']
         ids = item.order[offset:offset+limit]
         # Return fresh objects; response assembly cannot mutate the cache.
-        rows = [{k: v for k, v in item.records[uid].items() if k != 'description'} for uid in ids]
+        rows = [{k: v for k, v in item.records[uid].items() if k not in ('description', 'history')} for uid in ids]
         result = {**item.metadata, 'total': len(item.order), 'items': rows,
                   'next_cursor': self.cursor(item, offset+limit) if offset+limit < len(item.order) else None}
         return copy.deepcopy(result)
@@ -356,12 +357,27 @@ def snapshot_store(config):
 
 
 class AgentAPI:
-    def __init__(self, config, *, panel_url='http://127.0.0.1:8090/', store=None):
+    def __init__(self, config, *, panel_url='http://127.0.0.1:8090/', store=None, config_path=None):
         self.config = copy.deepcopy(config)
         self.db_path = config_mod.db_path(config)
         self.panel_base = _panel_base(panel_url)
         self.store = store if store is not None else snapshot_store(config)
         self.allow_label_writes = label_writes_enabled(config)
+        self.config_path = config_path
+
+    def plugins(self):
+        from . import plugin_host
+        from .config_edit import ConfigEditor, ConfigEditError
+        config = self.config
+        if self.config_path is not None:
+            try:
+                config = ConfigEditor(config, config_path=self.config_path).plugin_config()
+            except ConfigEditError:
+                raise APIError('config_unavailable', 503) from None
+        return {'ok': True, 'plugins': plugin_host.list_plugins(config),
+                'confirmation': 'Disclose the plugin name, purpose, all permissions, network timing and data sent. Wait for explicit user consent. The user must confirm in the local panel or run jobs plugin grant with the reviewed fingerprint. Never infer consent; do not execute while pending.',
+                'panel_url': self.panel_base.rstrip('/') + '/settings?section=plugins',
+                'cli': 'On the server, replace CONFIG_PATH with the configuration used by this instance: python -m jobs.cli --config CONFIG_PATH plugin review ID; python -m jobs.cli --config CONFIG_PATH plugin grant ID --fingerprint FINGERPRINT'}
 
     def _candidates(self, conn, query):
         scope, batch = query['scope'], None
@@ -403,12 +419,18 @@ class AgentAPI:
                 kept, excluded, legacy, index = report.load(conn, self.config, deduplicate=False)
                 pool = [r for r in kept+excluded if candidates is None or r['uid'] in candidates]
                 records = {}
+                # One read for the whole snapshot keeps history frozen with it.
+                groups, reference = history.group_index(conn), history.fetch_reference(conn)
+
+                def facts(row):
+                    group = row.get('dedupe_group')
+                    return history.build(row, groups.get(group, []) if group else None, reference)
                 for row in pool:
                     target = locations.parse_target(filters['geo']) if filters.get('geo') else None
                     decorated = location_query.decorate(conn, row, legacy, index, target=target)
-                    records[row['uid']] = serialize(conn, decorated, self.panel_base, filters)
+                    records[row['uid']] = serialize(conn, decorated, self.panel_base, filters, facts(row))
                 for row in rows:
-                    records[row['uid']] = serialize(conn, row, self.panel_base, filters)
+                    records[row['uid']] = serialize(conn, row, self.panel_base, filters, facts(row))
                 if batch:
                     members = {r['uid']: dict(r) for r in conn.execute('SELECT uid,is_new,seen_at FROM fetch_batch_members WHERE batch_id=?', (batch['batch_id'],))}
                     for uid, record in records.items():
@@ -537,7 +559,11 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.scheme or parsed.netloc or parsed.fragment:
                 raise APIError('invalid_request')
             qs = parse_qs(parsed.query, keep_blank_values=True, max_num_fields=40, errors='strict')
-            if parsed.path == PREFIX+'/jobs':
+            if parsed.path == PREFIX+'/plugins':
+                if qs:
+                    raise APIError('invalid_query')
+                result = self.server.api.plugins()
+            elif parsed.path == PREFIX+'/jobs':
                 result = self.server.api.jobs(qs)
             elif parsed.path.startswith(PREFIX+'/jobs/'):
                 uid = unquote(parsed.path[len(PREFIX+'/jobs/'):], errors='strict')
@@ -676,7 +702,7 @@ class Handler(BaseHTTPRequestHandler):
     do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = do_TRACE = do_CONNECT = _not_allowed
 
 
-def make_server(config, token, *, host='127.0.0.1', port=8091, panel_url='http://127.0.0.1:8090/', store=None):
+def make_server(config, token, *, host='127.0.0.1', port=8091, panel_url='http://127.0.0.1:8090/', store=None, config_path=None):
     # Docker publishes on host loopback. The wildcard is only a bind address
     # inside the container; it never becomes an accepted HTTP Host authority.
     if host not in ('127.0.0.1', 'localhost') and not (
@@ -684,7 +710,7 @@ def make_server(config, token, *, host='127.0.0.1', port=8091, panel_url='http:/
         raise ValueError('API host must be loopback; 0.0.0.0 requires JOBS_CONTAINER=1')
     if not isinstance(token, str) or not 32 <= len(token) <= 4096 or any(c.isspace() for c in token) or not token.isascii():
         raise ValueError('token must be 32 to 4096 non-whitespace ASCII characters')
-    api = AgentAPI(config, panel_url=panel_url, store=store)
+    api = AgentAPI(config, panel_url=panel_url, store=store, config_path=config_path)
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     server.token = token
@@ -718,7 +744,7 @@ def main(argv=None):
         token = read_token(args.token_file)
         # Fail before listening if the installation is missing/outdated.
         conn = read_connection(config_mod.db_path(config)); conn.close()
-        server = make_server(config, token, host=args.host, port=args.port, panel_url=args.panel_url)
+        server = make_server(config, token, host=args.host, port=args.port, panel_url=args.panel_url, config_path=args.config)
     except (OSError, ValueError, APIError, sqlite3.Error):
         parser.exit(2, 'Cannot start API: check host (wildcard requires JOBS_CONTAINER=1), '
                     'config, owner-only token file and upgraded database.\n')

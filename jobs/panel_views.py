@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import db as database
+from . import history
 from . import i18n
 from . import labels as labels_mod
 from . import skills as skills_mod
@@ -313,6 +314,11 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
         tags += _tag_html("warn", i18n.cue_label(lang, row["eligibility_cue"]))
     tags += _correction_tag(row, label, lang)
     tags += _salary_chip(pairs, row, lang)
+    plugin_badges = (row.get("_plugin_view") or {}).get("badges", [])
+    if plugin_badges:
+        # Employer warnings are visible first; they never change job ranking.
+        badge = min(plugin_badges, key=lambda b: {"bad": 0, "warn": 1, "info": 2, "good": 3}.get(b["level"], 4))
+        tags += _tag_html("plugin-badge " + badge["level"], badge["text"], badge["tooltip"])
     skills = [text for kind, text in pairs if kind == "skill"]
     skills_html = ""
     if skills:
@@ -457,6 +463,34 @@ def _geo_error(text: str) -> str | None:
     return None
 
 
+def _history_lines(row: dict, facts: dict, lang: str) -> list[str]:
+    """Local posting history for the copied text: observed facts only, no verdicts."""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    day = history.local_date
+    lines = []
+    if row.get("listing_date"):
+        lines.append(f'{T("copy.posted")}: {day(row["listing_date"])}')
+    lines.append(f'{T("copy.seen")}: ' + T("copy.seen_value", first=day(row.get("first_seen_at")),
+                                            last=day(row.get("last_seen_at")),
+                                            source=row.get("source") or ""))
+    if facts.get("latest_successful_fetch_at"):
+        key = "copy.latest_yes" if facts.get("seen_in_latest_successful_fetch") else "copy.latest_no"
+        lines.append(f'{T("copy.latest_fetch")}: ' + T(key, date=day(facts["latest_successful_fetch_at"])))
+    total = facts.get("related_total")
+    count = T("copy.related_unknown") if total is None else T("copy.related_count", n=total)
+    lines.append(f'{T("copy.related")}: {count}')
+    for item in facts.get("related") or []:
+        seen = item.get("seen_in_latest_successful_fetch")
+        state = "" if seen is None else T("copy.related_seen" if seen else "copy.related_gone")
+        lines.append(T("copy.related_item", first=day(item.get("first_seen_at")),
+                       source=item.get("source") or "", location=item.get("location") or "-",
+                       last=day(item.get("last_seen_at")), state=state))
+    if total and total > len(facts.get("related") or []):
+        lines.append(T("copy.related_more", n=total - len(facts["related"])))
+    lines.append(T("copy.scope_note"))
+    return lines
+
+
 def _copy_text(row: dict, lang: str) -> str:
     """「复制岗位」的纯文本：给外部 AI 用，所以取存储的完整 JD，不取渲染后的 DOM。"""
     T = lambda key: i18n.t(lang, key)   # noqa: E731
@@ -465,6 +499,8 @@ def _copy_text(row: dict, lang: str) -> str:
              f'{T("copy.company")}: {row.get("company") or ""}',
              f'{T("copy.location")}: {row.get("location") or ""}']
     lines.append(f'{T("copy.url")}: {row.get("url") or ""}')
+    if (facts := row.get("_history")) is not None:
+        lines += [""] + _history_lines(row, facts, lang)
     body = str(row.get("description") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     lines += ["", f'{T("copy.jd")}:', body or T("detail.jd_empty")]
     return "\n".join(lines) + "\n"
@@ -545,6 +581,13 @@ def _detail_html(row: dict, lang: str = "zh", keys: str = i18n.DEFAULT_KEYS) -> 
         f'<div class="hint">{_e(T("detail.skill_hint"))}</div>'
         '</div>',
     ]
+
+    for section in (row.get("_plugin_view") or {}).get("sections", [])[:6]:
+        out.append('<details class="plugin-facts"><summary>'
+                   + '<span class="plugin-facts-title">' + _e(section["title"]) + '</span>'
+                   + '<span class="plugin-facts-summary"> · ' + _e(section["status"]) + '</span></summary>'
+                   + '<div class="plugin-facts-body"><ul>'
+                   + ''.join('<li>' + _e(item) + '</li>' for item in section["items"]) + '</ul></div></details>')
 
     if row.get("is_excluded"):
         rule_ids = ',<wbr>'.join(
@@ -1167,8 +1210,11 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     elif page:
         # One divider wherever the displayed block changes: the location tier
         # and/or the "ineligible last" zone. Neither option: no dividers.
+        from . import plugin_host
+        plugin_views = plugin_host.presentation_many(config, [row["uid"] for row in page], lang)
         parts, previous = [], None
         for row in page:
+            row["_plugin_view"] = plugin_views.get(row["uid"], {})
             block = (row.get("_ineligible_last"),
                      (row.get("_geo_match") or "unknown") if filters.get("geo") else None)
             if previous is not None and block != previous:
@@ -1263,16 +1309,129 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 # ---------------------------------------------------------------------------
 # 设置页
 # ---------------------------------------------------------------------------
+# 插件授权：服务端只渲染身份、开关与授权状态；权限条目由 settings.js 用
+# GET /api/plugins 的当次数据渲染（审阅窗和详情页同一个渲染函数、同一份指纹）。
+# 插件提供的文字一律当纯文本，不插入 HTML。
+
+def _plugin_text(value, lang: str) -> str:
+    if isinstance(value, dict):
+        value = value.get(lang) or value.get("en") or value.get("zh") or ""
+    return value if isinstance(value, str) else ""
+
+
+def _plugin_consent_status(item: dict) -> str:
+    """required / changed / granted；没有可审阅的授权信息时为空串。"""
+    consent = item.get("consent")
+    status = consent.get("status") if isinstance(consent, dict) else None
+    return status if status in ("required", "changed", "granted") else ""
+
+
+def _plugin_state_text(item: dict, lang: str) -> tuple[str, str]:
+    """(状态文字, 样式)：开关只代表配置里的开/关，这一行说明它此刻能不能运行。"""
+    T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    if item.get("status") == "error":
+        return T("plugin.unavailable_hint"), "is-bad"
+    status = _plugin_consent_status(item)
+    if not status:
+        return "", ""
+    if status == "granted":
+        return T("plugin.consent_granted_short"), "is-ok"
+    if item.get("enabled"):
+        return T("plugin.consent_pending_enabled"), "is-cue"
+    return T("plugin.consent_" + status + "_short"), "is-cue"
+
+
+def _plugin_row(item: dict, name: str, lang: str) -> str:
+    T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    state = item["status"]
+    plugin_id = item["id"]
+    description = _plugin_text(item.get("description"), lang)
+    name_id, desc_id, msg_id, st_id = ("pl-name-" + plugin_id, "pl-desc-" + plugin_id,
+                                       "pl-msg-" + plugin_id, "pl-state-" + plugin_id)
+    errors = (T("plugin.error_count", n=item["error_count"]) if item.get("error_count") else "")
+    text, tone = _plugin_state_text(item, lang)
+    consent = _plugin_consent_status(item)
+    version = item.get("version") or ""
+    return (f'<div class="plugin-row" data-plugin-id="{_e(plugin_id)}">'
+            '<div class="plugin-row-main"><div class="plugin-identity">'
+            f'<b id="{_e(name_id)}">{_e(name)}'
+            + (f' <span class="plugin-version">{_e(T("plugin.version", version=version))}</span>' if version else '')
+            + '</b>'
+            f'<small id="{_e(desc_id)}">{_e(description)}</small>'
+            f'<small id="{_e(st_id)}" class="plugin-state {tone}" data-consent="{_e(consent)}"'
+            f'{" hidden" if not text else ""}>{_e(text)}</small>'
+            f'<small class="plugin-error-count"{" hidden" if not errors else ""}>{_e(errors)}</small></div>'
+            f'<button type="button" class="plugin-toggle" role="switch" '
+            f'aria-checked="{"true" if item["enabled"] else "false"}" '
+            f'aria-labelledby="{_e(name_id)}" aria-describedby="{_e(desc_id)} {_e(st_id)} {_e(msg_id)}" '
+            f'aria-disabled="{"true" if state == "error" and not item["enabled"] else "false"}" '
+            f'data-unavailable="{"true" if state == "error" else "false"}" '
+            f'data-plugin-toggle="{_e(plugin_id)}" data-enabled="{"true" if item["enabled"] else "false"}">'
+            '<span class="plugin-toggle-track" aria-hidden="true"><span></span></span></button>'
+            f'<a class="plugin-open" href="/settings?section=plugins&amp;plugin={_e(plugin_id)}" '
+            f'aria-label="{_e(T("plugin.settings", name=name))}">'
+            '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></a></div>'
+            f'<p id="{_e(msg_id)}" class="plugin-row-message" role="status" aria-live="polite"></p>'
+            # 需要授权时，审阅入口与开关并列在行内，不藏进详情页。
+            f'<button type="button" class="plugin-review-link" data-plugin-review="{_e(plugin_id)}"'
+            f'{" hidden" if consent not in ("required", "changed") or state == "error" else ""}>'
+            f'{_e(T("plugin.review_enable"))}</button></div>')
+
+
+def _plugin_detail(item: dict, name: str, lang: str) -> str:
+    T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    plugin_id = item["id"]
+    version = item.get("version") or ""
+    description = _plugin_text(item.get("description"), lang)
+    text, tone = _plugin_state_text(item, lang)
+    consent = _plugin_consent_status(item)
+    meta = " · ".join(x for x in (T("plugin.version", version=version) if version else "", plugin_id) if x)
+    switch = T("plugin.enabled") if item.get("enabled") else T("plugin.disabled")
+    return (f'<div class="plugin-detail" data-plugin-detail="{_e(plugin_id)}" '
+            f'data-enabled="{"true" if item.get("enabled") else "false"}" '
+            f'data-unavailable="{"true" if item.get("status") == "error" else "false"}">'
+            f'<h2>{_e(name)}</h2>'
+            f'<p class="plugin-meta">{_e(meta)}</p>'
+            + (f'<p class="set-hint">{_e(description)}</p>' if description else '')
+            + '<section class="plugin-grant" aria-labelledby="plugin-grant-title">'
+            f'<h3 id="plugin-grant-title">{_e(T("plugin.grant_section"))}</h3>'
+            '<dl class="plugin-grant-facts">'
+            f'<div><dt>{_e(T("plugin.switch_label"))}</dt><dd data-grant-switch>{_e(switch)}</dd></div>'
+            f'<div><dt>{_e(T("plugin.consent_label"))}</dt><dd><span class="plugin-state {tone}" '
+            f'data-grant-state data-consent="{_e(consent)}">{_e(text or T("plugin.loading"))}</span></dd></div></dl>'
+            '<p class="plugin-grant-hint" data-grant-hint></p>'
+            '<div class="plugin-grant-actions">'
+            f'<button type="button" class="primary-btn" data-plugin-review="{_e(plugin_id)}" hidden>'
+            f'{_e(T("plugin.review_enable"))}</button>'
+            f'<button type="button" class="btn plugin-revoke-btn" data-plugin-revoke="{_e(plugin_id)}" hidden>'
+            f'{_e(T("plugin.revoke"))}</button></div>'
+            '<p class="plugin-row-message" data-grant-message role="status" aria-live="polite"></p>'
+            '</section>'
+            '<section class="plugin-scope" aria-labelledby="plugin-scope-title">'
+            f'<h3 id="plugin-scope-title">{_e(T("plugin.permissions_title"))}</h3>'
+            f'<div class="plugin-scope-body" data-plugin-scope><p class="hint">{_e(T("plugin.loading"))}</p></div>'
+            '</section>'
+            '<section class="plugin-debug" aria-labelledby="plugin-debug-title">'
+            f'<h3 id="plugin-debug-title">{_e(T("plugin.debug"))}</h3>'
+            f'<p class="set-hint">{_e(T("plugin.debug_hint"))}</p>'
+            f'<button type="button" class="btn plugin-debug-btn" data-plugin-debug="{_e(plugin_id)}" '
+            f'aria-expanded="false" aria-controls="plugin-debug-output">{_e(T("plugin.debug"))}</button>'
+            '<p id="plugin-debug-status" class="hint" role="status" aria-live="polite"></p>'
+            '<pre id="plugin-debug-output" class="plugin-debug-output" tabindex="0" hidden></pre>'
+            '</section></div>')
+
+
+# ---------------------------------------------------------------------------
 
 # 「资格与规则」从「抓取与更新」里独立出来：它决定哪些岗位被排除，与抓取无关。
 # 未指定或未知分区时进入第一个分区：资格与规则。
-SETTINGS_SECTIONS = ("rules", "fetch", "skills", "display")
+SETTINGS_SECTIONS = ("rules", "fetch", "skills", "plugins", "display")
 # 配置编辑器（settings.js）按分区只显示自己的那几组；写入与冲突检测是同一套。
 CONFIG_GROUPS = {"rules": "rules", "fetch": "queries seek indeed linkedin"}
 
 def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = None,
                     section: str = SETTINGS_SECTIONS[0], lang_pref: str = "auto",
-                    keys: str = i18n.DEFAULT_KEYS) -> str:
+                    keys: str = i18n.DEFAULT_KEYS, plugin_id: str | None = None) -> str:
     """设置页：左分类、右详情，页面居中留白（LinkedIn 设置那种）。
 
     技术栈列表交给前端用 GET /api/skills 的数据渲染，服务端不重复写一套。
@@ -1286,7 +1445,31 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
         f'{_e(T("set.rules_tab" if key == "rules" else "set." + key))}</a>'
         for key in SETTINGS_SECTIONS)
 
-    if section == "skills":
+    if section == "plugins":
+        from . import plugin_host
+        plugins = plugin_host.list_plugins(config)
+        selected = next((p for p in plugins if p["id"] == plugin_id), None)
+        def plugin_name(item):
+            value = item["name"]
+            return value.get(lang) or value.get("en") or item["id"] if isinstance(value, dict) else value
+        if plugin_id is not None:
+            pane = f'<a class="plugin-back" href="/settings?section=plugins">‹ {_e(T("plugin.back"))}</a>'
+            if selected is None:
+                pane += f'<h2>{_e(T("plugin.missing"))}</h2>'
+            else:
+                pane += _plugin_detail(selected, plugin_name(selected), lang)
+        else:
+            pane = (f'<h2>{_e(T("set.plugins"))}</h2>'
+                    f'<p class="set-hint">{_e(T("plugin.hint"))}</p><div class="plugin-list">')
+            for item in plugins:
+                pane += _plugin_row(item, plugin_name(item), lang)
+            if not plugins:
+                pane += f'<p class="set-hint">{_e(T("plugin.empty"))}</p>'
+            pane += '</div>'
+        # Empty shell; settings.js fills it with textContent from GET /api/plugins.
+        pane += '<div class="modal plugin-consent" id="plugin-consent" hidden></div>'
+        extra = {}
+    elif section == "skills":
         tree = skill_tree(conn, config.get("skills_path"))
         pane = "".join([
             f'<h2>{_e(T("set.skills_title"))}</h2>',

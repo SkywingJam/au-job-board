@@ -261,7 +261,7 @@ def test_settings_sections() -> None:
             rules = panel.render_settings(conn, {}, lang, None, "rules", lang)
             fetch = panel.render_settings(conn, {}, lang, None, "fetch", lang)
             check(f"{lang}：分区导航含「资格与规则」且排第一",
-                  re.findall(r'href="/settings\?section=([a-z]+)"', rules)[:4] == ["rules", "fetch", "skills", "display"])
+                  re.findall(r'href="/settings\?section=([a-z]+)"', rules)[:5] == ["rules", "fetch", "skills", "plugins", "display"])
             check(f"{lang}：资格与规则只显示规则组", 'id="config-editor" data-config-groups="rules"' in rules)
             check(f"{lang}：说明保存不会重算", i18n.t(lang, "set.rules_hint") in rules)
             groups = re.search(r'id="config-editor" data-config-groups="([^"]+)"', fetch).group(1).split()

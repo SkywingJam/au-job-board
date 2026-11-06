@@ -59,14 +59,14 @@ def acquire_lock(config):
     return acquire_file_lock(target)
 
 
-def atomic_json(path, value):
+def atomic_json(path, value, *, ensure_ascii=True):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
         with temporary.open('w', encoding='utf-8') as stream:
             set_private(temporary)
-            json.dump(value, stream)
+            json.dump(value, stream, ensure_ascii=ensure_ascii)
         _retry_sharing(lambda: os.replace(temporary, path), _REPLACE_RETRY_SECONDS)
     finally:
         temporary.unlink(missing_ok=True)

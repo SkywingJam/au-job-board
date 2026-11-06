@@ -101,12 +101,40 @@ class MCPFixture(unittest.TestCase):
 
 
 class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_cli_grant_and_revoke_are_visible_through_api_and_mcp(self):
+        import yaml
+        config = {**self.server.api.config, 'plugins': {'sponsorship': {'enabled': True}}}
+        config_path = self.root / 'plugin-config.yaml'
+        config_path.write_text(yaml.safe_dump(config))
+        self.server.api.config_path = config_path
+        before = hashlib.sha256(self.path.read_bytes()).hexdigest()
+        async with self.client() as client:
+            review = await self.call(client, 'review_plugin_permissions', {})
+            self.assertIn('--config CONFIG_PATH', review['cli'])
+            self.assertTrue(review['panel_url'].endswith('/settings?section=plugins'))
+            item = next(p for p in review['plugins'] if p['id'] == 'sponsorship')
+            self.assertEqual(item['consent']['status'], 'required')
+            # A read tool has no confirmation argument and cannot mint a grant.
+            await client.call_tool('review_plugin_permissions', {'confirmed': True})
+            review = await self.call(client, 'review_plugin_permissions', {})
+            self.assertEqual(review['plugins'][0]['consent']['status'], 'required')
+            for command, expected in [('grant', 'granted'), ('revoke', 'required')]:
+                args = [sys.executable, '-B', '-m', 'jobs.cli', '--config', str(config_path),
+                        'plugin', command, 'sponsorship']
+                if command == 'grant':
+                    args += ['--fingerprint', item['consent']['fingerprint']]
+                proc = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=15)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                review = await self.call(client, 'review_plugin_permissions', {})
+                self.assertEqual(review['plugins'][0]['consent']['status'], expected)
+        self.assertEqual(hashlib.sha256(self.path.read_bytes()).hexdigest(), before)
+
     async def test_discovery_and_complete_frozen_read_without_writes(self):
         before = hashlib.sha256(self.path.read_bytes()).hexdigest()
         async with self.client() as client:
             tools = (await client.list_tools()).tools
             self.assertEqual({t.name for t in tools},
-                             {'list_jobs', 'get_job', 'list_batches', 'get_batch'})
+                             {'list_jobs', 'get_job', 'list_batches', 'get_batch', 'review_plugin_permissions'})
             for tool in tools:
                 self.assertTrue(tool.annotations.read_only_hint)
                 self.assertFalse(tool.annotations.destructive_hint)
@@ -154,6 +182,10 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 'get_job', {'uid': 'synthetic:a', 'snapshot_id': sid})
             results['list_batches'] = await client.call_tool('list_batches', {'limit': 1})
             results['get_batch'] = await client.call_tool('get_batch', {'batch_id': self.batch_id})
+            results['review_plugin_permissions'] = await client.call_tool('review_plugin_permissions', {})
+            review = results['review_plugin_permissions'].structured_content
+            self.assertIn('explicit user consent', review['confirmation'])
+            self.assertIn('panel', review['confirmation'])
             self.assertEqual(set(results), set(published))
             for name, result in results.items():
                 with self.subTest(name=name):
@@ -164,7 +196,6 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(text, json.dumps(result.structured_content, ensure_ascii=False,
                                                       separators=(',', ':')))
                     self.assertNotIn('\n', text)      # newlines inside the JD stay escaped
-                    self.assertNotIn(': ', text.replace('"description":"' + body, ''))
             self.assertEqual(results['get_job'].structured_content['item']['description'], body)
             self.assertIn('Caf\u00e9 \u65e5\u672c', results['get_job'].content[0].text)
 
@@ -186,7 +217,7 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
     async def test_legacy_initialization_and_tool_call(self):
         async with self.client(mode='legacy') as client:
             self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
-            self.assertEqual(len((await client.list_tools()).tools), 4)
+            self.assertEqual(len((await client.list_tools()).tools), 5)
             page = await self.call(client, 'list_jobs', {'query': {'limit': 1}})
             detail = await self.call(client, 'get_job', {
                 'uid': page['items'][0]['uid'], 'snapshot_id': page['snapshot_id']})
@@ -307,7 +338,7 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(TOKEN, proc.stderr)
 
 
-READ_TOOLS = {'list_jobs', 'get_job', 'list_batches', 'get_batch'}
+READ_TOOLS = {'list_jobs', 'get_job', 'list_batches', 'get_batch', 'review_plugin_permissions'}
 WRITE_TOOL = 'batch_label_jobs'
 
 
@@ -319,7 +350,7 @@ class MCPLabelWrites(MCPFixture, unittest.IsolatedAsyncioTestCase):
     """Real stdio SDK -> HTTP API with agent_api.allow_label_writes enabled."""
     label_writes = True
 
-    async def test_flag_registers_a_fifth_tool_with_write_annotations(self):
+    async def test_flag_registers_label_tool_with_write_annotations(self):
         async with self.client(writes=True) as client:
             self.assertEqual(client.server_info.name, 'AU Job Board')
             tools = {t.name: t for t in (await client.list_tools()).tools}

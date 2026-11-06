@@ -114,7 +114,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
             async with Client(streamable_http_client(service.url, http_client=http), mode='legacy') as client:
                 self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
                 self.assertEqual({t.name for t in (await client.list_tools()).tools},
-                    {'list_jobs','get_job','list_batches','get_batch'})
+                    {'list_jobs','get_job','list_batches','get_batch','review_plugin_permissions'})
                 first = await client.call_tool('list_jobs', {'query': {'limit': 1}})
                 self.assertFalse(first.is_error)
                 page = first.structured_content
@@ -150,13 +150,13 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(http.aclose)
         return Client(streamable_http_client(service.url, http_client=http), mode='legacy')
 
-    async def test_default_http_exposes_only_the_four_read_tools(self):
+    async def test_default_http_exposes_only_read_tools(self):
         before = self.fixture.human_state()
         service = self.start()
         async with await self.connect(service) as client:
             self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
             self.assertEqual({t.name for t in (await client.list_tools()).tools},
-                             {'list_jobs', 'get_job', 'list_batches', 'get_batch'})
+                             {'list_jobs', 'get_job', 'list_batches', 'get_batch', 'review_plugin_permissions'})
             result = await client.call_tool('batch_label_jobs', {'items': [
                 {'uid': 'synthetic:c', 'action': 'saved'}]})
             self.assertTrue(result.is_error)
@@ -171,7 +171,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(client.server_info.name, 'AU Job Board')
             tools = {t.name: t for t in (await client.list_tools()).tools}
             self.assertEqual(set(tools), {'list_jobs', 'get_job', 'list_batches', 'get_batch',
-                                          'batch_label_jobs'})
+                                          'review_plugin_permissions', 'batch_label_jobs'})
             for name, tool in tools.items():
                 note = tool.annotations
                 expected = (False, True, True, False) if name == 'batch_label_jobs' else (True, False, True, False)
@@ -305,7 +305,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         async with httpx2.AsyncClient(verify=ssl.create_default_context(cafile=cert),
                 headers={'Authorization': 'Bearer '+TOKEN}) as http:
             async with Client(streamable_http_client(service.url, http_client=http)) as client:
-                self.assertEqual(len((await client.list_tools()).tools), 4)
+                self.assertEqual(len((await client.list_tools()).tools), 5)
 
     async def test_conflict_and_invalid_settings_cleanup(self):
         with socket.socket() as occupied:

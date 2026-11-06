@@ -1,0 +1,8 @@
+{
+  "classification": "public reference only; no job/config/result data",
+  "source": "https://www.homeaffairs.gov.au/foi/files/2025/fa-250101229-document-released.PDF",
+  "as_of": "2025-01-15",
+  "file": "accredited-2025-01-15.txt",
+  "sha256": "1cb8a9d4d780a9d7664c85a17109c3aff62b3b69d79ea6a613b0cd2238654fde",
+  "method": "Local PDFKit/Vision OCR; page row counts checked, 21 source rows visually inspected; one omitted row and one spacing issue corrected. Not a full manual transcription audit."
+}

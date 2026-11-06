@@ -1,7 +1,7 @@
 """Optional stdio MCP adapter over the existing authenticated HTTP API.
 
 No database or application configuration is accessed here. By default only the
-four read tools exist; `batch_label_jobs` is registered only when label writes
+five read tools exist; `batch_label_jobs` is registered only when label writes
 are explicitly allowed, and the HTTP API must separately enable them.
 Install requirements-mcp.txt separately; the normal panel needs no MCP SDK.
 """
@@ -85,6 +85,9 @@ def make_server(client, *, allow_label_writes=False):
         Pass the exact uid and snapshot_id from list_jobs. Expired snapshots are
         errors: restart the list rather than mixing a fresh JD into older results.
         panel_url opens the live panel; its contents may have changed since then.
+        history holds local observations only (dates, sources, locations, related
+        postings in the same duplicate group); absence from later fetches does
+        not mean a job closed, and related postings are not asserted identical.
         """
         return get('/api/v1/jobs/' + quote(uid, safe=''), {'snapshot_id': snapshot_id})
 
@@ -103,6 +106,19 @@ def make_server(client, *, allow_label_writes=False):
     def get_batch(batch_id: Annotated[str, Field(min_length=1)]) -> dict[str, Any]:
         """Read collection facts and independent pipeline evidence for a batch ID."""
         return get('/api/v1/batches/' + quote(batch_id, safe=''), {})
+
+    @server.tool(annotations=readonly)
+    def review_plugin_permissions() -> dict[str, Any]:
+        """Review plugin permissions and confirmation status without running plugins.
+
+        Disclose each plugin's name, purpose, complete permission scope, network
+        timing and data sent. Wait for the user's explicit consent. Never infer
+        consent from installation, enabling, a query, silence or your own judgment.
+        The user must confirm through the local panel or CLI using the current
+        fingerprint. No model-supplied boolean can grant access. Query status
+        again afterwards; do not execute while consent is pending or changed.
+        """
+        return get('/api/v1/plugins', {})
 
     def drop_default(schema):
         schema.pop('default', None)
