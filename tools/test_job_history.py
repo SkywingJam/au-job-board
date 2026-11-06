@@ -111,7 +111,7 @@ class JobHistory(unittest.TestCase):
         self.assertIn('同一去重组（同公司、标题相近）的其他广告: 7 条\n', zh)
         self.assertIn('  · 首次看到 2026-10-17 · synthetic · Synthetic Town 6 VIC · 最后看到 2026-10-27，之后的抓取中未再出现\n', zh)
         self.assertIn('  · 另 2 条未列出\n', zh)
-        self.assertIn('未再出现不代表岗位已关闭', zh)
+        self.assertIn('说明：基于本地记录分析，受搜索条件和抓取结果限制，建议自行核验岗位信息。\n', zh)
         # History sits between the listing fields and the full JD, which stays last.
         self.assertLess(zh.index('原帖链接'), zh.index('发布日期'))
         self.assertLess(zh.index('说明：'), zh.index('完整 JD'))
@@ -125,8 +125,6 @@ class JobHistory(unittest.TestCase):
                     self.fail('related posting without a location: ' + line)
             history_part = text.split('完整 JD' if text is zh else 'Full job description')[0].lower()
             for word in VERDICT_WORDS:
-                for note in ('未再出现不代表岗位已关闭', 'does not mean the job closed'):
-                    history_part = history_part.replace(note, '')
                 self.assertNotIn(word, history_part)
         unknown = self.copied('synthetic:raw', 'en')
         self.assertIn('similar title): unknown (not analysed yet)\n', unknown)

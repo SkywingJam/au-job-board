@@ -16,8 +16,8 @@ from zoneinfo import ZoneInfo
 ZONE = "Australia/Melbourne"
 RELATED_LIMIT = 5
 BASIS = "same_dedupe_group"
-SCOPE_NOTE = ("Local collection records only: limited to this instance's searches and "
-              "successful fetches. Not appearing again does not mean the job closed.")
+SCOPE_NOTE = ("Based on local records and limited by search criteria and fetch results; "
+              "verify the job details independently.")
 
 _COLUMNS = "uid,source,title,location,listing_date,first_seen_at,last_seen_at,dedupe_group"
 
