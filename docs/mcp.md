@@ -176,7 +176,7 @@ establish a lower billed-token count.
 | Tool | Arguments | Result |
 |---|---|---|
 | `list_jobs` | Optional `query` object of HTTP API fields | One frozen page, `total`, `snapshot_id`, `next_cursor` |
-| `get_job` | Required `uid`, `snapshot_id` | Complete JD, machine evidence, group human state, live panel link |
+| `get_job` | Required `uid`, `snapshot_id` | Complete JD, machine evidence, local posting `history`, group human state, live panel link |
 | `list_batches` | `limit` (default 50, maximum 200), `offset` (default 0) | Fresh batch metadata, `next_offset` |
 | `get_batch` | Required `batch_id` | Collection facts and separate pipeline evidence |
 | `review_plugin_permissions` | None | Full permission review, current status and user-operated confirmation paths |

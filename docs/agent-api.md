@@ -134,6 +134,26 @@ success from a timestamp. UTC timestamps include offsets. Day queries use
 Australia/Melbourne with 23/25-hour DST days; publication date, first observed,
 and observed again in a specific batch remain separate fields.
 
+### Local posting history
+
+A job detail (`GET /api/v1/jobs/{uid}`, MCP `get_job`) includes `history`, the
+same facts the panel's "Copy job" text carries. List pages omit it.
+
+| Field | Meaning |
+|---|---|
+| `latest_successful_fetch_at` | Start of the newest batch whose collection succeeded for every source; `null` without recorded batches |
+| `seen_in_latest_successful_fetch` | Whether this source row was observed in that batch (`last_seen_at` at or after its start); `null` when unknown |
+| `related_basis` | `same_dedupe_group`: the stored duplicate group from the last analysis (same employer, similar title; cities merge unless `dedupe.include_city`) |
+| `related_total` | Other rows in that group; `null` before the job has been analysed |
+| `related` | Up to five of them, newest first observed: `uid`, `source`, `title`, `location`, `listing_date`, `first_seen_at`, `last_seen_at`, `seen_in_latest_successful_fetch` |
+| `scope_note` | Fixed reminder that these are local collection records |
+
+These are observations only. Not appearing in a later fetch can mean the
+search no longer matched it; it does not establish that the job closed. A
+related posting is not asserted to be the same position, and nothing here
+scores whether a job is genuine. Within a snapshot the history is read in the
+same transaction as the rest of the record.
+
 ## Stable pagination and limits
 
 The first list request reads a consistent SQLite transaction and materializes

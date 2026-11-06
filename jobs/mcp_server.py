@@ -85,6 +85,9 @@ def make_server(client, *, allow_label_writes=False):
         Pass the exact uid and snapshot_id from list_jobs. Expired snapshots are
         errors: restart the list rather than mixing a fresh JD into older results.
         panel_url opens the live panel; its contents may have changed since then.
+        history holds local observations only (dates, sources, locations, related
+        postings in the same duplicate group); absence from later fetches does
+        not mean a job closed, and related postings are not asserted identical.
         """
         return get('/api/v1/jobs/' + quote(uid, safe=''), {'snapshot_id': snapshot_id})
 

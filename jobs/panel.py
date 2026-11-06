@@ -131,6 +131,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 from . import plugin_host
                 row["_plugin_view"] = plugin_host.presentation(config, uid, lang)
+                from . import history
+                row["_history"] = history.for_job(conn, row)
                 payload = json.dumps({"html": _detail_html(row, lang, i18n.resolve_keys(self.headers.get("Cookie")))},
                                      ensure_ascii=False)
                 self._send(payload.encode("utf-8"), 200,

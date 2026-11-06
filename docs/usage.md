@@ -110,8 +110,13 @@ with the button; the list keeps its filters and scroll position.
 
 **Copy job** in the detail header copies plain text for pasting into another
 tool such as an AI assistant: UID, title, company, listing location, listing
-link and the complete stored description, not the
-on-screen rendering. Copying changes no job or label. If
+link, local posting history and the complete stored description, not the
+on-screen rendering. The history lists only what this installation observed:
+listing date, first/last seen, whether the posting appeared in the latest
+successful fetch, and up to five other postings in its duplicate group (same
+employer, similar title) with their locations and dates. It makes no judgement
+about whether a job is genuine or still open; the same facts are in the API and
+MCP `get_job` as `history`. Copying changes no job or label. If
 the browser blocks clipboard access (for example over plain HTTP from another
 device), a dialog shows the same text selected for manual copying.
 

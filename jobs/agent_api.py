@@ -31,7 +31,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
-from . import config as config_mod, labels, location_query
+from . import config as config_mod, history, labels, location_query
 from . import locations, migrations, panel_data, report, run_state, skills
 
 UTC = dt.timezone.utc
@@ -202,7 +202,7 @@ def _human(value):
     return {k: value.get(k) for k in keys}
 
 
-def serialize(conn, row, panel_base, filters):
+def serialize(conn, row, panel_base, filters, history_facts=None):
     keys = ('uid', 'source', 'title', 'company', 'location', 'url', 'salary', 'work_type',
             'listing_date', 'first_seen_at', 'last_seen_at', 'dedupe_group', 'tier', 'total_score',
             'skills', 'tags', 'is_excluded', 'rule_id', 'rule_kind', 'matched_text', 'reasons',
@@ -213,7 +213,8 @@ def serialize(conn, row, panel_base, filters):
                location_match=row.get('_geo_match'),
                human_scope='group',
                human=_human(row.get('_label') or {}),
-               panel_url=panel_link(panel_base, row['uid'], filters))
+               panel_url=panel_link(panel_base, row['uid'], filters),
+               history=history_facts if history_facts is not None else history.for_job(conn, row))
     return out
 
 
@@ -329,7 +330,7 @@ class SnapshotStore:
         limit = item.metadata['query']['limit']
         ids = item.order[offset:offset+limit]
         # Return fresh objects; response assembly cannot mutate the cache.
-        rows = [{k: v for k, v in item.records[uid].items() if k != 'description'} for uid in ids]
+        rows = [{k: v for k, v in item.records[uid].items() if k not in ('description', 'history')} for uid in ids]
         result = {**item.metadata, 'total': len(item.order), 'items': rows,
                   'next_cursor': self.cursor(item, offset+limit) if offset+limit < len(item.order) else None}
         return copy.deepcopy(result)
@@ -418,12 +419,18 @@ class AgentAPI:
                 kept, excluded, legacy, index = report.load(conn, self.config, deduplicate=False)
                 pool = [r for r in kept+excluded if candidates is None or r['uid'] in candidates]
                 records = {}
+                # One read for the whole snapshot keeps history frozen with it.
+                groups, latest = history.group_index(conn), history.latest_successful_fetch(conn)
+
+                def facts(row):
+                    group = row.get('dedupe_group')
+                    return history.build(row, groups.get(group, []) if group else None, latest)
                 for row in pool:
                     target = locations.parse_target(filters['geo']) if filters.get('geo') else None
                     decorated = location_query.decorate(conn, row, legacy, index, target=target)
-                    records[row['uid']] = serialize(conn, decorated, self.panel_base, filters)
+                    records[row['uid']] = serialize(conn, decorated, self.panel_base, filters, facts(row))
                 for row in rows:
-                    records[row['uid']] = serialize(conn, row, self.panel_base, filters)
+                    records[row['uid']] = serialize(conn, row, self.panel_base, filters, facts(row))
                 if batch:
                     members = {r['uid']: dict(r) for r in conn.execute('SELECT uid,is_new,seen_at FROM fetch_batch_members WHERE batch_id=?', (batch['batch_id'],))}
                     for uid, record in records.items():

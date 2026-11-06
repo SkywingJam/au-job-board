@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import db as database
+from . import history
 from . import i18n
 from . import labels as labels_mod
 from . import skills as skills_mod
@@ -462,6 +463,34 @@ def _geo_error(text: str) -> str | None:
     return None
 
 
+def _history_lines(row: dict, facts: dict, lang: str) -> list[str]:
+    """Local posting history for the copied text: observed facts only, no verdicts."""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    day = history.local_date
+    lines = []
+    if row.get("listing_date"):
+        lines.append(f'{T("copy.posted")}: {day(row["listing_date"])}')
+    lines.append(f'{T("copy.seen")}: ' + T("copy.seen_value", first=day(row.get("first_seen_at")),
+                                            last=day(row.get("last_seen_at")),
+                                            source=row.get("source") or ""))
+    if facts.get("latest_successful_fetch_at"):
+        key = "copy.latest_yes" if facts.get("seen_in_latest_successful_fetch") else "copy.latest_no"
+        lines.append(f'{T("copy.latest_fetch")}: ' + T(key, date=day(facts["latest_successful_fetch_at"])))
+    total = facts.get("related_total")
+    count = T("copy.related_unknown") if total is None else T("copy.related_count", n=total)
+    lines.append(f'{T("copy.related")}: {count}')
+    for item in facts.get("related") or []:
+        seen = item.get("seen_in_latest_successful_fetch")
+        state = "" if seen is None else T("copy.related_seen" if seen else "copy.related_gone")
+        lines.append(T("copy.related_item", first=day(item.get("first_seen_at")),
+                       source=item.get("source") or "", location=item.get("location") or "-",
+                       last=day(item.get("last_seen_at")), state=state))
+    if total and total > len(facts.get("related") or []):
+        lines.append(T("copy.related_more", n=total - len(facts["related"])))
+    lines.append(T("copy.scope_note"))
+    return lines
+
+
 def _copy_text(row: dict, lang: str) -> str:
     """「复制岗位」的纯文本：给外部 AI 用，所以取存储的完整 JD，不取渲染后的 DOM。"""
     T = lambda key: i18n.t(lang, key)   # noqa: E731
@@ -470,6 +499,8 @@ def _copy_text(row: dict, lang: str) -> str:
              f'{T("copy.company")}: {row.get("company") or ""}',
              f'{T("copy.location")}: {row.get("location") or ""}']
     lines.append(f'{T("copy.url")}: {row.get("url") or ""}')
+    if (facts := row.get("_history")) is not None:
+        lines += [""] + _history_lines(row, facts, lang)
     body = str(row.get("description") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     lines += ["", f'{T("copy.jd")}:', body or T("detail.jd_empty")]
     return "\n".join(lines) + "\n"
