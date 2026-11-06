@@ -16,8 +16,10 @@ from zoneinfo import ZoneInfo
 ZONE = "Australia/Melbourne"
 RELATED_LIMIT = 5
 BASIS = "same_dedupe_group"
-SCOPE_NOTE = ("Based on local records and limited by search criteria and fetch results; "
-              "verify the job details independently.")
+SCOPE_NOTE = ("Local collection records. Related postings are grouped automatically by employer and "
+              "title similarity and may be different actual positions; not appearing in later fetches "
+              "may only mean the search no longer matched, not that the job closed. Verify against the "
+              "original listing and the employer's own information.")
 
 _COLUMNS = "uid,source,title,location,listing_date,first_seen_at,last_seen_at,dedupe_group"
 
