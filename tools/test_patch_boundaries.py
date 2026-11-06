@@ -237,6 +237,17 @@ class PatchBoundaries(unittest.TestCase):
         with patch.object(seek, "urlopen", return_value=io.BytesIO(json.dumps(body).encode())):
             self.assertEqual(seek.fetch_detail("synthetic"), "Full description\n\nSummary")
 
+    def test_seek_detail_posts_to_current_graphql_host(self):
+        body = {"data": {"jobDetails": {"job": {"content": "<p>Full description</p>", "abstract": ""}}}}
+        with patch.object(seek, "urlopen", return_value=io.BytesIO(json.dumps(body).encode())) as opened:
+            self.assertEqual(seek.fetch_detail("synthetic"), "Full description")
+        request = opened.call_args.args[0]
+        self.assertEqual(request.full_url, "https://au.seek.com/graphql")
+        self.assertEqual(request.get_method(), "POST")
+        redirect = seek.HTTPError("https://www.seek.com.au/graphql", 308, "Permanent Redirect", {}, None)
+        with patch.object(seek, "urlopen", side_effect=redirect):
+            self.assertIsNone(seek.fetch_detail("synthetic"))
+
     def test_zero_score_orders_above_negative_and_wins_duplicate(self):
         rows = [dict(uid="synthetic:zero", source="synthetic", title="Zero", total_score=0, dedupe_group="g"),
                 dict(uid="synthetic:negative", source="synthetic", title="Negative", total_score=-1, dedupe_group="g")]

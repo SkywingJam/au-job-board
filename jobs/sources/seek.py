@@ -22,7 +22,9 @@ from . import blank_job
 
 SOURCE = "seek"
 SEARCH_API = "https://www.seek.com.au/api/jobsearch/v5/search"
-GRAPHQL = "https://www.seek.com.au/graphql"
+# SEEK moved GraphQL to au.seek.com in Nov 2026; the old host answers POST with
+# 308, which urllib does not follow for POST, so every detail fetch failed.
+GRAPHQL = "https://au.seek.com/graphql"
 JOB_URL = "https://www.seek.com.au/job/"
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
