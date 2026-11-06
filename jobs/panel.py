@@ -408,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = editor.read_plugins() if payload is None else editor.save_plugin(payload)
             self._json(result, 200, started)
         except ConfigEditError as exc:
-            status = 409 if exc.code in ("conflict", "run_busy") else 400
+            status = 409 if exc.code in ("conflict", "run_busy", "plugin_consent_required") else 400
             if exc.code in ("config_unavailable", "write_failed", "demo_disabled"):
                 status = 503
             self._json({"ok": False, "error": exc.code}, status, started)

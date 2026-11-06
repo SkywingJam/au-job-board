@@ -1,6 +1,7 @@
 """Employer-only facts adapted from Patrickchenxi's PR #27."""
 from __future__ import annotations
 import re
+import json
 import zipfile
 import xml.etree.ElementTree as ET
 import urllib.request
@@ -10,36 +11,8 @@ from . import reference as ref
 
 
 def after_fetch(request):
-    directory = Path(request['data_dir'])
-    directory.mkdir(parents=True, exist_ok=True)
-    days = 30
-    downloads = [
-        ('sanctioned.json', lambda path: ref._download(urllib.request.Request(ref.SANCTIONS_URL, data=b'{}', method='POST', headers={'Content-Type': 'application/json; charset=utf-8'}), path, ref._check_sanctions)),
-        ('asx-listed.csv', lambda path: ref._download(ref.ASX_URL, path, ref._check_asx)),
-    ]
-    errors = []
-    for name, download in downloads:
-        try:
-            if ref._stale(directory / name, days):
-                download(directory / name)
-        except (OSError, ValueError):
-            errors.append(name)
-    try:
-        existing = sorted(directory.glob('ato-tax-*.xlsx'))
-        damaged = False
-        if existing:
-            try:
-                ref.load_ato(directory)
-            except (OSError, ValueError, KeyError, IndexError, zipfile.BadZipFile, ET.ParseError):
-                damaged = True
-        if not existing or damaged or ref._stale(existing[-1], days):
-            latest = ref._latest_ato_url()
-            if latest is None:
-                raise ValueError('ATO reference unavailable')
-            ref._download(latest[1], directory / ('ato-tax-' + latest[0] + '.xlsx'), ref._check_ato)
-    except (OSError, ValueError, KeyError, IndexError, zipfile.BadZipFile, ET.ParseError):
-        errors.append('ato')
-    return {'errors': errors}
+    # The host performs authorized public reference refreshes.
+    return {'errors': []}
 
 
 def _date(path):
@@ -77,15 +50,63 @@ def _source_date(value, lang, *, month=False):
     return label
 
 
+def _baseline_date(directory):
+    try:
+        value = json.loads((directory / 'provenance.json').read_text(encoding='utf-8'))
+        date = value.get('retrieved_utc')
+        return date if isinstance(date, str) else 'unknown'
+    except (OSError, ValueError, AttributeError):
+        return 'unknown'
+
+
 def after_analyze_success(request):
     directory = Path(request['data_dir'])
-    accredited = ref.NameIndex(ref.load_accredited(directory))
-    sanctions = ref.load_sanctions(directory)
-    companies = ref.Companies(directory, ref.NameIndex)
-    accredited_files = sorted(directory.glob('accredited-*.txt'))
-    abf_available = (directory / 'sanctioned.json').exists()
-    asx_available = (directory / 'asx-listed.csv').exists()
-    ato_available = bool(list(directory.glob('ato-tax-*.xlsx')))
+    baseline = Path(__file__).resolve().parent / 'baseline'
+    baseline_date = _baseline_date(baseline)
+    accredited_dir, accredited_names, accredited_files = None, [], []
+    for candidate in (directory, baseline):
+        try:
+            files = sorted(candidate.glob('accredited-*.txt'))
+            if not files or any(path.stat().st_size > 64 * 1024 * 1024 for path in files):
+                continue
+            names = ref.load_accredited(candidate)
+            if names:
+                accredited_dir, accredited_names, accredited_files = candidate, names, files
+                break
+        except (OSError, ValueError, UnicodeError):
+            continue
+    def selected(name, validate):
+        for candidate in (directory, baseline):
+            path = candidate / name
+            try:
+                if path.stat().st_size > 64 * 1024 * 1024:
+                    continue
+                validate(path.read_bytes())
+                return candidate
+            except (OSError, ValueError, KeyError, IndexError, zipfile.BadZipFile, ET.ParseError):
+                continue
+        return None
+    abf_dir = selected('sanctioned.json', ref._check_sanctions)
+    asx_dir = selected('asx-listed.csv', ref._check_asx)
+    ato_dir = None
+    for candidate in (directory, baseline):
+        try:
+            if list(candidate.glob('ato-tax-*.xlsx')):
+                ref.load_ato(candidate)
+                ato_dir = candidate
+                break
+        except (OSError, ValueError, KeyError, IndexError, zipfile.BadZipFile, ET.ParseError):
+            continue
+    accredited = ref.NameIndex(accredited_names)
+    sanctions = ref.load_sanctions(abf_dir) if abf_dir else ref.Sanctions([])
+    # Each source falls back independently; no user-imported file is replaced.
+    companies = ref.Companies.__new__(ref.Companies)
+    companies.asx = ref.NameIndex(ref.load_asx(asx_dir)) if asx_dir else ref.NameIndex([])
+    companies.income, companies.ato_year = ref.load_ato(ato_dir) if ato_dir else ({}, None)
+    companies.ato = ref.NameIndex(list(companies.income))
+    abf_available = abf_dir is not None
+    asx_available = asx_dir is not None
+    ato_available = ato_dir is not None
     source_lines = {}
     asx_sources = {}
     ato_sources = {}
@@ -97,15 +118,23 @@ def after_analyze_success(request):
                 _source_date(path.stem.removeprefix('accredited-'), lang, month=True)
                 for path in accredited_files))
             sources.append(f'Home Affairs 认证名单（{dates}）' if zh else f'Home Affairs accredited list ({dates})')
+            if accredited_dir == baseline:
+                sources[-1] += '（随包基线）' if zh else ' (bundled baseline)'
         if abf_available:
-            date = _source_date(_date(directory / 'sanctioned.json'), lang)
+            date = _source_date(baseline_date if abf_dir == baseline else _date(abf_dir / 'sanctioned.json'), lang)
             sources.append(f'ABF 违规名单（下载 {date}）' if zh else f'ABF sanctions register (downloaded {date})')
+            if abf_dir == baseline:
+                sources[-1] += '（随包基线）' if zh else ' (bundled baseline)'
         if asx_available:
-            date = _source_date(_date(directory / 'asx-listed.csv'), lang)
+            date = _source_date(baseline_date if asx_dir == baseline else _date(asx_dir / 'asx-listed.csv'), lang)
             asx_sources[lang] = f'ASX 上市名单（下载 {date}）' if zh else f'ASX listed-company directory (downloaded {date})'
+            if asx_dir == baseline:
+                asx_sources[lang] += '（随包基线）' if zh else ' (bundled baseline)'
         if ato_available:
             year = companies.ato_year or ('年度未知' if zh else 'year unknown')
             ato_sources[lang] = f'ATO 企业税务透明度报告（{year}）' if zh else f'ATO corporate tax transparency report ({year})'
+            if ato_dir == baseline:
+                ato_sources[lang] += '（随包基线）' if zh else ' (bundled baseline)'
         source_lines[lang] = sources
     results = {}
     for job in request['jobs']:

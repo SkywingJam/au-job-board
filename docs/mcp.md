@@ -11,7 +11,7 @@ enable it in the persistent config with an owner-only token. The instructions
 below describe source installations. By default both transports identify as
 `AU Job Board (read-only)`.
 
-Two transports provide the same four read-only tools by default:
+Two transports provide the same five read-only tools by default:
 
 - **Streamable HTTP owned by the application** (recommended): starts and stops
   with `panel`, on the panel address and the panel port plus one.
@@ -78,7 +78,7 @@ the configured address and derived port; browser Origin headers are rejected.
 No CORS permissions are provided. The SDK uses stateless Streamable HTTP with
 JSON responses; application snapshots still persist in the internal reader for
 the configured TTL. A 64 KiB request-body limit protects the protocol endpoint.
-It exposes the same four read-only tools and error semantics as stdio (plus
+It exposes the same five read-only tools and error semantics as stdio (plus
 `batch_label_jobs` only when `agent_api.allow_label_writes` is true).
 
 For private data on a remote network, enable TLS with both `mcp.tls_certfile` and
@@ -164,7 +164,7 @@ owned by the application, use the Streamable HTTP mode above.
 
 ## Tools and a first read
 
-All four of these tools declare themselves read-only. Successful calls return the HTTP
+All five of these tools declare themselves read-only. Successful calls return the HTTP
 JSON object as structured content, with text content for compatible clients.
 The text copy is the same JSON value rendered compactly (no indentation or extra
 whitespace; Unicode and escaped newlines inside job text are preserved), and
@@ -179,6 +179,7 @@ establish a lower billed-token count.
 | `get_job` | Required `uid`, `snapshot_id` | Complete JD, machine evidence, group human state, live panel link |
 | `list_batches` | `limit` (default 50, maximum 200), `offset` (default 0) | Fresh batch metadata, `next_offset` |
 | `get_batch` | Required `batch_id` | Collection facts and separate pipeline evidence |
+| `review_plugin_permissions` | None | Full permission review, current status and user-operated confirmation paths |
 
 Example tool calls:
 
@@ -216,7 +217,7 @@ data, so it can differ from the frozen snapshot.
 
 ## Optional batch label tool
 
-Off by default. When enabled, a fifth tool, `batch_label_jobs`, lets an MCP
+Off by default. When enabled, a sixth tool, `batch_label_jobs`, lets an MCP
 client set application progress and the priority star for exact UIDs; it is the
 only write tool and cannot edit notes, eligibility, jobs or JDs. It uses the
 [batch label route](agent-api.md#optional-batch-label-write), so read its
@@ -250,7 +251,7 @@ is a real boolean; an omitted field is kept. The result is the same compact JSON
 `human_scope` entry per item, never JD text or notes) in both text and
 structured content, with a published `outputSchema`. It is annotated
 `readOnlyHint=false`, `destructiveHint=true`, `idempotentHint=true`,
-`openWorldHint=false`; the four read tools keep their read-only annotations.
+`openWorldHint=false`; the five read tools keep their read-only annotations.
 Invalid arguments, unknown or duplicate UIDs, two UIDs of one group, an
 authentication or HTTP failure, a refused redirect or a lost connection are tool
 errors, never empty successes. Nothing is retried automatically: after a
@@ -267,7 +268,7 @@ service using handwritten synthetic records and a temporary database. It checks
 discovery, legacy initialization, pagination, full JDs, folded source identity, group state, frozen
 reads after live edits, filter parity, batch facts, explicit errors, redirects,
 token permissions and unchanged DB bytes during reads. Its write cases check the
-fifth tool, annotations, compact/structured equality, persisted group state and
+label tool, annotations, compact/structured equality, persisted group state and
 that invalid, redirected, unauthenticated or API-refused writes leave the
 database unchanged; `tools/test_mcp_http.py` repeats this over Streamable HTTP. All processes stop on
 test exit. It does not inspect personal data or configure a desktop host.

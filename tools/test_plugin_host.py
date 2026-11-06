@@ -5,6 +5,7 @@ import os
 from contextlib import closing
 from pathlib import Path
 import sqlite3
+import shutil
 import sys
 import tempfile
 import zipfile
@@ -26,13 +27,22 @@ class PluginTests(unittest.TestCase):
         self.plugin_root = self.root / 'plugins'
         self.path = self.plugin_root / 'sample'
         self.path.mkdir(parents=True)
-        self.manifest = {'id': 'sample', 'name': {'en': 'Sample'}, 'version': '1', 'compatibility': {'host_api': 1}, 'entry': 'plugin.py', 'hooks': ['after_analyze_success'], 'network': 'none', 'display': True, 'i18n': ['en', 'zh']}
+        self.manifest = {'id': 'sample', 'name': {'en': 'Sample'}, 'version': '1', 'compatibility': {'host_api': 1}, 'entry': 'plugin.py', 'hooks': ['after_analyze_success'], 'network': 'none', 'display': True, 'i18n': ['en', 'zh'], 'permissions': {'job_fields': ['uid', 'company'], 'files': ['plugin_data'], 'network': [], 'execution': ['python_worker'], 'display': ['job_badges', 'job_details']}}
         self.write_manifest()
         self.root_patch = patch.object(host, 'PLUGIN_ROOT', self.plugin_root)
         self.root_patch.start()
         self.addCleanup(self.root_patch.stop)
+        host.grant(self.config, self.manifest, host.fingerprint(self.manifest), 'test')
         self.addCleanup(self.tmp.cleanup)
         self.jobs = [{'uid': 'synthetic:1', 'company': 'Imaginary Gumtree Pty'}]
+
+    def use_sponsorship(self):
+        # Keep public test inputs synthetic: copy code, but no bundled public data.
+        source = Path(__file__).resolve().parent.parent / 'plugins' / 'sponsorship'
+        destination = self.plugin_root / 'sponsorship'
+        shutil.copytree(source, destination, ignore=shutil.ignore_patterns('baseline', '__pycache__'))
+        manifest = host._manifest(destination, 'sponsorship')
+        host.grant(self.config, manifest, host.fingerprint(manifest), 'test')
 
     def write_manifest(self):
         (self.path / 'manifest.json').write_text(json.dumps(self.manifest))
@@ -86,6 +96,16 @@ class PluginTests(unittest.TestCase):
         result_file.write_text('{bad')
         self.assertEqual(host.presentation(self.config, 'synthetic:1'), {'badges': [], 'sections': []})
 
+    def test_result_budget_and_storage_use_the_workers_utf8_encoding(self):
+        self.code("def after_analyze_success(r):\n v={'badges':[],'sections':[{'title':'Facts','status':'Ready','items':['中文'*100]}]}\n return {'analysis_id':r['analysis_id'],'results':{j['uid']:{'zh':v,'en':v} for j in r['jobs']}}\n")
+        with patch.object(host, 'MAX_RESULT', 2400):
+            self.dispatch()
+            target = host._root(self.config) / 'sample' / 'results.json'
+            self.assertTrue(target.exists(), host.read_debug(self.config, 'sample'))
+            self.assertLessEqual(target.stat().st_size, host.MAX_RESULT)
+            self.assertIn('中文', target.read_text(encoding='utf-8'))
+            self.assertEqual(host.presentation(self.config, 'synthetic:1')['sections'][0]['items'], ['中文'*100])
+
     def test_manifest_config_and_storage_failure(self):
         self.manifest['compatibility'] = {'host_api': 2}
         self.write_manifest()
@@ -109,8 +129,7 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(len(host.read_debug(self.config, 'sample')['entries']), 1)
 
     def test_bundled_employer_facts(self):
-        self.root_patch.stop()
-        self.addCleanup(self.root_patch.start)
+        self.use_sponsorship()
         self.config['plugins'] = {'sponsorship': {'enabled': True}}
         data = host._root(self.config) / 'sponsorship' / 'data'
         data.mkdir(parents=True)
@@ -139,8 +158,7 @@ class PluginTests(unittest.TestCase):
                     self.dispatch()
 
     def test_accredited_departments_are_not_treated_as_page_headers(self):
-        self.root_patch.stop()
-        self.addCleanup(self.root_patch.start)
+        self.use_sponsorship()
         self.config['plugins'] = {'sponsorship': {'enabled': True}}
         data = host._root(self.config) / 'sponsorship' / 'data'
         data.mkdir(parents=True)
@@ -157,6 +175,29 @@ class PluginTests(unittest.TestCase):
             view = host.presentation(self.config, job['uid'], 'en')
             self.assertEqual([badge['text'] for badge in view['badges']],
                              ['Accredited list match'])
+        self.assertEqual(host.read_debug(self.config, 'sponsorship')['entries'], [])
+
+    def test_corrupt_cache_falls_back_to_synthetic_baseline(self):
+        self.use_sponsorship()
+        self.config['plugins'] = {'sponsorship': {'enabled': True}}
+        baseline = self.plugin_root / 'sponsorship' / 'baseline'
+        baseline.mkdir()
+        (baseline / 'accredited-2025-01-15.txt').write_text('Imaginary Gumtree Pty Ltd\n')
+        (baseline / 'sanctioned.json').write_text(json.dumps({'d': {'success': True, 'data': [
+            {'sponsorname': 'Synthetic Other Employer Pty Ltd'}]}}))
+        data = host._root(self.config) / 'sponsorship' / 'data'
+        data.mkdir(parents=True)
+        (data / 'sanctioned.json').write_text('{damaged')
+        manual = data / 'accredited-2025-01-15.txt'
+        for damaged in (b'\xff', b''):
+            with self.subTest(manual_bytes=damaged):
+                manual.write_bytes(damaged)
+                host.dispatch(self.config, 'after_analyze_success', self.jobs, 1)
+                view = host.presentation(self.config, 'synthetic:1', 'en')
+                self.assertIn('bundled baseline', str(view))
+                self.assertIn('Accredited list match', str(view))
+                self.assertEqual(manual.read_bytes(), damaged)
+        self.assertEqual((data / 'sanctioned.json').read_text(), '{damaged')
         self.assertEqual(host.read_debug(self.config, 'sponsorship')['entries'], [])
 
     def test_external_execution_udp_and_lookup_blocked_for_offline_hook(self):
@@ -186,10 +227,10 @@ class PluginTests(unittest.TestCase):
         target = host._root(self.config)/'sample'/'results.json'
         original = target.read_bytes()
         real = host.atomic_json
-        def fail_results(path, value):
+        def fail_results(path, value, **kwargs):
             if Path(path).name == 'results.json':
                 raise OSError('simulated full disk')
-            return real(path, value)
+            return real(path, value, **kwargs)
         with patch.object(host, 'atomic_json', side_effect=fail_results):
             self.dispatch()
         self.assertEqual(target.read_bytes(), original)
@@ -243,19 +284,22 @@ class PluginTests(unittest.TestCase):
             ref.load_sanctions(self.root)
 
     def test_stale_and_corrupt_same_period_ato_are_downloaded_again(self):
-        from plugins.sponsorship import plugin, reference as ref
+        import io
+        from jobs import plugin_downloads as downloads
         data = self.root/'refresh'; data.mkdir()
         target = data/'ato-tax-2024-25.xlsx'; target.write_text('damaged')
-        with patch.object(ref, '_stale', return_value=True), \
-             patch.object(ref, '_latest_ato_url', return_value=('2024-25','https://example.invalid/report.xlsx')), \
-             patch.object(ref, '_download') as download:
-            plugin.after_fetch({'data_dir':str(data)})
-            self.assertTrue(any(call.args[1] == target for call in download.call_args_list))
-        with patch.object(ref, '_stale', return_value=False), \
-             patch.object(ref, '_latest_ato_url', return_value=('2024-25','https://example.invalid/report.xlsx')), \
-             patch.object(ref, '_download') as download:
-            plugin.after_fetch({'data_dir':str(data)})
-            self.assertTrue(any(call.args[1] == target for call in download.call_args_list))
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            archive.writestr('xl/worksheets/sheet1.xml', '<worksheet><row><c><v>Name</v></c><c><v>Total income</v></c></row><row><c><v>Imaginary Tree</v></c><c><v>123</v></c></row></worksheet>')
+        url = 'https://data.gov.au/data/dataset/c2524c87-cea4-4636-acac-599a82048a26/resource/1234/download/test.xlsx'
+        package = json.dumps({'result': {'resources': [{'name':'2024-25 Report of Entity Tax Information', 'url':url}]}}).encode()
+        def fake_read(kind, url):
+            if kind == 'ato': return package
+            if kind == 'ato_file': return buffer.getvalue()
+            raise OSError('offline')
+        with patch.object(downloads, '_read', side_effect=fake_read):
+            downloads.refresh(data)
+        self.assertEqual(target.read_bytes(), buffer.getvalue())
 
     def test_fact_summaries_distinguish_missing_no_match_and_name_uncertainty(self):
         from plugins.sponsorship import plugin
@@ -278,8 +322,7 @@ class PluginTests(unittest.TestCase):
         self.assertIn('unavailable',plugin._summary('en',None,None,False,False))
 
     def test_employer_copy_explains_findings_and_groups_sources_in_both_languages(self):
-        self.root_patch.stop()
-        self.addCleanup(self.root_patch.start)
+        self.use_sponsorship()
         self.config['plugins'] = {'sponsorship': {'enabled': True}}
         data = host._root(self.config) / 'sponsorship' / 'data'
         data.mkdir(parents=True)
@@ -328,8 +371,7 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(host.read_debug(self.config, 'sponsorship')['entries'], [])
 
     def test_missing_reference_copy_does_not_claim_a_clean_record(self):
-        self.root_patch.stop()
-        self.addCleanup(self.root_patch.start)
+        self.use_sponsorship()
         self.config['plugins'] = {'sponsorship': {'enabled': True}}
         host.dispatch(self.config, 'after_analyze_success', self.jobs, 1)
         for lang in ('zh', 'en'):

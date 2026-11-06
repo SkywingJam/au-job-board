@@ -955,12 +955,51 @@ def cmd_run(args) -> int:
     return _execute_pipeline(args)
 
 
+def cmd_plugin(args):
+    from .config_edit import ConfigEditor, ConfigEditError
+    editor = ConfigEditor(load_config(args.config), config_path=args.config)
+    try:
+        result = editor.read_plugins()
+        item = next((p for p in result['plugins'] if p['id'] == args.plugin_id), None)
+        if not item or 'consent' not in item:
+            print('Plugin unavailable or manifest invalid.', file=sys.stderr)
+            return 1
+        print(json.dumps(item, ensure_ascii=False, indent=2))
+        if args.plugin_action == 'review':
+            return 0
+        payload = {'digest': result['digest'], 'id': args.plugin_id,
+                   'enabled': args.plugin_action == 'grant'}
+        if args.plugin_action == 'revoke':
+            payload['action'] = 'revoke'
+        elif args.plugin_action == 'grant':
+            current = item['consent']['fingerprint']
+            if args.fingerprint is None:
+                if not sys.stdin.isatty() or input('Grant the displayed permissions? Type yes: ').strip() != 'yes':
+                    print('No grant recorded.', file=sys.stderr)
+                    return 1
+                payload['consent_fingerprint'] = current
+            else:
+                payload['consent_fingerprint'] = args.fingerprint
+        editor.save_plugin(payload, channel='cli')
+        print('Plugin settings saved.')
+        return 0
+    except ConfigEditError as exc:
+        print('Plugin settings failed: ' + exc.code, file=sys.stderr)
+        return 1
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="jobs", description="澳洲求职聚合流水线")
     parser.add_argument("--config", help="config.yaml 路径")
     parser.add_argument("--rules", help="rules.yaml 路径")
     parser.add_argument("--skills", help="skills.yaml 路径（技能词表）")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_plugin = sub.add_parser('plugin', help='Review, grant or revoke plugin permissions')
+    p_plugin.add_argument('plugin_action', choices=('review', 'grant', 'revoke'))
+    p_plugin.add_argument('plugin_id')
+    p_plugin.add_argument('--fingerprint', help='Grant only this reviewed permission fingerprint')
+    p_plugin.set_defaults(func=cmd_plugin)
 
     p_fetch = sub.add_parser("fetch", help="抓列表（联网）")
     p_fetch.add_argument("--only", choices=["seek", "indeed", "linkedin"],

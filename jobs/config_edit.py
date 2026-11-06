@@ -405,12 +405,19 @@ class ConfigEditor:
         return {"ok": True, "digest": hashlib.sha256(raw).hexdigest(),
                 "plugins": plugin_host.list_plugins(config)}
 
-    def save_plugin(self, payload):
+    def save_plugin(self, payload, *, channel='panel'):
         from . import plugin_host
         from .run_state import acquire_lock
-        if (not isinstance(payload, dict) or set(payload) != {"digest", "id", "enabled"}
+        if not isinstance(payload, dict):
+            raise ConfigEditError("invalid_request")
+        if payload.get('action') == 'revoke' and 'enabled' not in payload:
+            payload = {**payload, 'enabled': False}
+        if (not {"digest", "id", "enabled"} <= set(payload)
+                or set(payload) - {"digest", "id", "enabled", "consent_fingerprint", "action"}
                 or not isinstance(payload["digest"], str) or len(payload["digest"]) != 64
-                or not isinstance(payload["id"], str) or type(payload["enabled"]) is not bool):
+                or not isinstance(payload["id"], str) or type(payload["enabled"]) is not bool
+                or ("action" in payload and (payload["action"] != "revoke" or payload["enabled"]))
+                or ("consent_fingerprint" in payload and not isinstance(payload["consent_fingerprint"], str))):
             raise ConfigEditError("invalid_request")
         try:
             lock = acquire_lock(self.config)
@@ -426,6 +433,30 @@ class ConfigEditor:
             item = next((p for p in items if p["id"] == payload["id"]), None)
             if item is None or (payload["enabled"] and item["status"] == "error"):
                 raise ConfigEditError("validation_failed")
+            config = {**self.config, "plugins": plain.get("plugins", {})}
+            pending_grant = None
+            if payload.get("action") == "revoke":
+                try:
+                    plugin_host.revoke(config, item['id'])
+                except OSError as exc:
+                    raise ConfigEditError('write_failed') from exc
+            elif payload['enabled']:
+                consent = item['consent']
+                supplied = payload.get('consent_fingerprint')
+                if supplied is not None and supplied != consent['fingerprint']:
+                    raise ConfigEditError('plugin_consent_required')
+                if consent['status'] != 'granted':
+                    if supplied != consent['fingerprint']:
+                        raise ConfigEditError('plugin_consent_required')
+                    try:
+                        manifest = plugin_host._manifest(plugin_host.PLUGIN_ROOT / item['id'], item['id'])
+                        if plugin_host.fingerprint(manifest) != supplied:
+                            raise ValueError('fingerprint changed')
+                        pending_grant = manifest, supplied
+                    except ValueError as exc:
+                        raise ConfigEditError('plugin_consent_required') from exc
+                    except OSError as exc:
+                        raise ConfigEditError('write_failed') from exc
             path = "plugins." + item["id"] + ".enabled"
             expected = copy.deepcopy(plain)
             _set(expected, path, payload["enabled"])
@@ -437,6 +468,15 @@ class ConfigEditor:
                 raise ConfigEditError("config_invalid")
             if encoded != raw:
                 self._replace(encoded, payload["digest"])
+            # Complete configuration persistence before publishing a new grant.
+            # If granting then fails, an enabled-but-ungranted plugin stays inert.
+            if pending_grant is not None:
+                try:
+                    plugin_host.grant(config, *pending_grant, channel)
+                except ValueError as exc:
+                    raise ConfigEditError('plugin_consent_required') from exc
+                except OSError as exc:
+                    raise ConfigEditError('write_failed') from exc
             return self.read_plugins()
         finally:
             lock.close()

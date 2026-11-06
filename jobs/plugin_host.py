@@ -6,6 +6,7 @@ accidental crashes and hangs; it is not a security boundary against hostile code
 from __future__ import annotations
 
 import json
+import hashlib
 import stat
 import time
 from contextlib import closing
@@ -32,6 +33,9 @@ TIMEOUT_ANALYZE = 30
 TIMEOUT_FETCH = 180
 _ID = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
 _EMPTY = {'badges': [], 'sections': []}
+SPONSOR_NETWORK = [{'purpose': 'sponsorship_reference', 'timing': 'after_fetch',
+                    'targets': ['www.abf.gov.au', 'www.asx.com.au', 'data.gov.au'],
+                    'request_data': 'no_job_data'}]
 
 
 def _read(path, limit):
@@ -75,7 +79,88 @@ def _manifest(path, plugin_id):
         raise ValueError('invalid hooks')
     if value.get('network') not in ('after_fetch', 'none') or not isinstance(value.get('display'), bool) or not isinstance(value.get('i18n'), list) or not set(value['i18n']) <= {'zh', 'en'}:
         raise ValueError('invalid capabilities')
+    permissions = value.get('permissions')
+    if not isinstance(permissions, dict) or set(permissions) != {'job_fields', 'files', 'network', 'execution', 'display'}:
+        raise ValueError('missing permissions')
+    if (permissions['job_fields'] != ['uid', 'company'] or
+            permissions['files'] != ['plugin_data'] or
+            permissions['execution'] != ['python_worker'] or
+            permissions['display'] != ['job_badges', 'job_details'] or
+            permissions['network'] not in ([], SPONSOR_NETWORK)):
+        raise ValueError('unknown permissions')
+    if (value['network'] == 'after_fetch') != bool(permissions['network']):
+        raise ValueError('inconsistent network permission')
     return value
+
+
+def fingerprint(manifest):
+    scope = {key: manifest.get(key) for key in ('id', 'hooks', 'network', 'display', 'permissions')}
+    return hashlib.sha256(json.dumps(scope, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
+
+
+def _grant_path(config, plugin_id):
+    return _root(config) / plugin_id / 'consent.json'
+
+
+def consent(config, manifest):
+    current = fingerprint(manifest)
+    try:
+        saved = _read(_grant_path(config, manifest['id']), MAX_LOG)
+        previous = saved.get('fingerprint') if isinstance(saved, dict) else None
+    except RunTimeout:
+        raise
+    except Exception:
+        previous = None
+    status = 'granted' if previous == current else ('changed' if previous else 'required')
+    entries = [
+        ('identity', '插件来源', 'Plugin source',
+         '这是本机安装的插件，请确认安装包来自你信任的维护者。', 'This plugin is installed locally. Make sure its package comes from a maintainer you trust.'),
+        ('jobs', '岗位资料', 'Job data', '读取岗位标识和公司名称，用于匹配雇主。', 'Reads job identifier and company name to match employers.'),
+        ('files', '文件和保留', 'Files and retention', '使用插件资料、结果和错误记录目录；关闭或卸载后保留。', 'Uses plugin data, results and error records; these remain after disable or uninstall.'),
+        ('execution', '本机执行', 'Local execution', '在 Python 子进程中运行插件。', 'Runs plugin code in a Python child process.'),
+        ('display', '展示', 'Presentation', '可在岗位卡片及详情显示结果，不修改核心岗位数据。', 'May show results on job cards and details; does not change core job data.'),
+    ]
+    if manifest['permissions']['network']:
+        entries.insert(3, ('network', '公开资料更新', 'Public reference updates',
+                          '抓取后由宿主从 www.abf.gov.au、www.asx.com.au 和 data.gov.au 下载公开名单及报告，不向这些网站发送岗位资料。',
+                          'After fetch, the host downloads public lists and reports from www.abf.gov.au, www.asx.com.au and data.gov.au. It does not send job data to these sites.'))
+    else:
+        entries.insert(3, ('network', '网络', 'Network', '未声明联网。', 'No network access declared.'))
+    return {'status': status, 'fingerprint': current,
+            'permissions': [{'id': i, 'title': {'zh': z, 'en': e}, 'description': {'zh': dz, 'en': de}} for i, z, e, dz, de in entries],
+            'limits': {'zh': '宿主限制常规 Python 文件访问：可读插件代码、资料、临时目录和 Python 运行库，只可写资料及临时目录。插件不能直接联网或启动外部程序；已授权的公开资料下载由宿主完成。这些限制适用于可信 Python 插件，不能安全运行恶意代码。',
+                       'en': 'The host restricts ordinary Python file access: plugins can read their code, data, temporary files and Python libraries, and write only data and temporary files. Direct networking and external programs are blocked; the host performs approved public downloads. These limits are for trusted Python plugins, not hostile code.'}}
+
+
+def grant(config, manifest, expected, channel):
+    if expected != fingerprint(manifest):
+        raise ValueError('fingerprint changed')
+    path = _grant_path(config, manifest['id'])
+    try:
+        atomic_json(path, {'fingerprint': expected, 'plugin_id': manifest['id'],
+                    'actor': 'local_user', 'channel': channel, 'time': datetime.now(timezone.utc).isoformat()})
+        with path.open('rb') as stream:
+            os.fsync(stream.fileno())
+        _sync_directory(path.parent)
+    except OSError:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def _sync_directory(path):
+    if os.name != 'nt':
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
+def revoke(config, plugin_id):
+    path = _grant_path(config, plugin_id)
+    if path.exists():
+        path.unlink()
+        _sync_directory(path.parent)
 
 
 def _enabled(config, plugin_id):
@@ -135,7 +220,8 @@ def list_plugins(config: dict) -> list[dict]:
             item['enabled'] = _enabled(config, plugin_id)
             manifest = _manifest(path, plugin_id)
             item.update(name=manifest['name'], version=manifest['version'], description=manifest.get('description', ''))
-            item['status'] = 'enabled' if item['enabled'] else 'disabled'
+            item['consent'] = consent(config, manifest)
+            item['status'] = ('enabled' if item['consent']['status'] == 'granted' else 'consent_required') if item['enabled'] else 'disabled'
         except RunTimeout:
             raise
         except Exception:
@@ -225,6 +311,15 @@ def _wait_worker(process, hook):
 
 
 def _run_worker(config, plugin_id, hook, request):
+    return _run_isolated(config, plugin_id, hook, request)
+
+
+def _refresh_references(config, plugin_id, directory):
+    return _run_isolated(config, plugin_id, 'after_fetch',
+                         {'data_dir': str(directory)}, trusted_download=True)
+
+
+def _run_isolated(config, plugin_id, hook, request, *, trusted_download=False):
     payload = json.dumps(request, ensure_ascii=False).encode('utf-8')
     if len(payload) > MAX_REQUEST:
         raise ValueError('request too large')
@@ -232,7 +327,9 @@ def _run_worker(config, plugin_id, hook, request):
         request_path, result_path = Path(tmp) / 'input.json', Path(tmp) / 'output.json'
         request_path.write_bytes(payload)
         request_path.chmod(0o600)
-        command = [sys.executable, '-m', 'jobs.plugin_worker', str(PLUGIN_ROOT / plugin_id / 'plugin.py'), hook, str(request_path), str(result_path)]
+        command = ([sys.executable, '-m', 'jobs.plugin_downloads', str(request_path), str(result_path)]
+                   if trusted_download else
+                   [sys.executable, '-m', 'jobs.plugin_worker', str(PLUGIN_ROOT / plugin_id / 'plugin.py'), hook, str(request_path), str(result_path)])
         process = job = lock = None
         try:
             if os.name == 'nt':
@@ -247,7 +344,8 @@ def _run_worker(config, plugin_id, hook, request):
                     finally:
                         os.set_handle_inheritable(raw, False)
             else:
-                process = subprocess.Popen(command, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                environment = {key: value for key, value in os.environ.items() if key in ('SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL')}
+                process = subprocess.Popen(command, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, env=environment)
             _wait_worker(process, hook)
             if process.returncode != 0:
                 try:
@@ -298,13 +396,18 @@ def _dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: in
         plugin_id = item['id']
         try:
             manifest = _manifest(PLUGIN_ROOT / plugin_id, plugin_id)
+            if consent(config, manifest)['status'] != 'granted':
+                continue
             if hook not in manifest['hooks']:
                 continue
             directory = _root(config) / plugin_id
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if hook == 'after_fetch' and plugin_id == 'sponsorship' and manifest['permissions']['network'] == SPONSOR_NETWORK:
+                if _refresh_references(config, plugin_id, directory / 'data').get('errors'):
+                    _log(config, plugin_id, hook, 'RefreshError')
             request = {'api': 1, 'hook': hook, 'data_dir': str(directory / 'data'),
-                       'config': config.get('plugins', {}).get(plugin_id, {}), 'jobs': jobs or [], 'analysis_id': analysis_id,
-                       'allow_network': hook == 'after_fetch' and manifest['network'] == 'after_fetch'}
+                       'config': {}, 'jobs': [{k: j.get(k) for k in ('uid', 'company')} for j in jobs or []], 'analysis_id': analysis_id,
+                       'allow_network': False}
             value = _run_worker(config, plugin_id, hook, request)
             if hook == 'after_fetch' and isinstance(value, dict) and value.get('errors'):
                 _log(config, plugin_id, hook, 'RefreshError')
@@ -314,11 +417,11 @@ def _dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: in
                 allowed = {j['uid'] for j in jobs or []}
                 if set(value['results']) != allowed or not all(isinstance(v, dict) and set(v) == {'zh', 'en'} and all(_valid_view(x) for x in v.values()) for v in value['results'].values()):
                     raise ValueError('invalid presentation')
-                if len(json.dumps(value).encode('utf-8')) > MAX_RESULT:
+                if len(json.dumps(value, ensure_ascii=False).encode('utf-8')) > MAX_RESULT:
                     raise ValueError('serialized result too large')
                 if _latest(config) != analysis_id:
                     raise ValueError('analysis changed')
-                atomic_json(directory / 'results.json', value)
+                atomic_json(directory / 'results.json', value, ensure_ascii=False)
         except subprocess.TimeoutExpired:
             _log(config, plugin_id, hook, 'Timeout', 'Plugin exceeded its execution time budget.')
         except WorkerError as exc:

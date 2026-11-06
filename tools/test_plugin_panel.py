@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import shutil
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -22,6 +23,15 @@ class PluginPanelTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        # Product baselines contain real public employers; panel regressions use
+        # an isolated plugin copy without those assets and never refresh online.
+        self.plugin_root = self.root / 'plugins'
+        shutil.copytree(ROOT / 'plugins' / 'sponsorship', self.plugin_root / 'sponsorship',
+                        ignore=shutil.ignore_patterns('baseline', '__pycache__'))
+        roots = patch.object(plugin_host, 'PLUGIN_ROOT', self.plugin_root)
+        roots.start(); self.addCleanup(roots.stop)
+        refresh = patch.object(plugin_host, '_refresh_references', return_value={'errors': []})
+        refresh.start(); self.addCleanup(refresh.stop)
         self.config = {'db_path': str(self.root/'jobs.db'), 'queries': ['Synthetic'],
                        'skills_path': str(self.root/'skills.yaml'),
                        'seek': {'enabled': False},
@@ -67,10 +77,17 @@ class PluginPanelTests(unittest.TestCase):
         finally:
             client.close()
 
-    def toggle(self, enabled=True, digest=None):
+    def toggle(self, enabled=True, digest=None, consent=True):
+        _, view = self.request('/api/plugins')
         if digest is None:
-            _, view = self.request('/api/plugins'); digest = view['digest']
-        return self.request('/api/plugins', {'digest': digest, 'id': 'sponsorship', 'enabled': enabled})
+            digest = view['digest']
+        body = {'digest': digest, 'id': 'sponsorship', 'enabled': enabled}
+        # Enabling now requires the panel's explicit review; tests that only need a running
+        # plugin accept the currently displayed fingerprint, as the consent dialog does.
+        item = next((p for p in view.get('plugins', []) if p['id'] == 'sponsorship'), {})
+        if enabled and consent and (item.get('consent') or {}).get('status') in ('required', 'changed'):
+            body['consent_fingerprint'] = item['consent']['fingerprint']
+        return self.request('/api/plugins', body)
 
     def test_navigation_and_debug_only_settings_in_both_languages(self):
         for lang, title in [('zh', '插件'), ('en', 'Plugins')]:
@@ -253,6 +270,124 @@ class PluginPanelTests(unittest.TestCase):
         self.assertIn('Plugin files, version or configuration',page)
         self.assertIn('plugin=sponsorship',page)
 
+
+    # ---- consent UI (server markup, client boundary) ------------------------------------
+    CONSENT = {'fingerprint': 'f'*64,
+               'permissions': [{'id': 'network.reference', 'title': {'zh': '下载公开资料', 'en': 'Download lists'},
+                                'description': {'zh': '<img src=x onerror=bad>', 'en': '<img src=x onerror=bad>'}}],
+               'limits': {'zh': '不是沙箱', 'en': 'Not a sandbox'}}
+
+    def plugin_item(self, status, enabled=False, state=None, name='<b>Facts</b>'):
+        return {'id': 'sponsorship', 'name': {'zh': name, 'en': name}, 'version': '1.1.0',
+                'description': {'zh': '描述', 'en': 'Description'}, 'enabled': enabled,
+                'status': state or ('enabled' if enabled else 'disabled'), 'error_count': 0,
+                **({'consent': {**self.CONSENT, 'status': status}} if status else {})}
+
+    def settings_page(self, item, lang, detail=False):
+        path = '/settings?section=plugins' + ('&plugin=sponsorship' if detail else '')
+        with patch.object(plugin_host, 'list_plugins', return_value=[item]):
+            status, page = self.request(path, headers={'Cookie': 'jobs_lang='+lang})
+        self.assertEqual(status, 200)
+        return page
+
+    def review_entry(self, page):
+        return re.search(r'<button[^>]*data-plugin-review="sponsorship"[^>]*>', page).group(0)
+
+    def test_list_rows_explain_consent_state_in_both_languages(self):
+        cases = [('required', False, None, 'plugin.consent_required_short', 'is-cue', True),
+                 ('changed', False, None, 'plugin.consent_changed_short', 'is-cue', True),
+                 ('changed', True, None, 'plugin.consent_pending_enabled', 'is-cue', True),
+                 ('required', True, None, 'plugin.consent_pending_enabled', 'is-cue', True),
+                 ('granted', True, None, 'plugin.consent_granted_short', 'is-ok', False),
+                 ('granted', False, 'error', 'plugin.unavailable_hint', 'is-bad', False),
+                 ('required', False, 'error', 'plugin.unavailable_hint', 'is-bad', False)]
+        for lang in ('zh', 'en'):
+            for status, enabled, state, key, tone, review in cases:
+                with self.subTest(lang=lang, status=status, enabled=enabled, state=state):
+                    page = self.settings_page(self.plugin_item(status, enabled, state), lang)
+                    self.assertIn(f'class="plugin-state {tone}" data-consent="{status}">{i18n.t(lang, key)}<', page)
+                    self.assertIn('aria-describedby="pl-desc-sponsorship pl-state-sponsorship pl-msg-sponsorship"', page)
+                    self.assertIn(f'aria-checked="{str(enabled).lower()}"', page)
+                    self.assertEqual(' hidden' not in self.review_entry(page), review)
+                    self.assertIn(i18n.t(lang, 'plugin.review_enable'), page)
+                    self.assertIn('<div class="modal plugin-consent" id="plugin-consent" hidden></div>', page)
+                    self.assertNotIn('<b>Facts</b>', page)
+                    self.assertIn('&lt;b&gt;Facts&lt;/b&gt;', page)
+                    # Permission text is rendered only by the client from the API, never in server HTML.
+                    self.assertNotIn('onerror', page.split('window.__I18N__')[0])
+
+    def test_rows_without_consent_data_keep_previous_markup(self):
+        page = self.settings_page(self.plugin_item(None), 'en')
+        self.assertIn('id="pl-state-sponsorship" class="plugin-state " data-consent="" hidden>', page)
+        self.assertIn(' hidden', self.review_entry(page))
+
+    def test_detail_shows_identity_grant_state_and_scope_containers(self):
+        for lang in ('zh', 'en'):
+            for status, enabled in (('required', False), ('changed', True), ('granted', True)):
+                with self.subTest(lang=lang, status=status):
+                    page = self.settings_page(self.plugin_item(status, enabled), lang, detail=True)
+                    self.assertIn('data-plugin-detail="sponsorship"', page)
+                    self.assertIn('<h2>&lt;b&gt;Facts&lt;/b&gt;</h2>', page)
+                    self.assertIn(i18n.t(lang, 'plugin.version', version='1.1.0') + ' · sponsorship', page)
+                    self.assertIn(i18n.t(lang, 'plugin.enabled' if enabled else 'plugin.disabled'), page)
+                    self.assertIn(f'data-grant-state data-consent="{status}"', page)
+                    self.assertIn('data-plugin-scope', page)
+                    self.assertIn('data-plugin-revoke="sponsorship" hidden', page)
+                    self.assertIn('data-plugin-debug="sponsorship"', page)
+                    self.assertNotIn('data-plugin-toggle=', page)
+                    self.assertNotIn('onerror', page.split('window.__I18N__')[0])
+                    self.assertIn('<div class="modal plugin-consent" id="plugin-consent" hidden></div>', page)
+
+    def test_consent_client_boundary(self):
+        script = (ROOT/'jobs'/'panel_assets'/'settings.js').read_text()
+        section = script[script.index('/* Plugins: only validated data'):]
+        for sink in ('innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write', 'eval(', 'new Function'):
+            self.assertNotIn(sink, section)
+        # Grant binds the reviewed fingerprint, rechecked against a fresh read; revoke is its own action.
+        self.assertIn("consent_fingerprint:fingerprint", section)
+        self.assertIn("c.fingerprint!==fingerprint", section)
+        self.assertIn("action:'revoke'", section)
+        self.assertIn("error.message==='plugin_consent_required'", section)
+        # Ordinary enable is used only when the current scope is already granted.
+        self.assertIn("if(turningOn&&c&&c.status!=='granted')", section)
+
+    def test_consent_copy_exists_in_both_languages(self):
+        zh = {k for k in i18n.STRINGS['zh'] if k.startswith('plugin.')}
+        en = {k for k in i18n.STRINGS['en'] if k.startswith('plugin.')}
+        self.assertEqual(zh, en)
+        script = (ROOT/'jobs'/'panel_assets'/'settings.js').read_text()
+        for key in set(re.findall(r"T\('(plugin\.[a-z_]+)'[,)]", script)):
+            self.assertIn(key, zh, key)
+        for key in ('consent_required', 'consent_changed'):
+            self.assertIn('plugin.'+key+'_short', zh)
+            self.assertIn('plugin.'+key+'_hint', zh)
+        for lang in ('zh', 'en'):
+            strings = i18n.js_strings(lang)
+            self.assertIn('plugin.consent_accept', strings)
+            self.assertIn('plugin.plugin_consent_required', strings)
+
+    def test_panel_enable_requires_reviewed_fingerprint(self):
+        """Actual-backend contract (PLAN): plain enable is refused until the shown scope is accepted."""
+        _, view = self.request('/api/plugins')
+        consent = view['plugins'][0]['consent']
+        self.assertEqual(consent['status'], 'required')
+        self.assertTrue(consent['permissions'])
+        self.assertEqual(set(consent['limits']), {'zh', 'en'})
+        status, data = self.toggle(True, consent=False)
+        self.assertEqual((status, data['error']), (409, 'plugin_consent_required'))
+        status, data = self.request('/api/plugins', {'digest': view['digest'], 'id': 'sponsorship',
+                                                      'enabled': True, 'consent_fingerprint': '0'*64})
+        self.assertEqual(status, 409)
+        self.assertFalse(self.request('/api/plugins')[1]['plugins'][0]['enabled'])
+        self.assertEqual(self.toggle(True)[0], 200)
+        self.assertEqual(self.request('/api/plugins')[1]['plugins'][0]['consent']['status'], 'granted')
+        self.assertEqual(self.toggle(False)[0], 200)
+        self.assertEqual(self.toggle(True, consent=False)[0], 200)   # same scope: no new review
+        _, view = self.request('/api/plugins')
+        status, data = self.request('/api/plugins', {'digest': view['digest'], 'id': 'sponsorship', 'action': 'revoke'})
+        self.assertEqual(status, 200)
+        item = data['plugins'][0]
+        self.assertEqual((item['enabled'], item['consent']['status']), (False, 'required'))
 
 if __name__ == '__main__':
     unittest.main()

@@ -326,3 +326,7 @@ interruption/partial success and schema recovery. Both are in the curated
 [public test runner](public-tests.md). A synthetic external-agent report is a
 workflow verification; production connectivity and actual private daily reports
 require their own authorized deployment and checks.
+
+## Plugin permission review
+
+`GET /api/v1/plugins` returns installed plugin descriptions, permission items, fingerprints and grant status without executing plugins. It also gives the local panel and CLI confirmation paths. This endpoint does not grant or revoke permissions. The user must review and confirm through the panel or CLI; an agent must disclose the complete scope and wait for explicit consent. The API continues to use its existing authentication and read-only defaults.

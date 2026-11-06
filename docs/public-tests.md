@@ -10,7 +10,7 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 46 checks: 41 Python tests
+be collected by accident. The entry currently has 47 checks: 42 Python tests
 plus five Node behavior tests.
 
 Run it from the project root with the project interpreter:
@@ -21,10 +21,10 @@ Run it from the project root with the project interpreter:
 ```
 
 The optional MCP adapter has two opt-in integration entries:
-`python tools/run_public_tests.py --with-mcp` (48 entries on macOS).
+`python tools/run_public_tests.py --with-mcp` (49 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default local command keeps
-46 entries. Release CI installs the optional SDK and runs all 48 entries.
+47 entries. Release CI installs the optional SDK and runs the platform-applicable inventory.
 See [MCP](mcp.md).
 
 It prints one line per test with the command, the exit status and the elapsed
@@ -50,6 +50,7 @@ nothing in the suite fetches listings.
 | Test | Covers | Platform |
 |---|---|---|
 | `tools/test_plugin_panel.py` | Plugin settings navigation, isolated debug records, roundtrip toggles, config conflicts/lock, Host/Origin validation, safe output, corrupt data and demo boundaries | all |
+| `tools/test_plugin_consent_backend.py` | Consent gate, fingerprint changes and trusted worker boundaries | all |
 | `tools/test_plugin_host.py` | Plugin process failures, bounded results and analysis generations | all |
 | `tools/test_windows_runtime.py` | Listener ownership and bind without reverse DNS, lock handoff, supervisor success/busy/start failure, process-tree timeout, interruption and retry; run-state replace/read under a concurrent reader (Windows sharing retry, POSIX unchanged); `platform` skips WMI on CPython < 3.13.4 (gh-130727); native forced-parent-exit and platform lookup checks | all; native case on Windows |
 | `tools/test_file_security.py` | POSIX modes, Windows ACL dispatch/failures and native private/public token checks | all; native ACL case on Windows |
@@ -111,7 +112,7 @@ published API/MCP port checks use a temporary bridge without fetching. See
 ## Windows coverage
 
 The same entry runs on native Windows x64 / Python 3.12. On Windows there are
-45 default entries or 47 with MCP; only the macOS LaunchAgent entry is
+46 default entries or 48 with MCP; only the macOS LaunchAgent entry is
 inapplicable. CI also runs it on GitHub-hosted `windows-2022` from the documented `.venv`,
 with `PYTHONUTF8=1` and Git for Windows' openssl; that job uses the runner's
 administrator account, so ordinary-account acceptance stays a separate native

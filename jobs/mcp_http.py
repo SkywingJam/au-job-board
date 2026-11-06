@@ -94,7 +94,8 @@ class MCPHTTPService:
             self.socket.setblocking(False)
             # Internal API stays loopback-only and authenticated, with no fixed extra port.
             self.api = agent_api.make_server(config, token, port=0,
-                panel_url=f'http://{configured_host}:{port}/')
+                panel_url=f'http://{configured_host}:{port}/',
+                config_path=getattr(getattr(panel_server, 'config_editor', None), 'path', None))
             server = make_server(APIClient(f'http://127.0.0.1:{self.api.server_port}', token),
                                  allow_label_writes=self.api.api.allow_label_writes)
             authority = f'{configured_host}:{self.port}'

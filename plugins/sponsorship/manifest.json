@@ -14,6 +14,18 @@
     "after_analyze_success"
   ],
   "network": "after_fetch",
+  "permissions": {
+    "job_fields": ["uid", "company"],
+    "files": ["plugin_data"],
+    "network": [{
+      "purpose": "sponsorship_reference",
+      "timing": "after_fetch",
+      "targets": ["www.abf.gov.au", "www.asx.com.au", "data.gov.au"],
+      "request_data": "no_job_data"
+    }],
+    "execution": ["python_worker"],
+    "display": ["job_badges", "job_details"]
+  },
   "display": true,
   "i18n": [
     "zh",

@@ -59,6 +59,15 @@ def main():
         subprocess.run(["docker", "build", "-t", tag, "."], cwd=root, check=True)
     architecture = docker("image", "inspect", tag, "--format", "{{.Os}}/{{.Architecture}}").stdout.strip()
     print("Testing", architecture, flush=True)
+    # Exercise enabled plugin authorization and process restrictions in Linux.
+    # Tests use synthetic data and exclude bundled reference assets.
+    for script in ('test_plugin_consent_backend.py', 'test_plugin_host.py'):
+        source = root / 'tools' / script
+        target = '/app/tools/' + script
+        docker('run', '--rm', '--network', 'none', '--mount',
+               f'type=bind,src={source},dst={target},readonly',
+               '--entrypoint', 'python', tag, '-B', target)
+    print('PASS offline plugin consent and worker boundaries', flush=True)
     privacy = docker("run", "--rm", "--network", "none", "--entrypoint", "python", tag,
                      "-c", "import os; from pathlib import Path; assert os.getuid()==10001; "
                      "assert not Path('/app/.git').exists(); assert not Path('/app/config.yaml').exists(); "
@@ -247,8 +256,14 @@ def main():
             initialized = rpc('initialize', {'protocolVersion':'2025-03-26','capabilities':{},
                                             'clientInfo':{'name':'synthetic-docker-smoke','version':'1'}})
             assert initialized['serverInfo']['name'] == 'AU Job Board (read-only)'
-            assert {t['name'] for t in rpc('tools/list', {})['tools']} == {
-                'list_jobs','get_job','list_batches','get_batch'}
+            available_tools = rpc('tools/list', {})['tools']
+            assert {t['name'] for t in available_tools} == {
+                'list_jobs','get_job','list_batches','get_batch','review_plugin_permissions'}
+            review_tool = next(t for t in available_tools if t['name'] == 'review_plugin_permissions')
+            assert review_tool['annotations']['readOnlyHint'] is True
+            review = rpc('tools/call', {'name': 'review_plugin_permissions', 'arguments': {}})
+            assert not review.get('isError')
+            assert 'explicit user consent' in review['structuredContent']['confirmation']
             listed = rpc('tools/call', {'name':'list_jobs','arguments':{'query':{'limit':1}}})
             assert not listed.get('isError')
             page = listed['structuredContent']

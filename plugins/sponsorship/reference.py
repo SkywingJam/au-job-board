@@ -268,9 +268,16 @@ def load_ato(data_dir: Path) -> tuple[dict[str, float], str | None]:
     files = sorted(data_dir.glob("ato-tax-*.xlsx"))
     if not files:
         return {}, None
-    income = _ato_workbook(files[-1])
-    year = re.search(r"\d{4}-\d{2}", files[-1].name)
-    return income, (year.group(0) if year else None)
+    for path in reversed(files):
+        try:
+            income = _ato_workbook(path)
+            if not income:
+                continue
+        except (OSError, ValueError, KeyError, IndexError, zipfile.BadZipFile, ET.ParseError):
+            continue
+        year = re.search(r"\d{4}-\d{2}", path.name)
+        return income, (year.group(0) if year else None)
+    raise ValueError('no valid ATO reference')
 
 
 class Companies:

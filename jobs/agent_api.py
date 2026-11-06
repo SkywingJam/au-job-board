@@ -356,12 +356,27 @@ def snapshot_store(config):
 
 
 class AgentAPI:
-    def __init__(self, config, *, panel_url='http://127.0.0.1:8090/', store=None):
+    def __init__(self, config, *, panel_url='http://127.0.0.1:8090/', store=None, config_path=None):
         self.config = copy.deepcopy(config)
         self.db_path = config_mod.db_path(config)
         self.panel_base = _panel_base(panel_url)
         self.store = store if store is not None else snapshot_store(config)
         self.allow_label_writes = label_writes_enabled(config)
+        self.config_path = config_path
+
+    def plugins(self):
+        from . import plugin_host
+        from .config_edit import ConfigEditor, ConfigEditError
+        config = self.config
+        if self.config_path is not None:
+            try:
+                config = ConfigEditor(config, config_path=self.config_path).plugin_config()
+            except ConfigEditError:
+                raise APIError('config_unavailable', 503) from None
+        return {'ok': True, 'plugins': plugin_host.list_plugins(config),
+                'confirmation': 'Disclose the plugin name, purpose, all permissions, network timing and data sent. Wait for explicit user consent. The user must confirm in the local panel or run jobs plugin grant with the reviewed fingerprint. Never infer consent; do not execute while pending.',
+                'panel_url': self.panel_base.rstrip('/') + '/settings?section=plugins',
+                'cli': 'On the server, replace CONFIG_PATH with the configuration used by this instance: python -m jobs.cli --config CONFIG_PATH plugin review ID; python -m jobs.cli --config CONFIG_PATH plugin grant ID --fingerprint FINGERPRINT'}
 
     def _candidates(self, conn, query):
         scope, batch = query['scope'], None
@@ -537,7 +552,11 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.scheme or parsed.netloc or parsed.fragment:
                 raise APIError('invalid_request')
             qs = parse_qs(parsed.query, keep_blank_values=True, max_num_fields=40, errors='strict')
-            if parsed.path == PREFIX+'/jobs':
+            if parsed.path == PREFIX+'/plugins':
+                if qs:
+                    raise APIError('invalid_query')
+                result = self.server.api.plugins()
+            elif parsed.path == PREFIX+'/jobs':
                 result = self.server.api.jobs(qs)
             elif parsed.path.startswith(PREFIX+'/jobs/'):
                 uid = unquote(parsed.path[len(PREFIX+'/jobs/'):], errors='strict')
@@ -676,7 +695,7 @@ class Handler(BaseHTTPRequestHandler):
     do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = do_TRACE = do_CONNECT = _not_allowed
 
 
-def make_server(config, token, *, host='127.0.0.1', port=8091, panel_url='http://127.0.0.1:8090/', store=None):
+def make_server(config, token, *, host='127.0.0.1', port=8091, panel_url='http://127.0.0.1:8090/', store=None, config_path=None):
     # Docker publishes on host loopback. The wildcard is only a bind address
     # inside the container; it never becomes an accepted HTTP Host authority.
     if host not in ('127.0.0.1', 'localhost') and not (
@@ -684,7 +703,7 @@ def make_server(config, token, *, host='127.0.0.1', port=8091, panel_url='http:/
         raise ValueError('API host must be loopback; 0.0.0.0 requires JOBS_CONTAINER=1')
     if not isinstance(token, str) or not 32 <= len(token) <= 4096 or any(c.isspace() for c in token) or not token.isascii():
         raise ValueError('token must be 32 to 4096 non-whitespace ASCII characters')
-    api = AgentAPI(config, panel_url=panel_url, store=store)
+    api = AgentAPI(config, panel_url=panel_url, store=store, config_path=config_path)
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     server.token = token
@@ -718,7 +737,7 @@ def main(argv=None):
         token = read_token(args.token_file)
         # Fail before listening if the installation is missing/outdated.
         conn = read_connection(config_mod.db_path(config)); conn.close()
-        server = make_server(config, token, host=args.host, port=args.port, panel_url=args.panel_url)
+        server = make_server(config, token, host=args.host, port=args.port, panel_url=args.panel_url, config_path=args.config)
     except (OSError, ValueError, APIError, sqlite3.Error):
         parser.exit(2, 'Cannot start API: check host (wildcard requires JOBS_CONTAINER=1), '
                     'config, owner-only token file and upgraded database.\n')

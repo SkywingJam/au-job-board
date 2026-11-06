@@ -44,6 +44,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PYTHON_TESTS = (
     ("tools/test_plugin_panel.py", "plugin settings, debug and presentation HTTP boundaries", None),
     ("tools/test_plugin_host.py", "plugin process isolation and result generations", None),
+    ("tools/test_plugin_consent_backend.py", "plugin consent and trusted worker boundaries", None),
     ("tools/test_windows_runtime.py", "cross-platform lock ownership and Windows pipeline supervisor", None),
     ("tools/test_file_security.py", "private save permissions and shared token ACL validation", None),
     ("tools/test_platform_install.py", "timezone data, LF resources and Unicode source paths", None),

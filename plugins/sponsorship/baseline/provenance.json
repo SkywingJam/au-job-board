@@ -1,0 +1,17 @@
+{
+  "retrieved_utc": "2026-11-06",
+  "files": {
+    "sanctioned.json": {
+      "source": "https://www.abf.gov.au/_layouts/15/api/Data.aspx/GetSanctionsData",
+      "sha256": "e0255a228e9be260709846205b0d9ecb291002124247c62e2d1946ea496dc4e4"
+    },
+    "asx-listed.csv": {
+      "source": "https://www.asx.com.au/asx/research/ASXListedCompanies.csv",
+      "sha256": "4b1debecfe863623f3ec4372b28369d26b9dce188c2e3e824f0e865f989e0dea"
+    },
+    "ato-tax-2024-25.xlsx": {
+      "source": "https://data.gov.au/data/dataset/c2524c87-cea4-4636-acac-599a82048a26/resource/15bf4eaa-7a14-48e9-8a3f-092df32a644e/download/2024-25-corporate-report-of-entity-tax-information.xlsx",
+      "sha256": "7cccd963cd4aad31c305b21d33272d3d99ff9c36258641622a28cd0028d65c45"
+    }
+  }
+}

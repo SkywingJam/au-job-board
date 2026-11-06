@@ -1278,6 +1278,119 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 # ---------------------------------------------------------------------------
 # 设置页
 # ---------------------------------------------------------------------------
+# 插件授权：服务端只渲染身份、开关与授权状态；权限条目由 settings.js 用
+# GET /api/plugins 的当次数据渲染（审阅窗和详情页同一个渲染函数、同一份指纹）。
+# 插件提供的文字一律当纯文本，不插入 HTML。
+
+def _plugin_text(value, lang: str) -> str:
+    if isinstance(value, dict):
+        value = value.get(lang) or value.get("en") or value.get("zh") or ""
+    return value if isinstance(value, str) else ""
+
+
+def _plugin_consent_status(item: dict) -> str:
+    """required / changed / granted；没有可审阅的授权信息时为空串。"""
+    consent = item.get("consent")
+    status = consent.get("status") if isinstance(consent, dict) else None
+    return status if status in ("required", "changed", "granted") else ""
+
+
+def _plugin_state_text(item: dict, lang: str) -> tuple[str, str]:
+    """(状态文字, 样式)：开关只代表配置里的开/关，这一行说明它此刻能不能运行。"""
+    T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    if item.get("status") == "error":
+        return T("plugin.unavailable_hint"), "is-bad"
+    status = _plugin_consent_status(item)
+    if not status:
+        return "", ""
+    if status == "granted":
+        return T("plugin.consent_granted_short"), "is-ok"
+    if item.get("enabled"):
+        return T("plugin.consent_pending_enabled"), "is-cue"
+    return T("plugin.consent_" + status + "_short"), "is-cue"
+
+
+def _plugin_row(item: dict, name: str, lang: str) -> str:
+    T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    state = item["status"]
+    plugin_id = item["id"]
+    description = _plugin_text(item.get("description"), lang)
+    name_id, desc_id, msg_id, st_id = ("pl-name-" + plugin_id, "pl-desc-" + plugin_id,
+                                       "pl-msg-" + plugin_id, "pl-state-" + plugin_id)
+    errors = (T("plugin.error_count", n=item["error_count"]) if item.get("error_count") else "")
+    text, tone = _plugin_state_text(item, lang)
+    consent = _plugin_consent_status(item)
+    version = item.get("version") or ""
+    return (f'<div class="plugin-row" data-plugin-id="{_e(plugin_id)}">'
+            '<div class="plugin-row-main"><div class="plugin-identity">'
+            f'<b id="{_e(name_id)}">{_e(name)}'
+            + (f' <span class="plugin-version">{_e(T("plugin.version", version=version))}</span>' if version else '')
+            + '</b>'
+            f'<small id="{_e(desc_id)}">{_e(description)}</small>'
+            f'<small id="{_e(st_id)}" class="plugin-state {tone}" data-consent="{_e(consent)}"'
+            f'{" hidden" if not text else ""}>{_e(text)}</small>'
+            f'<small class="plugin-error-count"{" hidden" if not errors else ""}>{_e(errors)}</small></div>'
+            f'<button type="button" class="plugin-toggle" role="switch" '
+            f'aria-checked="{"true" if item["enabled"] else "false"}" '
+            f'aria-labelledby="{_e(name_id)}" aria-describedby="{_e(desc_id)} {_e(st_id)} {_e(msg_id)}" '
+            f'aria-disabled="{"true" if state == "error" and not item["enabled"] else "false"}" '
+            f'data-unavailable="{"true" if state == "error" else "false"}" '
+            f'data-plugin-toggle="{_e(plugin_id)}" data-enabled="{"true" if item["enabled"] else "false"}">'
+            '<span class="plugin-toggle-track" aria-hidden="true"><span></span></span></button>'
+            f'<a class="plugin-open" href="/settings?section=plugins&amp;plugin={_e(plugin_id)}" '
+            f'aria-label="{_e(T("plugin.settings", name=name))}">'
+            '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></a></div>'
+            f'<p id="{_e(msg_id)}" class="plugin-row-message" role="status" aria-live="polite"></p>'
+            # 需要授权时，审阅入口与开关并列在行内，不藏进详情页。
+            f'<button type="button" class="plugin-review-link" data-plugin-review="{_e(plugin_id)}"'
+            f'{" hidden" if consent not in ("required", "changed") or state == "error" else ""}>'
+            f'{_e(T("plugin.review_enable"))}</button></div>')
+
+
+def _plugin_detail(item: dict, name: str, lang: str) -> str:
+    T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    plugin_id = item["id"]
+    version = item.get("version") or ""
+    description = _plugin_text(item.get("description"), lang)
+    text, tone = _plugin_state_text(item, lang)
+    consent = _plugin_consent_status(item)
+    meta = " · ".join(x for x in (T("plugin.version", version=version) if version else "", plugin_id) if x)
+    switch = T("plugin.enabled") if item.get("enabled") else T("plugin.disabled")
+    return (f'<div class="plugin-detail" data-plugin-detail="{_e(plugin_id)}" '
+            f'data-enabled="{"true" if item.get("enabled") else "false"}" '
+            f'data-unavailable="{"true" if item.get("status") == "error" else "false"}">'
+            f'<h2>{_e(name)}</h2>'
+            f'<p class="plugin-meta">{_e(meta)}</p>'
+            + (f'<p class="set-hint">{_e(description)}</p>' if description else '')
+            + '<section class="plugin-grant" aria-labelledby="plugin-grant-title">'
+            f'<h3 id="plugin-grant-title">{_e(T("plugin.grant_section"))}</h3>'
+            '<dl class="plugin-grant-facts">'
+            f'<div><dt>{_e(T("plugin.switch_label"))}</dt><dd data-grant-switch>{_e(switch)}</dd></div>'
+            f'<div><dt>{_e(T("plugin.consent_label"))}</dt><dd><span class="plugin-state {tone}" '
+            f'data-grant-state data-consent="{_e(consent)}">{_e(text or T("plugin.loading"))}</span></dd></div></dl>'
+            '<p class="plugin-grant-hint" data-grant-hint></p>'
+            '<div class="plugin-grant-actions">'
+            f'<button type="button" class="primary-btn" data-plugin-review="{_e(plugin_id)}" hidden>'
+            f'{_e(T("plugin.review_enable"))}</button>'
+            f'<button type="button" class="btn plugin-revoke-btn" data-plugin-revoke="{_e(plugin_id)}" hidden>'
+            f'{_e(T("plugin.revoke"))}</button></div>'
+            '<p class="plugin-row-message" data-grant-message role="status" aria-live="polite"></p>'
+            '</section>'
+            '<section class="plugin-scope" aria-labelledby="plugin-scope-title">'
+            f'<h3 id="plugin-scope-title">{_e(T("plugin.permissions_title"))}</h3>'
+            f'<div class="plugin-scope-body" data-plugin-scope><p class="hint">{_e(T("plugin.loading"))}</p></div>'
+            '</section>'
+            '<section class="plugin-debug" aria-labelledby="plugin-debug-title">'
+            f'<h3 id="plugin-debug-title">{_e(T("plugin.debug"))}</h3>'
+            f'<p class="set-hint">{_e(T("plugin.debug_hint"))}</p>'
+            f'<button type="button" class="btn plugin-debug-btn" data-plugin-debug="{_e(plugin_id)}" '
+            f'aria-expanded="false" aria-controls="plugin-debug-output">{_e(T("plugin.debug"))}</button>'
+            '<p id="plugin-debug-status" class="hint" role="status" aria-live="polite"></p>'
+            '<pre id="plugin-debug-output" class="plugin-debug-output" tabindex="0" hidden></pre>'
+            '</section></div>')
+
+
+# ---------------------------------------------------------------------------
 
 # 「资格与规则」从「抓取与更新」里独立出来：它决定哪些岗位被排除，与抓取无关。
 # 未指定或未知分区时进入第一个分区：资格与规则。
@@ -1313,44 +1426,17 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             if selected is None:
                 pane += f'<h2>{_e(T("plugin.missing"))}</h2>'
             else:
-                pane += (f'<h2>{_e(plugin_name(selected))}</h2>'
-                         f'<p class="set-hint">{_e(T("plugin.debug_hint"))}</p>'
-                         f'<button type="button" class="btn plugin-debug-btn" data-plugin-debug="{_e(selected["id"])}" '
-                         f'aria-expanded="false" aria-controls="plugin-debug-output">{_e(T("plugin.debug"))}</button>'
-                         '<p id="plugin-debug-status" class="hint" role="status" aria-live="polite"></p>'
-                         '<pre id="plugin-debug-output" class="plugin-debug-output" tabindex="0" hidden></pre>')
+                pane += _plugin_detail(selected, plugin_name(selected), lang)
         else:
             pane = (f'<h2>{_e(T("set.plugins"))}</h2>'
                     f'<p class="set-hint">{_e(T("plugin.hint"))}</p><div class="plugin-list">')
             for item in plugins:
-                name = plugin_name(item)
-                state = item["status"]
-                plugin_id = item["id"]
-                description = item.get("description") or ""
-                if isinstance(description, dict):
-                    description = description.get(lang) or description.get("en") or ""
-                name_id, desc_id, msg_id = ("pl-name-" + plugin_id, "pl-desc-" + plugin_id, "pl-msg-" + plugin_id)
-                errors = (T("plugin.error_count", n=item["error_count"]) if item["error_count"] else "")
-                pane += (f'<div class="plugin-row" data-plugin-id="{_e(plugin_id)}">'
-                         '<div class="plugin-row-main"><div class="plugin-identity">'
-                         f'<b id="{_e(name_id)}">{_e(name)}</b>'
-                         f'<small id="{_e(desc_id)}">{_e(description)}</small>'
-                         f'<small class="plugin-state"{" hidden" if state != "error" else ""}>{_e(T("plugin.unavailable_hint")) if state == "error" else ""}</small>'
-                         f'<small class="plugin-error-count"{" hidden" if not errors else ""}>{_e(errors)}</small></div>'
-                         f'<button type="button" class="plugin-toggle" role="switch" '
-                         f'aria-checked="{"true" if item["enabled"] else "false"}" '
-                         f'aria-labelledby="{_e(name_id)}" aria-describedby="{_e(desc_id)} {_e(msg_id)}" '
-                         f'aria-disabled="{"true" if state == "error" and not item["enabled"] else "false"}" '
-                         f'data-unavailable="{"true" if state == "error" else "false"}" '
-                         f'data-plugin-toggle="{_e(plugin_id)}" data-enabled="{"true" if item["enabled"] else "false"}">'
-                         '<span class="plugin-toggle-track" aria-hidden="true"><span></span></span></button>'
-                         f'<a class="plugin-open" href="/settings?section=plugins&amp;plugin={_e(plugin_id)}" '
-                         f'aria-label="{_e(T("plugin.settings", name=name))}">'
-                         '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></a></div>'
-                         f'<p id="{_e(msg_id)}" class="plugin-row-message" role="status" aria-live="polite"></p></div>')
+                pane += _plugin_row(item, plugin_name(item), lang)
             if not plugins:
                 pane += f'<p class="set-hint">{_e(T("plugin.empty"))}</p>'
             pane += '</div>'
+        # Empty shell; settings.js fills it with textContent from GET /api/plugins.
+        pane += '<div class="modal plugin-consent" id="plugin-consent" hidden></div>'
         extra = {}
     elif section == "skills":
         tree = skill_tree(conn, config.get("skills_path"))

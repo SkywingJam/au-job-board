@@ -24,3 +24,5 @@
 !plugins/*/
 !plugins/*/manifest.json
 !plugins/*/*.py
+!plugins/sponsorship/baseline/
+!plugins/sponsorship/baseline/*
