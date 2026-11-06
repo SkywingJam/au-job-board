@@ -420,11 +420,11 @@ class AgentAPI:
                 pool = [r for r in kept+excluded if candidates is None or r['uid'] in candidates]
                 records = {}
                 # One read for the whole snapshot keeps history frozen with it.
-                groups, latest = history.group_index(conn), history.latest_successful_fetch(conn)
+                groups, reference = history.group_index(conn), history.fetch_reference(conn)
 
                 def facts(row):
                     group = row.get('dedupe_group')
-                    return history.build(row, groups.get(group, []) if group else None, latest)
+                    return history.build(row, groups.get(group, []) if group else None, reference)
                 for row in pool:
                     target = locations.parse_target(filters['geo']) if filters.get('geo') else None
                     decorated = location_query.decorate(conn, row, legacy, index, target=target)

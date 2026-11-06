@@ -112,8 +112,8 @@ with the button; the list keeps its filters and scroll position.
 tool such as an AI assistant: UID, title, company, listing location, listing
 link, local posting history and the complete stored description, not the
 on-screen rendering. The history lists only what this installation observed:
-listing date, first/last seen, whether the posting appeared in the latest
-successful fetch, and up to five other postings in its duplicate group (same
+listing date, first/last seen, whether the posting was recorded in the latest
+fully successful fetch of its source, and up to five other postings in its duplicate group (same
 employer, similar title) with their locations and dates. It makes no judgement
 about whether a job is genuine or still open; the same facts are in the API and
 MCP `get_job` as `history`. Copying changes no job or label. If

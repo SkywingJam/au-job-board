@@ -141,11 +141,11 @@ same facts the panel's "Copy job" text carries. List pages omit it.
 
 | Field | Meaning |
 |---|---|
-| `latest_successful_fetch_at` | Start of the newest batch whose collection succeeded for every source; `null` without recorded batches |
-| `seen_in_latest_successful_fetch` | Whether this source row was observed in that batch (`last_seen_at` at or after its start); `null` when unknown |
+| `latest_successful_fetch_at` | Start of the newest fully successful batch that searched this job's source (a partial batch, or `fetch --only` for another source, does not count); `null` without one |
+| `seen_in_latest_successful_fetch` | Exact batch membership: whether this source row was recorded in that batch; `null` when there is no reference batch |
 | `related_basis` | `same_dedupe_group`: the stored duplicate group from the last analysis (same employer, similar title; cities merge unless `dedupe.include_city`) |
 | `related_total` | Other rows in that group; `null` before the job has been analysed |
-| `related` | Up to five of them, newest first observed: `uid`, `source`, `title`, `location`, `listing_date`, `first_seen_at`, `last_seen_at`, `seen_in_latest_successful_fetch` |
+| `related` | Up to five of them, newest first observed: `uid`, `source`, `title`, `location`, `listing_date`, `first_seen_at`, `last_seen_at`, `seen_in_latest_successful_fetch` (against that posting's own source) |
 | `scope_note` | Fixed reminder that these are local collection records |
 
 These are observations only. Not appearing in a later fetch can mean the

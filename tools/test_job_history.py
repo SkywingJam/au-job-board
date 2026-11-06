@@ -35,11 +35,24 @@ class JobHistory(unittest.TestCase):
                 self.job(conn, f'old{i}', f'Synthetic Town {i} VIC', f'2026-10-{10 + i:02d}T21:00:00+00:00', last, 'tmpl')
             self.job(conn, 'solo', 'Melbourne VIC', '2026-11-01T21:00:00+00:00', '2026-11-02T20:31:00+00:00', 'solo-group')
             self.job(conn, 'raw', 'Melbourne VIC', '2026-11-01T21:00:00+00:00', '2026-11-05T20:31:00+00:00', None)
-            conn.execute("INSERT INTO fetch_batches(batch_id,started_at,finished_at,collection_state,trigger) "
-                         "VALUES ('b-ok',?,?,'success','synthetic'),"
-                         "('b-later-partial','2026-11-06T20:30:00+00:00',NULL,'partial','synthetic')",
-                         (BATCH_START, '2026-11-05T20:35:00+00:00'))
+            self.batch(conn, 'b-ok', BATCH_START, 'success', {'synthetic': {'seen': 3}},
+                       ['now', 'old0', 'raw'])
+            # Later batches must not become the reference for "synthetic":
+            # one partial, one that searched another source only (fetch --only).
+            self.batch(conn, 'b-later-partial', '2026-11-06T20:30:00+00:00', 'partial',
+                       {'synthetic': {'seen': 1}}, ['now'])
+            self.batch(conn, 'b-only-other', '2026-11-07T20:30:00+00:00', 'success',
+                       {'othersource': {'seen': 0}}, [])
             conn.commit()
+
+    def batch(self, conn, batch_id, started, state, stats, members):
+        run = conn.execute("INSERT INTO runs(kind,started_at,finished_at,stats) VALUES ('fetch',?,?,?)",
+                           (started, started, json.dumps(stats))).lastrowid
+        conn.execute("INSERT INTO fetch_batches(batch_id,started_at,finished_at,collection_state,trigger,fetch_run_id) "
+                     "VALUES (?,?,?,?,'synthetic',?)", (batch_id, started, started, state, run))
+        for ident in members:
+            conn.execute("INSERT INTO fetch_batch_members(batch_id,uid,is_new,seen_at) VALUES (?,?,0,?)",
+                         (batch_id, 'synthetic:'+ident, started))
 
     def job(self, conn, ident, location, first, last, group):
         db.upsert_job(conn, dict(source='synthetic', source_id=ident, title='Synthetic Technician',
@@ -82,14 +95,31 @@ class JobHistory(unittest.TestCase):
 
     def test_database_without_successful_batches_reports_unknown(self):
         with closing(db.connect(self.path)) as conn:
-            conn.execute('DELETE FROM fetch_batches'); conn.commit()
+            conn.execute('DELETE FROM fetch_batch_members'); conn.execute('DELETE FROM fetch_batches'); conn.commit()
         _, facts = self.facts('synthetic:now')
         self.assertIsNone(facts['latest_successful_fetch_at'])
         self.assertIsNone(facts['seen_in_latest_successful_fetch'])
         self.assertTrue(all(r['seen_in_latest_successful_fetch'] is None for r in facts['related']))
         with closing(db.connect(self.path)) as conn:
             conn.execute('DROP TABLE fetch_batch_members'); conn.execute('DROP TABLE fetch_batches')
-            self.assertIsNone(history.latest_successful_fetch(conn))
+            self.assertEqual(history.fetch_reference(conn), {'by_source': {}, 'members': {}})
+
+    def test_membership_is_exact_not_inferred_from_timestamps(self):
+        # Seen only in a later partial batch: its last_seen_at is after the
+        # reference batch started, yet it was not recorded there.
+        with closing(db.connect(self.path)) as conn:
+            self.job(conn, 'late', 'Late Town VIC', '2026-11-06T20:31:00+00:00', '2026-11-06T20:31:00+00:00', 'late-group')
+            conn.execute("INSERT INTO fetch_batch_members(batch_id,uid,is_new,seen_at) VALUES ('b-later-partial','synthetic:late',1,'2026-11-06T20:31:00+00:00')")
+            conn.commit()
+        late = self.facts('synthetic:late')[1]
+        self.assertEqual(late['latest_successful_fetch_at'], BATCH_START)
+        self.assertFalse(late['seen_in_latest_successful_fetch'])
+        # A source with no successful batch of its own has no reference at all.
+        with closing(db.connect(self.path)) as conn:
+            row = dict(conn.execute("SELECT * FROM jobs WHERE uid='synthetic:now'").fetchone(), source='unsearched')
+            facts = history.for_job(conn, row)
+        self.assertIsNone(facts['latest_successful_fetch_at'])
+        self.assertIsNone(facts['seen_in_latest_successful_fetch'])
 
     def test_local_dates_use_melbourne_calendar(self):
         self.assertEqual(history.local_date('2026-11-04T21:00:00+00:00'), '2026-11-05')
@@ -107,7 +137,7 @@ class JobHistory(unittest.TestCase):
         zh = self.copied('synthetic:now', 'zh')
         self.assertIn('发布日期: 2026-10-30\n', zh)
         self.assertIn('本地首次 / 最后看到: 2026-11-05 / 2026-11-06（来源：synthetic）\n', zh)
-        self.assertIn('本地最近一次成功抓取: 2026-11-06（本条在其中出现）\n', zh)
+        self.assertIn('该来源本地最近一次成功抓取: 2026-11-06（本条在其中出现）\n', zh)
         self.assertIn('同一去重组（同公司、标题相近）的其他广告: 7 条\n', zh)
         self.assertIn('  · 首次看到 2026-10-17 · synthetic · Synthetic Town 6 VIC · 最后看到 2026-10-27，之后的抓取中未再出现\n', zh)
         self.assertIn('  · 另 2 条未列出\n', zh)

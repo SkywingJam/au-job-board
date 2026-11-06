@@ -10,6 +10,7 @@ their AI. Related postings are the other rows of the stored duplicate group
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sqlite3
 from zoneinfo import ZoneInfo
 
@@ -24,14 +25,47 @@ SCOPE_NOTE = ("Local collection records. Related postings are grouped automatica
 _COLUMNS = "uid,source,title,location,listing_date,first_seen_at,last_seen_at,dedupe_group"
 
 
-def latest_successful_fetch(conn) -> str | None:
-    """Start of the newest fetch batch in which every source succeeded."""
+def fetch_reference(conn) -> dict:
+    """Per source, the newest fully successful batch that searched it, with exact members.
+
+    A partial batch, or one that searched other sources only (`fetch --only`),
+    never becomes the reference for a source it did not cover successfully.
+    """
+    by_source: dict[str, dict] = {}
     try:
-        row = conn.execute("SELECT MAX(started_at) FROM fetch_batches "
-                           "WHERE collection_state='success'").fetchone()
+        rows = conn.execute(
+            "SELECT b.batch_id, b.started_at, r.stats FROM fetch_batches b "
+            "JOIN runs r ON r.run_id = b.fetch_run_id "
+            "WHERE b.collection_state='success' ORDER BY b.started_at DESC, b.batch_id DESC").fetchall()
     except sqlite3.OperationalError:   # pre-batch database: no reference point
+        return {"by_source": {}, "members": {}}
+    for batch_id, started_at, stats in rows:
+        try:
+            covered = json.loads(stats or "{}")
+        except ValueError:
+            continue
+        if not isinstance(covered, dict):
+            continue
+        for source, result in covered.items():
+            if isinstance(result, dict) and "error" not in result:
+                by_source.setdefault(source, {"batch_id": batch_id, "started_at": started_at})
+    members: dict[str, set] = {}
+    for ref in by_source.values():
+        if ref["batch_id"] not in members:
+            members[ref["batch_id"]] = {r[0] for r in conn.execute(
+                "SELECT uid FROM fetch_batch_members WHERE batch_id=?", (ref["batch_id"],))}
+    return {"by_source": by_source, "members": members}
+
+
+def _reference_for(source, reference: dict) -> dict | None:
+    return reference["by_source"].get(source)
+
+
+def _seen_in(uid: str, source, reference: dict) -> bool | None:
+    ref = _reference_for(source, reference)
+    if ref is None:
         return None
-    return row[0] if row and row[0] else None
+    return uid in reference["members"].get(ref["batch_id"], set())
 
 
 def group_index(conn) -> dict[str, list[dict]]:
@@ -47,13 +81,7 @@ def _group_rows(conn, group: str) -> list[dict]:
         f"SELECT {_COLUMNS} FROM jobs WHERE dedupe_group=?", (group,))]
 
 
-def _seen_in(last_seen: str | None, latest: str | None) -> bool | None:
-    if not latest or not last_seen:
-        return None
-    return str(last_seen) >= str(latest)
-
-
-def build(row: dict, members: list[dict] | None, latest: str | None) -> dict:
+def build(row: dict, members: list[dict] | None, reference: dict) -> dict:
     """History facts for one job; `members` is its stored group (None if unknown)."""
     related = None
     total = None
@@ -64,10 +92,11 @@ def build(row: dict, members: list[dict] | None, latest: str | None) -> dict:
         related = [{"uid": m["uid"], "source": m.get("source"), "title": m.get("title"),
                     "location": m.get("location"), "listing_date": m.get("listing_date"),
                     "first_seen_at": m.get("first_seen_at"), "last_seen_at": m.get("last_seen_at"),
-                    "seen_in_latest_successful_fetch": _seen_in(m.get("last_seen_at"), latest)}
+                    "seen_in_latest_successful_fetch": _seen_in(m["uid"], m.get("source"), reference)}
                    for m in others[:RELATED_LIMIT]]
-    return {"latest_successful_fetch_at": latest,
-            "seen_in_latest_successful_fetch": _seen_in(row.get("last_seen_at"), latest),
+    ref = _reference_for(row.get("source"), reference)
+    return {"latest_successful_fetch_at": ref["started_at"] if ref else None,
+            "seen_in_latest_successful_fetch": _seen_in(row["uid"], row.get("source"), reference),
             "related_basis": BASIS,
             "related_total": total,
             "related": related,
@@ -77,7 +106,7 @@ def build(row: dict, members: list[dict] | None, latest: str | None) -> dict:
 def for_job(conn, row: dict) -> dict:
     group = row.get("dedupe_group")
     members = _group_rows(conn, group) if group else None
-    return build(row, members, latest_successful_fetch(conn))
+    return build(row, members, fetch_reference(conn))
 
 
 def local_date(value) -> str:
