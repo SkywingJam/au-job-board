@@ -4,6 +4,7 @@ import json
 import io
 from contextlib import redirect_stdout, redirect_stderr
 import os
+import socket
 from pathlib import Path
 import sqlite3
 import sys
@@ -47,6 +48,24 @@ class ConsentTests(unittest.TestCase):
 
     def write_manifest(self):
         (self.plugin/'manifest.json').write_text(json.dumps(self.manifest))
+
+    @unittest.skipUnless(hasattr(socket.socket, 'sendmsg'), 'sendmsg is unavailable on this platform')
+    def test_sendmsg_is_denied_before_any_datagram_is_sent(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+            receiver.bind(('127.0.0.1', 0))
+            receiver.settimeout(.15)
+            port = receiver.getsockname()[1]
+            (self.plugin/'plugin.py').write_text(
+                'import socket\ndef after_fetch(r):\n'
+                ' with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sender:\n'
+                f'  sender.sendmsg([b"synthetic"],[],0,("127.0.0.1",{port}))\n'
+                ' return {"errors":[]}\nafter_analyze_success=after_fetch\n')
+            for hook in ('after_fetch', 'after_analyze_success'):
+                with self.assertRaises(host.WorkerError) as error:
+                    host._run_worker(self.config, 'sample', hook, {'data_dir': str(self.base/'data')})
+                self.assertEqual(error.exception.code, 'PermissionError')
+                with self.assertRaises(socket.timeout):
+                    receiver.recvfrom(100)
 
     def save(self, **extra):
         state = self.editor.read_plugins()

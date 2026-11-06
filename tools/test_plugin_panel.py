@@ -1,10 +1,11 @@
 """Synthetic HTTP/config integration for isolated optional plugins."""
 from __future__ import annotations
 import http.client
+import io
 import json
 import re
 import shutil
-from contextlib import closing
+from contextlib import closing, redirect_stdout, redirect_stderr
 from pathlib import Path
 import sqlite3
 import sys
@@ -20,6 +21,36 @@ from jobs import db, panel, panel_views, plugin_host, config_edit, run_state, i1
 
 
 class PluginPanelTests(unittest.TestCase):
+    def test_cli_reports_pending_consent_for_legacy_and_changed_scope_only(self):
+        def analyze():
+            output, errors = io.StringIO(), io.StringIO()
+            with redirect_stdout(output), redirect_stderr(errors):
+                result = cli.main(['--config', str(self.path), '--rules', str(ROOT/'rules.yaml'),
+                                   '--skills', str(self.root/'skills.yaml'), 'analyze'])
+            self.assertEqual(result, 0)
+            return errors.getvalue()
+
+        self.assertNotIn('[plugin]', analyze())
+        config = yaml.safe_load(self.path.read_text())
+        config['plugins']['sponsorship']['enabled'] = True
+        self.path.write_text(yaml.safe_dump(config))
+        with patch.object(plugin_host, '_run_worker') as worker:
+            notice = analyze()
+            worker.assert_not_called()
+        self.assertIn('sponsorship', notice)
+        self.assertIn('consent required', notice)
+        self.assertIn(str(self.path), notice)
+        self.assertIn('plugin review sponsorship', notice)
+        self.assertIn('Settings > Plugins', notice)
+        manifest_path = self.plugin_root/'sponsorship'/'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        plugin_host.grant(config, manifest, plugin_host.fingerprint(manifest), 'cli')
+        manifest['hooks'] = ['after_analyze_success']
+        manifest_path.write_text(json.dumps(manifest))
+        with patch.object(plugin_host, '_run_worker') as worker:
+            self.assertIn('permissions changed', analyze())
+            worker.assert_not_called()
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)

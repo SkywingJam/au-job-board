@@ -11,7 +11,7 @@ import traceback
 def _offline(event, args):
     # Trusted plugin code only. Deny accidental network and process escape paths,
     # including urllib, UDP and external curl, before importing installed code.
-    if (event in {'socket.connect', 'socket.sendto', 'socket.bind', 'socket.getaddrinfo',
+    if (event in {'socket.connect', 'socket.sendto', 'socket.sendmsg', 'socket.bind', 'socket.getaddrinfo',
                   'socket.gethostbyname', 'socket.gethostbyaddr', 'subprocess.Popen',
                   'os.system', 'os.posix_spawn', 'os.fork', 'os.forkpty', 'os.exec', 'os.spawn'}):
         raise PermissionError('network and external execution unavailable for this hook')

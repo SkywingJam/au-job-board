@@ -22,6 +22,7 @@ import json
 import sqlite3
 import os
 import signal
+import shlex
 import sys
 import time
 import threading
@@ -57,6 +58,32 @@ def _open(args):
     if config is None:
         config = load_config(getattr(args, "config", None))
     return config, database.connect(db_path(config))
+
+
+def _plugin_pending_notice(config, args):
+    """Keep unattended runs useful without granting or executing plugins."""
+    from . import plugin_host
+    from .config import ROOT
+    try:
+        pending = [item for item in plugin_host.list_plugins(config)
+                   if item['status'] == 'consent_required'] if plugin_host._configured(config) else []
+    except RunTimeout:
+        raise
+    except Exception:
+        return
+    for item in pending:
+        path = str(Path(getattr(args, 'config', None) or ROOT / 'config.yaml').resolve())
+        command_args = [sys.executable, '-m', 'jobs.cli', '--config', path,
+                        'plugin', 'review', item['id']]
+        if os.name == 'nt':
+            from subprocess import list2cmdline
+            command = list2cmdline(command_args)
+        else:
+            command = shlex.join(command_args)
+        reason = '权限声明已变化 / permissions changed' if item['consent']['status'] == 'changed' else '尚未授权 / consent required'
+        print(f"[plugin] {item['id']}: {reason}，已跳过 / skipped. "
+              f"请在设置 > 插件中审阅并确认 / Review and confirm in Settings > Plugins, "
+              f"或 / or: {command}", file=sys.stderr, flush=True)
 
 
 # --------------------------------------------------------------------------
@@ -146,6 +173,7 @@ def _cmd_fetch(args) -> int:
             raise
         from . import plugin_host
         plugin_host.dispatch(config, "after_fetch")
+        _plugin_pending_notice(config, args)
         print(f"[fetch] 完成 -> {database.counts(conn)}")
         return 0
 
@@ -313,6 +341,7 @@ def _analyze_legacy(args, config: dict, rules: dict, selected_rules: dict,
     # Optional input preparation is isolated too, and skipped when disabled.
     from . import plugin_host
     plugin_host.after_analyze(config, conn)
+    _plugin_pending_notice(config, args)
 
     disabled_ex = sum(1 for on in resolution["exclude"].values() if not on)
     disabled_ov = sum(1 for on in resolution["overrides"].values() if not on)
