@@ -317,17 +317,19 @@ class Handler(BaseHTTPRequestHandler):
 
         Closing a socket with unread data makes some systems (notably macOS)
         reset the connection while the client is still sending."""
-        remaining = min(max(length, 0), limit)
-        if not remaining:
+        # Larger declared bodies are never read; the connection just closes.
+        connection = getattr(self, "connection", None)
+        if connection is None or not 0 < length <= limit:
             return
+        remaining = length
         deadline = time.monotonic() + seconds
-        previous = self.connection.gettimeout()
+        previous = connection.gettimeout()
         try:
             while remaining > 0:
                 left = deadline - time.monotonic()
                 if left <= 0:
                     break
-                self.connection.settimeout(left)
+                connection.settimeout(left)
                 chunk = self.rfile.read1(min(remaining, 8192))
                 if not chunk:
                     break
@@ -336,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
         finally:
             try:
-                self.connection.settimeout(previous)
+                connection.settimeout(previous)
             except OSError:
                 pass
 
