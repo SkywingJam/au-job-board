@@ -149,6 +149,8 @@ class PluginPanelTests(unittest.TestCase):
         self.assertIn('<details class="plugin-facts"><summary>', detail['html'])
         self.assertNotIn('<details class="plugin-facts" open', detail['html'])
         self.assertIn('plugin-facts-summary', detail['html'])
+        self.assertNotIn('plugin-summary-full', detail['html'])
+        self.assertEqual(detail['html'].count('Reference'), 1)
         self.toggle(False)
         self.assertNotIn('&lt;b&gt;Test&lt;/b&gt;', self.request('/?view=all')[1])
         self.assertTrue((plugin_host._root(self.config)/'sponsorship'/'results.json').exists())

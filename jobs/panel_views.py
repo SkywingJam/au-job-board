@@ -555,7 +555,7 @@ def _detail_html(row: dict, lang: str = "zh", keys: str = i18n.DEFAULT_KEYS) -> 
         out.append('<details class="plugin-facts"><summary>'
                    + '<span class="plugin-facts-title">' + _e(section["title"]) + '</span>'
                    + '<span class="plugin-facts-summary"> · ' + _e(section["status"]) + '</span></summary>'
-                   + '<div class="plugin-facts-body"><p class="plugin-summary-full">' + _e(section["status"]) + '</p><ul>'
+                   + '<div class="plugin-facts-body"><ul>'
                    + ''.join('<li>' + _e(item) + '</li>' for item in section["items"]) + '</ul></div></details>')
 
     if row.get("is_excluded"):

@@ -50,20 +50,31 @@ def _date(path):
 
 
 def _summary(lang, acc, sanction, acc_available, abf_available):
+    zh = lang == 'zh'
     if sanction:
-        text = ('违规名单确认匹配' if sanction == 'confirmed' else '可能关联违规名单') if lang == 'zh' else ('Confirmed sanctions match' if sanction == 'confirmed' else 'Possible sanctions match')
-        if acc:
-            text += (' · 认证名单匹配' if acc == 'exact' else ' · 认证名单可能匹配') if lang == 'zh' else (' · Accredited list match' if acc == 'exact' else ' · Possible accredited list match')
-        return text
-    if acc:
-        return ('认证担保名单匹配' if acc == 'exact' else '认证名单可能匹配') if lang == 'zh' else ('Accredited list match' if acc == 'exact' else 'Possible accredited list match')
-    if not acc_available and not abf_available:
-        return '暂无可用参考名单' if lang == 'zh' else 'Reference lists unavailable'
+        return ('⚠ 有违规担保记录' if sanction == 'confirmed' else '⚠ 可能有违规记录') if zh else ('⚠ Sponsorship breach recorded' if sanction == 'confirmed' else '⚠ Possible sponsorship breach')
+    missing = []
     if not acc_available:
-        return '认证名单未导入' if lang == 'zh' else 'Accredited list not imported'
+        missing.append('认证担保名单' if zh else 'Accredited sponsor list')
     if not abf_available:
-        return '违规名单不可用' if lang == 'zh' else 'Sanctions list unavailable'
-    return '参考名单均未匹配' if lang == 'zh' else 'No reference-list match'
+        missing.append('违规名单' if zh else 'Sanctions list')
+    if missing:
+        return ('、'.join(missing) + '暂不可用') if zh else ('; '.join(missing) + ' unavailable')
+    if acc:
+        return ('认证担保雇主 ✓' if acc == 'exact' else '可能是认证担保雇主') if zh else ('Accredited sponsor ✓' if acc == 'exact' else 'Possible accredited sponsor')
+    return '未见违规记录' if zh else 'No sponsorship breach found'
+
+
+def _source_date(value, lang, *, month=False):
+    """Format reference dates without exposing storage filenames."""
+    try:
+        date = datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        return '日期未知' if lang == 'zh' else 'date unknown'
+    label = date.strftime('%Y-%m' if month else '%Y-%m-%d')
+    if (datetime.now(timezone.utc).date() - date).days > 365:
+        label += '，较旧' if lang == 'zh' else ', older source'
+    return label
 
 
 def after_analyze_success(request):
@@ -72,10 +83,30 @@ def after_analyze_success(request):
     sanctions = ref.load_sanctions(directory)
     companies = ref.Companies(directory, ref.NameIndex)
     accredited_files = sorted(directory.glob('accredited-*.txt'))
-    acc_source = ', '.join(p.name for p in accredited_files) or 'unavailable'
-    asx_date = _date(directory / 'asx-listed.csv')
-    abf_date = _date(directory / 'sanctioned.json')
     abf_available = (directory / 'sanctioned.json').exists()
+    asx_available = (directory / 'asx-listed.csv').exists()
+    ato_available = bool(list(directory.glob('ato-tax-*.xlsx')))
+    source_lines = {}
+    asx_sources = {}
+    ato_sources = {}
+    for lang in ('zh', 'en'):
+        zh = lang == 'zh'
+        sources = []
+        if accredited_files:
+            dates = ' · '.join(dict.fromkeys(
+                _source_date(path.stem.removeprefix('accredited-'), lang, month=True)
+                for path in accredited_files))
+            sources.append(f'Home Affairs 认证名单（{dates}）' if zh else f'Home Affairs accredited list ({dates})')
+        if abf_available:
+            date = _source_date(_date(directory / 'sanctioned.json'), lang)
+            sources.append(f'ABF 违规名单（下载 {date}）' if zh else f'ABF sanctions register (downloaded {date})')
+        if asx_available:
+            date = _source_date(_date(directory / 'asx-listed.csv'), lang)
+            asx_sources[lang] = f'ASX 上市名单（下载 {date}）' if zh else f'ASX listed-company directory (downloaded {date})'
+        if ato_available:
+            year = companies.ato_year or ('年度未知' if zh else 'year unknown')
+            ato_sources[lang] = f'ATO 企业税务透明度报告（{year}）' if zh else f'ATO corporate tax transparency report ({year})'
+        source_lines[lang] = sources
     results = {}
     for job in request['jobs']:
         company = job.get('company') or ''
@@ -85,7 +116,7 @@ def after_analyze_success(request):
                 views[lang]['sections'].append({
                     'title': '雇主信息' if lang == 'zh' else 'Employer facts',
                     'status': '实际雇主未知' if lang == 'zh' else 'Actual employer unknown',
-                    'items': ['招聘机构或匿名发布，未查询实际雇主名单。' if lang == 'zh' else 'Agency or anonymous advertiser; actual employer lists were not checked.']})
+                    'items': ['广告使用招聘机构或匿名名称，暂无法核对实际雇主的名单记录。' if lang == 'zh' else 'The advert uses an agency or anonymous name, so the actual employer cannot be checked.']})
         else:
             acc, acc_name = accredited.match(company)
             sanction, sanction_row = sanctions.match(company)
@@ -93,40 +124,52 @@ def after_analyze_success(request):
             for lang in ('zh', 'en'):
                 zh = lang == 'zh'
                 items = []
-                if acc:
-                    label = ('认证担保名单匹配' if acc == 'exact' else '认证名单可能匹配') if zh else ('Accredited list match' if acc == 'exact' else 'Possible accredited list match')
-                    evidence = (f'认证担保名单：{"匹配" if acc == "exact" else "名称相近，可能匹配"} {acc_name} · 来源 Home Affairs FOI（{acc_source}）' if zh else f'Accredited list: {"match" if acc == "exact" else "possible match, similar name"}, {acc_name} · Source: Home Affairs FOI ({acc_source})')
-                    items.append(evidence)
-                    views[lang]['badges'].append({'text': label, 'level': 'info', 'tooltip': evidence})
-                elif accredited_files:
-                    items.append(f'认证担保名单：未匹配 · 来源 Home Affairs FOI（{acc_source}）' if zh else f'Accredited list: no match · Source: Home Affairs FOI ({acc_source})')
+                sources = list(source_lines[lang])
                 if sanction:
                     label = ('违规名单确认匹配' if sanction == 'confirmed' else '可能关联违规名单') if zh else ('Confirmed sanctions match' if sanction == 'confirmed' else 'Possible sanctions match')
                     date = sanction_row.get('date') or ('未知' if zh else 'unknown')
-                    evidence = (f'违规名单：{"确认匹配" if sanction == "confirmed" else "可能关联"} {sanction_row.get("name", "")} · 来源 ABF · 名单下载 {abf_date} · 记录日期 {date}' if zh else f'Sanctions: {"confirmed match" if sanction == "confirmed" else "possible match"}, {sanction_row.get("name", "")} · Source: ABF · Downloaded {abf_date} · Record date {date}')
+                    name = sanction_row.get('name', '')
+                    if sanction == 'confirmed':
+                        evidence = (f'⚠ 有违规担保记录\n曾因违反担保义务受到处罚。名单名称：{name}；记录日期：{date}。' if zh else f'⚠ Sponsorship breach recorded\nThe employer was sanctioned for breaching sponsorship obligations. Listed name: {name}; record date: {date}.')
+                    else:
+                        evidence = (f'⚠ 可能有违规记录\n名称与违规名单中的 {name} 相近，请核对公司全称。记录日期：{date}。' if zh else f'⚠ Possible sponsorship breach\nThe name resembles {name} on the sanctions register. Check the full company name. Record date: {date}.')
                     items.append(evidence)
                     views[lang]['badges'].append({'text': label, 'level': 'warn', 'tooltip': evidence})
                 elif abf_available:
-                    items.append(f'违规名单：未匹配 · 来源 ABF · 名单下载 {abf_date}' if zh else f'Sanctions: no match · Source: ABF · Downloaded {abf_date}')
+                    items.append('✓ 未见违规担保记录\n澳洲边境执法局（ABF）公布的违规担保雇主中没有这家公司。' if zh else '✓ No sponsorship breach found\nThe company is not on the Australian Border Force (ABF) register of sanctioned sponsors.')
+                else:
+                    items.append('违规名单暂不可用\n暂时无法核对这家公司的违规担保记录。' if zh else 'Sanctions list unavailable\nSponsorship breach records cannot be checked at the moment.')
+                if acc:
+                    label = ('认证担保名单匹配' if acc == 'exact' else '认证名单可能匹配') if zh else ('Accredited list match' if acc == 'exact' else 'Possible accredited list match')
+                    if acc == 'exact':
+                        evidence = (f'✓ 认证担保雇主\n名单将 {acc_name} 列为移民局认证的担保方，可享相应审批便利。' if zh else f'✓ Accredited sponsor\nThe list records {acc_name} as a Home Affairs accredited sponsor, with access to accreditation benefits.')
+                    else:
+                        evidence = (f'可能是认证担保雇主\n名称与认证名单中的 {acc_name} 相近，请核对公司全称。' if zh else f'Possible accredited sponsor\nThe name resembles {acc_name} on the accredited sponsor list. Check the full company name.')
+                    if abf_available and not sanction:
+                        items.insert(0, evidence)
+                    else:
+                        items.append(evidence)
+                    views[lang]['badges'].append({'text': label, 'level': 'info', 'tooltip': evidence})
+                elif accredited_files:
+                    items.append('– 不在认证担保雇主名单内\n普通担保雇主也能提供担保；这份名单只列获移民局额外认证的雇主。' if zh else '– Not on the accredited sponsor list\nStandard business sponsors can also offer sponsorship. This list covers only those with additional accreditation.')
+                else:
+                    items.append('认证担保名单暂不可用\n暂时无法核对这家公司是否在认证名单中。' if zh else 'Accredited sponsor list unavailable\nThe company cannot be checked against the accredited sponsor list at the moment.')
                 if size['asx']:
-                    match = ('匹配' if size['asx'] == 'exact' else '可能匹配') if zh else ('match' if size['asx'] == 'exact' else 'possible match')
-                    items.append(f'ASX 上市名单：{match} {size["asx_name"]} · 名单下载 {asx_date}' if zh else f'ASX listed companies: {match}, {size["asx_name"]} · Downloaded {asx_date}')
+                    sources.append(asx_sources[lang])
+                    heading = ('✓ ASX 上市公司' if size['asx'] == 'exact' else '可能是 ASX 上市公司') if zh else ('✓ ASX-listed company' if size['asx'] == 'exact' else 'Possible ASX-listed company')
+                    explanation = (f'上市公司名单中列有 {size["asx_name"]}。' if zh else f'The listed-company directory includes {size["asx_name"]}.') if size['asx'] == 'exact' else (f'名称与上市公司 {size["asx_name"]} 相近，请核对公司全称。' if zh else f'The name resembles the listed company {size["asx_name"]}. Check the full company name.')
+                    items.append(heading + '\n' + explanation)
                 if size['ato']:
-                    match = ('匹配' if size['ato'] == 'exact' else '可能匹配') if zh else ('match' if size['ato'] == 'exact' else 'possible match')
-                    year = size['ato_year'] or ('未知' if zh else 'unknown')
-                    items.append(f'ATO 企业税务透明度名单：{match} {size["ato_name"]} · 报告年度 {year}' if zh else f'ATO corporate tax transparency: {match}, {size["ato_name"]} · Reporting year {year}')
-                missing = []
-                if not accredited_files:
-                    missing.append('认证担保名单未导入' if zh else 'accredited list not imported')
-                if not abf_available:
-                    missing.append('ABF 名单不可用' if zh else 'ABF list unavailable')
-                if not (directory / 'asx-listed.csv').exists():
-                    missing.append('ASX 名单不可用' if zh else 'ASX list unavailable')
-                if not list(directory.glob('ato-tax-*.xlsx')):
-                    missing.append('ATO 名单不可用' if zh else 'ATO list unavailable')
-                if missing:
-                    items.append(('资料状态：' if zh else 'Reference availability: ') + '；'.join(missing))
-                items.append('名单记录不保证当前岗位提供担保；未匹配也不表示企业不能担保。' if zh else 'A list entry does not guarantee sponsorship for this job; no match does not establish ineligibility.')
+                    sources.append(ato_sources[lang])
+                    heading = ('✓ 列入 ATO 企业税务透明度报告' if size['ato'] == 'exact' else '可能列入 ATO 企业税务透明度报告') if zh else ('✓ Included in the ATO corporate tax transparency report' if size['ato'] == 'exact' else 'Possible entry in the ATO corporate tax transparency report')
+                    explanation = (f'报告列有 {size["ato_name"]}，可作为企业规模参考。' if zh else f'The report includes {size["ato_name"]}, providing a reference for company scale.') if size['ato'] == 'exact' else (f'名称与报告中的 {size["ato_name"]} 相近，请核对公司全称。' if zh else f'The name resembles {size["ato_name"]} in the report. Check the full company name.')
+                    items.append(heading + '\n' + explanation)
+                if not asx_available:
+                    items.append('ASX 上市名单暂不可用。' if zh else 'ASX listed-company directory unavailable.')
+                if not ato_available:
+                    items.append('ATO 企业税务透明度报告暂不可用。' if zh else 'ATO corporate tax transparency report unavailable.')
+                items.append('能否担保，以岗位描述或直接向雇主确认为准。' if zh else 'Check the job description or ask the employer whether this role offers sponsorship.')
+                items.append(('来源：' if zh else 'Sources: ') + (' · '.join(sources) if sources else ('暂无可用名单。' if zh else 'No reference lists available.')))
                 views[lang]['sections'].append({'title': '雇主信息' if zh else 'Employer facts',
                     'status': _summary(lang, acc, sanction, bool(accredited_files), abf_available), 'items': items})
         results[job['uid']] = views

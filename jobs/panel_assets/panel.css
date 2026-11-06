@@ -1060,8 +1060,8 @@ body.portrait .geo-suggest-panel{left:0;right:0;min-width:0;width:auto}
 .plugin-facts-summary{font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .plugin-facts>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:var(--r-ctl)}
 .plugin-facts-body{padding:0 12px 12px 28px;line-height:1.6;overflow-wrap:anywhere;color:var(--ink2)}
-.plugin-summary-full{margin:0 0 8px;font-weight:600}
 .plugin-facts ul{margin:0;padding:0;list-style:none}
+.plugin-facts li{white-space:pre-line}
 .plugin-facts li+li{margin-top:8px}
 .plugin-facts li:last-child{color:var(--ink3);font-size:var(--fs-xs)}
 .tag.plugin-badge{background:transparent;border:1px solid var(--line3);color:var(--ink2)}

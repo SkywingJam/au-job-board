@@ -26,7 +26,7 @@ _SPONSOR_TAIL = {"systems", "technologies", "technology", "wholesale", "clothing
 # The advertised name may add one of these to the listed name ("Example Brands" -> "Example").
 _COMPANY_TAIL = {"brands", "new", "zealand"}
 # OCR noise in the accredited list: page numbers, headers, watermark fragments
-_NOISE = re.compile(r"^\d{1,3}$|freedom of information|released by|department of|home affairs|"
+_NOISE = re.compile(r"^\d{1,3}$|freedom of information|released by|home affairs|"
                     r"australian government|list of accredited|^fa \d", re.I)
 # Recruiter / anonymous advertisers: the real employer cannot be checked
 _AGENCY = re.compile(r"\b(recruit\w*|talent|careers|staffing|personnel|resourcing|search|"

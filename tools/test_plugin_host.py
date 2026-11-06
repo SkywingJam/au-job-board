@@ -138,6 +138,27 @@ class PluginTests(unittest.TestCase):
                 with self.assertRaises(type(error)):
                     self.dispatch()
 
+    def test_accredited_departments_are_not_treated_as_page_headers(self):
+        self.root_patch.stop()
+        self.addCleanup(self.root_patch.start)
+        self.config['plugins'] = {'sponsorship': {'enabled': True}}
+        data = host._root(self.config) / 'sponsorship' / 'data'
+        data.mkdir(parents=True)
+        employers = ['Department of Imaginary Gumtrees',
+                     'Imaginary Department of Fanciful Rivers']
+        (data / 'accredited-2025-01-15.txt').write_text(
+            'Australian Government\nDepartment of Home Affairs\n'
+            'Released by Department of Home Affairs\n001\n'
+            + '\n'.join(employers) + '\n', encoding='utf-8')
+        jobs = [{'uid': f'synthetic:department:{i}', 'company': name}
+                for i, name in enumerate(employers)]
+        host.dispatch(self.config, 'after_analyze_success', jobs, 1)
+        for job in jobs:
+            view = host.presentation(self.config, job['uid'], 'en')
+            self.assertEqual([badge['text'] for badge in view['badges']],
+                             ['Accredited list match'])
+        self.assertEqual(host.read_debug(self.config, 'sponsorship')['entries'], [])
+
     def test_external_execution_udp_and_lookup_blocked_for_offline_hook(self):
         cases = ["import subprocess; subprocess.run(['curl', 'https://example.invalid'])",
                  "import socket; socket.socket(socket.AF_INET,socket.SOCK_DGRAM).sendto(b'x',('127.0.0.1',9))",
@@ -239,13 +260,15 @@ class PluginTests(unittest.TestCase):
     def test_fact_summaries_distinguish_missing_no_match_and_name_uncertainty(self):
         from plugins.sponsorship import plugin
         cases = [
-            ('exact', None, True, True, '认证担保名单匹配'),
-            ('fuzzy', None, True, True, '认证名单可能匹配'),
-            (None, None, True, True, '参考名单均未匹配'),
-            ('exact', 'confirmed', True, True, '违规名单确认匹配'),
-            (None, None, False, False, '暂无可用参考名单'),
-            (None, None, False, True, '认证名单未导入'),
-            (None, None, True, False, '违规名单不可用')]
+            ('exact', None, True, True, '认证担保雇主 ✓'),
+            ('fuzzy', None, True, True, '可能是认证担保雇主'),
+            (None, None, True, True, '未见违规记录'),
+            ('exact', 'confirmed', True, True, '⚠ 有违规担保记录'),
+            ('exact', 'possible', True, True, '⚠ 可能有违规记录'),
+            (None, None, False, False, '认证担保名单、违规名单暂不可用'),
+            (None, None, False, True, '认证担保名单暂不可用'),
+            (None, None, True, False, '违规名单暂不可用'),
+            ('exact', None, True, False, '违规名单暂不可用')]
         for acc, sanction, a, b, expected in cases:
             summary=plugin._summary('zh',acc,sanction,a,b)
             self.assertTrue(summary.startswith(expected),summary)
@@ -253,6 +276,78 @@ class PluginTests(unittest.TestCase):
             self.assertNotIn('不可担保', summary)
         self.assertIn('Possible',plugin._summary('en','fuzzy',None,True,True))
         self.assertIn('unavailable',plugin._summary('en',None,None,False,False))
+
+    def test_employer_copy_explains_findings_and_groups_sources_in_both_languages(self):
+        self.root_patch.stop()
+        self.addCleanup(self.root_patch.start)
+        self.config['plugins'] = {'sponsorship': {'enabled': True}}
+        data = host._root(self.config) / 'sponsorship' / 'data'
+        data.mkdir(parents=True)
+        (data / 'accredited-1999-01-15.txt').write_text(
+            'Imaginary Gumtree Pty Ltd\nImaginary Cedar Pty Ltd\nMoonlit Walnut Systems Pty Ltd\n')
+        (data / 'sanctioned.json').write_text(json.dumps({'d': {'success': True, 'data': [
+            {'sponsorname': 'Imaginary Gumtree Pty Ltd', 'sanctionimposeddatetext': '2025-01-01'},
+            {'sponsorname': 'Invented Lantern Goods Pty Ltd', 'tradingname': 'Fanciful Willow',
+             'sanctionimposeddatetext': '2025-02-02'}]}}))
+        (data / 'asx-listed.csv').write_text('Company name,Code\nImaginary Cedar Pty Ltd,XYZ\n')
+        with zipfile.ZipFile(data / 'ato-tax-2024-25.xlsx', 'w') as archive:
+            archive.writestr('xl/worksheets/sheet1.xml', '<worksheet><row><c><v>Name</v></c><c><v>Total income</v></c></row><row><c><v>Imaginary Cedar Pty Ltd</v></c><c><v>100000001</v></c></row></worksheet>')
+        names = ['Imaginary Gumtree Pty Ltd', 'Imaginary Cedar Pty Ltd', 'Moonlit Walnut',
+                 'Fanciful Quartz', 'Fanciful Willow', 'Imaginary Talent Recruitment']
+        jobs = [{'uid': f'synthetic:copy:{i}', 'company': name} for i, name in enumerate(names)]
+        host.dispatch(self.config, 'after_analyze_success', jobs, 1)
+        for lang in ('zh', 'en'):
+            views = [host.presentation(self.config, job['uid'], lang) for job in jobs]
+            for view in views[:-1]:
+                section = view['sections'][0]
+                source = section['items'][-1]
+                self.assertTrue(source.startswith('来源：' if lang == 'zh' else 'Sources: '))
+                self.assertIn('1999-01', source)
+                self.assertIn('较旧' if lang == 'zh' else 'older source', source)
+                self.assertNotIn('.txt', str(view))
+                self.assertNotIn('未匹配' if lang == 'zh' else 'no match', str(view))
+                self.assertEqual(sum(item.startswith('来源：' if lang == 'zh' else 'Sources: ')
+                                     for item in section['items']), 1)
+                self.assertTrue(all('\n' in item for item in section['items'][:-2]))
+            self.assertIn('2025-01-01', views[0]['sections'][0]['items'][0])
+            self.assertTrue(views[0]['sections'][0]['items'][0].startswith('⚠'))
+            self.assertTrue(views[1]['sections'][0]['items'][0].startswith('✓'))
+            self.assertIn('ASX', views[1]['sections'][0]['items'][-1])
+            self.assertIn('ATO', views[1]['sections'][0]['items'][-1])
+            self.assertIn('2024-25', views[1]['sections'][0]['items'][-1])
+            self.assertIn('公司全称' if lang == 'zh' else 'full company name',
+                          views[2]['sections'][0]['items'][0])
+            self.assertEqual(views[3]['sections'][0]['status'],
+                             '未见违规记录' if lang == 'zh' else 'No sponsorship breach found')
+            self.assertIn('普通担保雇主' if lang == 'zh' else 'Standard business sponsors',
+                          views[3]['sections'][0]['items'][1])
+            self.assertIn('2025-02-02', views[4]['sections'][0]['items'][0])
+            self.assertEqual(views[5]['badges'], [])
+            self.assertIn('实际雇主' if lang == 'zh' else 'actual employer',
+                          views[5]['sections'][0]['items'][0])
+        self.assertEqual(host.read_debug(self.config, 'sponsorship')['entries'], [])
+
+    def test_missing_reference_copy_does_not_claim_a_clean_record(self):
+        self.root_patch.stop()
+        self.addCleanup(self.root_patch.start)
+        self.config['plugins'] = {'sponsorship': {'enabled': True}}
+        host.dispatch(self.config, 'after_analyze_success', self.jobs, 1)
+        for lang in ('zh', 'en'):
+            section = host.presentation(self.config, 'synthetic:1', lang)['sections'][0]
+            self.assertIn('暂不可用' if lang == 'zh' else 'unavailable', section['status'])
+            self.assertNotIn('未见违规' if lang == 'zh' else 'No sponsorship breach found', str(section))
+            self.assertNotIn('未匹配' if lang == 'zh' else 'no match', str(section))
+
+    def test_reference_age_is_marked_after_one_year_without_exposing_filenames(self):
+        from datetime import datetime, timezone
+        from plugins.sponsorship import plugin
+        with patch.object(plugin, 'datetime') as clock:
+            clock.strptime.side_effect = datetime.strptime
+            clock.now.return_value = datetime(2026, 11, 6, tzinfo=timezone.utc)
+            self.assertEqual(plugin._source_date('2025-11-06', 'zh'), '2025-11-06')
+            self.assertEqual(plugin._source_date('2025-11-05', 'zh', month=True), '2025-11，较旧')
+            self.assertEqual(plugin._source_date('2025-11-05', 'en', month=True), '2025-11, older source')
+            self.assertEqual(plugin._source_date('not-a-date', 'zh'), '日期未知')
 
 
 if __name__ == '__main__':
