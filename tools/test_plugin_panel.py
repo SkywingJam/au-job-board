@@ -2,6 +2,7 @@
 from __future__ import annotations
 import http.client
 import json
+import re
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -78,14 +79,20 @@ class PluginPanelTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertIn(title, page)
             self.assertEqual(i18n.js_strings(lang)["plugin.no_errors"], i18n.t(lang, "plugin.no_errors"))
-            self.assertIn('class="plugin-menu"', page)
-            self.assertIn('cy="10"', page)
+            self.assertIn('role="switch"', page)
+            self.assertIn('aria-checked="false"', page)
+            self.assertIn('aria-labelledby="pl-name-sponsorship"', page)
+            self.assertNotIn('class="plugin-menu"', page)
+            self.assertIn('plugin-toggle-track', page)
             self.assertIn('plugin=sponsorship', page)
             status, detail = self.request('/settings?section=plugins&plugin=sponsorship', headers=headers)
             self.assertEqual(status, 200)
             self.assertIn('data-plugin-debug="sponsorship"', detail)
             self.assertNotIn('data-plugin-toggle=', detail)
             self.assertNotIn('refresh_days', detail)
+            self.assertIn('id="plugin-debug-status"', detail)
+            log_tag = re.search(r'<pre[^>]*id="plugin-debug-output"[^>]*>', detail).group(0)
+            self.assertNotIn('role="status"', log_tag)
         status, data = self.request('/api/plugins/debug?id=sponsorship')
         self.assertEqual((status, data['entries']), (200, []))
 
@@ -139,6 +146,9 @@ class PluginPanelTests(unittest.TestCase):
         _, detail = self.request('/api/job?uid=synthetic:one')
         self.assertIn('&lt;script&gt;bad&lt;/script&gt;', detail['html'])
         self.assertNotIn('<script>bad</script>', detail['html'])
+        self.assertIn('<details class="plugin-facts"><summary>', detail['html'])
+        self.assertNotIn('<details class="plugin-facts" open', detail['html'])
+        self.assertIn('plugin-facts-summary', detail['html'])
         self.toggle(False)
         self.assertNotIn('&lt;b&gt;Test&lt;/b&gt;', self.request('/?view=all')[1])
         self.assertTrue((plugin_host._root(self.config)/'sponsorship'/'results.json').exists())
@@ -211,6 +221,35 @@ class PluginPanelTests(unittest.TestCase):
         with patch.object(plugin_host, '_analysis_jobs', side_effect=RunTimeout()):
             with self.assertRaises(RunTimeout):
                 cli.main(args)
+
+    def test_only_highest_priority_plugin_badge_is_on_card(self):
+        row = {'uid':'synthetic:badge','title':'Synthetic role','company':'Imaginary Fern',
+               '_plugin_view':{'badges':[
+                   {'text':'Accredited match','level':'info','tooltip':'Evidence one'},
+                   {'text':'Sanctions match','level':'warn','tooltip':'Evidence two'}]}}
+        card = panel_views._card(row)
+        self.assertEqual(card.count('plugin-badge'), 1)
+        self.assertIn('Sanctions match', card)
+        self.assertNotIn('Accredited match', card)
+
+    def test_plugin_description_is_plain_optional_metadata(self):
+        _, data = self.request('/api/plugins')
+        self.assertIn('public lists',data['plugins'][0]['description']['en'])
+        _, page = self.request('/settings?section=plugins')
+        self.assertIn('id="pl-desc-sponsorship"',page)
+
+    def test_unavailable_switch_can_be_found_and_diagnostics_remain_reachable(self):
+        item = {'id':'sponsorship','name':{'zh':'雇主信息','en':'Employer facts'},
+                'version':'1','description':{'en':'Public references'},'enabled':False,
+                'status':'error','error_count':3}
+        with patch.object(plugin_host, 'list_plugins', return_value=[item]):
+            status, page = self.request('/settings?section=plugins',headers={'Cookie':'jobs_lang=en'})
+        self.assertEqual(status,200)
+        self.assertIn('role="switch" aria-checked="false"',page)
+        self.assertIn('aria-disabled="true"',page)
+        self.assertIn('3 error records',page)
+        self.assertIn('Plugin files, version or configuration',page)
+        self.assertIn('plugin=sponsorship',page)
 
 
 if __name__ == '__main__':

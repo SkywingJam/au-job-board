@@ -36,6 +36,12 @@ KEY_PROFILES = {
 
 STRINGS: dict[str, dict[str, str]] = {
     "zh": {
+        'plugin.unavailable_hint': '插件文件、版本或配置不可用，请查看详情。',
+        'plugin.error_count': '{n} 条错误记录',
+        'plugin.saving': '正在保存…',
+        'plugin.enabled_saved': '已启用：已有结果会显示，新岗位在下次更新或分析后补充。',
+        'plugin.disabled_saved': '已关闭：岗位中不再显示雇主信息，已有结果保留。',
+        'plugin.debug_loaded': '已读取 {n} 条错误记录。',
         'set.plugins': '插件',
         'plugin.back': '全部插件',
         'plugin.debug': '调试输出',
@@ -47,7 +53,7 @@ STRINGS: dict[str, dict[str, str]] = {
         'plugin.disabled': '已关闭',
         'plugin.error': '不可用',
         'plugin.actions': '{name}的操作',
-        'plugin.settings': '{name}设置',
+        'plugin.settings': '{name}详情与调试',
         'plugin.enable': '启用',
         'plugin.disable': '关闭',
         'plugin.no_errors': '暂无错误记录。',
@@ -507,6 +513,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "js.note_gap": "",
     },
     "en": {
+        'plugin.unavailable_hint': 'Plugin files, version or configuration are unavailable. Open details.',
+        'plugin.error_count': '{n} error records',
+        'plugin.saving': 'Saving…',
+        'plugin.enabled_saved': 'Enabled. Existing results are shown; new jobs are covered by the next update or analysis.',
+        'plugin.disabled_saved': 'Disabled. Employer facts are hidden and existing results are kept.',
+        'plugin.debug_loaded': 'Loaded {n} error records.',
         'set.plugins': 'Plugins',
         'plugin.back': 'All plugins',
         'plugin.debug': 'Debug output',
@@ -518,7 +530,7 @@ STRINGS: dict[str, dict[str, str]] = {
         'plugin.disabled': 'Disabled',
         'plugin.error': 'Unavailable',
         'plugin.actions': 'Actions for {name}',
-        'plugin.settings': 'Settings for {name}',
+        'plugin.settings': 'Details and debug for {name}',
         'plugin.enable': 'Enable',
         'plugin.disable': 'Disable',
         'plugin.no_errors': 'No errors recorded.',

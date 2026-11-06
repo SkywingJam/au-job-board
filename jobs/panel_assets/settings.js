@@ -450,17 +450,16 @@ function bindConfigEditor(){
 }
 document.addEventListener('DOMContentLoaded',bindConfigEditor);
 
-/* Plugins: core renders the controls; installed code never runs in this page. */
+/* Plugins: only validated data crosses this boundary, never installed code. */
 (function pluginSettings(){
-  const status=document.getElementById('plugin-status');
-  let busy=false;
+  const pending=new Set();
   const message=code=>T('plugin.'+code)===('plugin.'+code)?T('plugin.failed'):T('plugin.'+code);
   document.querySelectorAll('[data-plugin-toggle]').forEach(button=>{
     button.addEventListener('click',async()=>{
-      if(busy)return;
-      busy=true;button.disabled=true;
-      const menu=button.closest('details');if(menu)menu.open=false;
-      if(status)status.textContent=T('plugin.loading');
+      if(pending.has(button)||button.getAttribute('aria-disabled')==='true')return;
+      const row=button.closest('.plugin-row'),status=row.querySelector('.plugin-row-message');
+      pending.add(button);button.setAttribute('aria-busy','true');button.setAttribute('aria-disabled','true');
+      status.classList.remove('is-error');status.textContent=T('plugin.saving');
       try{
         const currentResponse=await fetch('/api/plugins');
         const current=await currentResponse.json();
@@ -472,38 +471,37 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
         const item=result.plugins.find(p=>p.id===button.dataset.pluginToggle);
         if(!item)throw new Error('failed');
         button.dataset.enabled=String(item.enabled);
-        button.textContent=T(item.enabled?'plugin.disable':'plugin.enable');
-        const row=button.closest('.plugin-row');
-        row.querySelector('.plugin-state').textContent=T('plugin.'+item.status);
-        if(status)status.textContent=T('plugin.saved');
-        const summary=row.querySelector('summary');if(summary)summary.focus();
-      }catch(error){if(status)status.textContent=message(error.message);}
-      finally{busy=false;button.disabled=false;}
+        button.dataset.unavailable=String(item.status==='error');
+        button.setAttribute('aria-checked',String(item.enabled));
+        const state=row.querySelector('.plugin-state');
+        state.hidden=item.status!=='error';state.textContent=item.status==='error'?T('plugin.unavailable_hint'):'';
+        const errors=row.querySelector('.plugin-error-count');
+        errors.hidden=!item.error_count;errors.textContent=item.error_count?T('plugin.error_count',{n:item.error_count}):'';
+        status.textContent=T(item.enabled?'plugin.enabled_saved':'plugin.disabled_saved');
+      }catch(error){status.classList.add('is-error');status.textContent=message(error.message);}
+      finally{
+        pending.delete(button);button.removeAttribute('aria-busy');
+        button.setAttribute('aria-disabled',String(button.dataset.unavailable==='true'&&button.dataset.enabled!=='true'));
+      }
     });
   });
   const debug=document.querySelector('[data-plugin-debug]');
+  let debugBusy=false;
   if(debug)debug.addEventListener('click',async()=>{
-    if(busy)return;
-    const output=document.getElementById('plugin-debug-output');
+    if(debugBusy)return;
+    const output=document.getElementById('plugin-debug-output'),status=document.getElementById('plugin-debug-status');
     if(debug.getAttribute('aria-expanded')==='true'){
-      output.hidden=true;debug.setAttribute('aria-expanded','false');return;
+      output.hidden=true;debug.setAttribute('aria-expanded','false');status.textContent='';return;
     }
-    busy=true;debug.disabled=true;output.hidden=false;
-    output.textContent=T('plugin.loading');debug.setAttribute('aria-expanded','true');
+    debugBusy=true;debug.setAttribute('aria-busy','true');debug.setAttribute('aria-disabled','true');output.hidden=false;
+    output.textContent='';status.textContent=T('plugin.loading');debug.setAttribute('aria-expanded','true');
     try{
       const response=await fetch('/api/plugins/debug?id='+encodeURIComponent(debug.dataset.pluginDebug));
       const data=await response.json();
       if(!response.ok||!data.ok)throw new Error(data.error||'failed');
       output.textContent=data.entries.length?data.entries.map(e=>[e.time,e.stage,e.error,e.message].join('  ')).join('\n'):T('plugin.no_errors');
-    }catch(error){output.textContent=message(error.message);}
-    finally{busy=false;debug.disabled=false;}
+      status.textContent=T('plugin.debug_loaded',{n:data.entries.length});
+    }catch(error){output.textContent=message(error.message);status.textContent=message(error.message);}
+    finally{debugBusy=false;debug.removeAttribute('aria-busy');debug.removeAttribute('aria-disabled');}
   });
-  document.addEventListener('keydown',event=>{
-    if(event.key!=='Escape')return;
-    const menu=document.querySelector('.plugin-menu[open]');
-    if(menu){menu.open=false;menu.querySelector('summary').focus();}
-  });
-  document.addEventListener('click',event=>document.querySelectorAll('.plugin-menu[open]').forEach(menu=>{
-    if(!menu.contains(event.target))menu.open=false;
-  }));
 })();

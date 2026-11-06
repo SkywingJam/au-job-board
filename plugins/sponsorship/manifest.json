@@ -1,11 +1,26 @@
 {
   "id": "sponsorship",
-  "name": {"zh": "雇主担保信息", "en": "Employer sponsorship facts"},
+  "name": {
+    "zh": "雇主担保信息",
+    "en": "Employer sponsorship facts"
+  },
   "version": "1.0.0",
-  "compatibility": {"host_api": 1},
+  "compatibility": {
+    "host_api": 1
+  },
   "entry": "plugin.py",
-  "hooks": ["after_fetch", "after_analyze_success"],
+  "hooks": [
+    "after_fetch",
+    "after_analyze_success"
+  ],
   "network": "after_fetch",
   "display": true,
-  "i18n": ["zh", "en"]
+  "i18n": [
+    "zh",
+    "en"
+  ],
+  "description": {
+    "zh": "查看雇主在公开名单中的记录与来源。",
+    "en": "Employer records and sources from public lists."
+  }
 }

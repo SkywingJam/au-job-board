@@ -236,6 +236,24 @@ class PluginTests(unittest.TestCase):
             plugin.after_fetch({'data_dir':str(data)})
             self.assertTrue(any(call.args[1] == target for call in download.call_args_list))
 
+    def test_fact_summaries_distinguish_missing_no_match_and_name_uncertainty(self):
+        from plugins.sponsorship import plugin
+        cases = [
+            ('exact', None, True, True, '认证担保名单匹配'),
+            ('fuzzy', None, True, True, '认证名单可能匹配'),
+            (None, None, True, True, '参考名单均未匹配'),
+            ('exact', 'confirmed', True, True, '违规名单确认匹配'),
+            (None, None, False, False, '暂无可用参考名单'),
+            (None, None, False, True, '认证名单未导入'),
+            (None, None, True, False, '违规名单不可用')]
+        for acc, sanction, a, b, expected in cases:
+            summary=plugin._summary('zh',acc,sanction,a,b)
+            self.assertTrue(summary.startswith(expected),summary)
+            self.assertNotIn('可担保', summary)
+            self.assertNotIn('不可担保', summary)
+        self.assertIn('Possible',plugin._summary('en','fuzzy',None,True,True))
+        self.assertIn('unavailable',plugin._summary('en',None,None,False,False))
+
 
 if __name__ == '__main__':
     unittest.main()

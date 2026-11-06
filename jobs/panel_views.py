@@ -313,7 +313,10 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
         tags += _tag_html("warn", i18n.cue_label(lang, row["eligibility_cue"]))
     tags += _correction_tag(row, label, lang)
     tags += _salary_chip(pairs, row, lang)
-    for badge in (row.get("_plugin_view") or {}).get("badges", [])[:4]:
+    plugin_badges = (row.get("_plugin_view") or {}).get("badges", [])
+    if plugin_badges:
+        # Employer warnings are visible first; they never change job ranking.
+        badge = min(plugin_badges, key=lambda b: {"bad": 0, "warn": 1, "info": 2, "good": 3}.get(b["level"], 4))
         tags += _tag_html("plugin-badge " + badge["level"], badge["text"], badge["tooltip"])
     skills = [text for kind, text in pairs if kind == "skill"]
     skills_html = ""
@@ -549,9 +552,11 @@ def _detail_html(row: dict, lang: str = "zh", keys: str = i18n.DEFAULT_KEYS) -> 
     ]
 
     for section in (row.get("_plugin_view") or {}).get("sections", [])[:6]:
-        out.append('<section class="plugin-facts"><h3>' + _e(section["title"]) + '</h3>'
-                   + '<span class="plugin-fact-status">' + _e(section["status"]) + '</span><ul>'
-                   + ''.join('<li>' + _e(item) + '</li>' for item in section["items"]) + '</ul></section>')
+        out.append('<details class="plugin-facts"><summary>'
+                   + '<span class="plugin-facts-title">' + _e(section["title"]) + '</span>'
+                   + '<span class="plugin-facts-summary"> · ' + _e(section["status"]) + '</span></summary>'
+                   + '<div class="plugin-facts-body"><p class="plugin-summary-full">' + _e(section["status"]) + '</p><ul>'
+                   + ''.join('<li>' + _e(item) + '</li>' for item in section["items"]) + '</ul></div></details>')
 
     if row.get("is_excluded"):
         rule_ids = ',<wbr>'.join(
@@ -1312,31 +1317,40 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
                          f'<p class="set-hint">{_e(T("plugin.debug_hint"))}</p>'
                          f'<button type="button" class="btn plugin-debug-btn" data-plugin-debug="{_e(selected["id"])}" '
                          f'aria-expanded="false" aria-controls="plugin-debug-output">{_e(T("plugin.debug"))}</button>'
-                         '<pre id="plugin-debug-output" class="plugin-debug-output" role="status" hidden></pre>')
+                         '<p id="plugin-debug-status" class="hint" role="status" aria-live="polite"></p>'
+                         '<pre id="plugin-debug-output" class="plugin-debug-output" tabindex="0" hidden></pre>')
         else:
             pane = (f'<h2>{_e(T("set.plugins"))}</h2>'
                     f'<p class="set-hint">{_e(T("plugin.hint"))}</p><div class="plugin-list">')
             for item in plugins:
                 name = plugin_name(item)
                 state = item["status"]
-                pane += (f'<div class="plugin-row" data-plugin-id="{_e(item["id"])}">'
-                         f'<div class="plugin-identity"><b>{_e(name)}</b>'
-                         f'<small class="plugin-state">{_e(T("plugin." + state))}</small></div>'
-                         '<details class="plugin-menu">'
-                         f'<summary aria-label="{_e(T("plugin.actions", name=name))}">'
-                         '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">'
-                         '<circle cx="4" cy="10" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="16" cy="10" r="1.5"/></svg></summary>'
-                         '<div class="plugin-menu-items">'
-                         f'<button type="button" data-plugin-toggle="{_e(item["id"])}" '
-                         f'data-enabled="{"true" if item["enabled"] else "false"}"'
-                         f'{" disabled" if state == "error" and not item["enabled"] else ""}>'
-                         f'{_e(T("plugin.disable" if item["enabled"] else "plugin.enable"))}</button></div></details>'
-                         f'<a class="plugin-open" href="/settings?section=plugins&amp;plugin={_e(item["id"])}" '
+                plugin_id = item["id"]
+                description = item.get("description") or ""
+                if isinstance(description, dict):
+                    description = description.get(lang) or description.get("en") or ""
+                name_id, desc_id, msg_id = ("pl-name-" + plugin_id, "pl-desc-" + plugin_id, "pl-msg-" + plugin_id)
+                errors = (T("plugin.error_count", n=item["error_count"]) if item["error_count"] else "")
+                pane += (f'<div class="plugin-row" data-plugin-id="{_e(plugin_id)}">'
+                         '<div class="plugin-row-main"><div class="plugin-identity">'
+                         f'<b id="{_e(name_id)}">{_e(name)}</b>'
+                         f'<small id="{_e(desc_id)}">{_e(description)}</small>'
+                         f'<small class="plugin-state"{" hidden" if state != "error" else ""}>{_e(T("plugin.unavailable_hint")) if state == "error" else ""}</small>'
+                         f'<small class="plugin-error-count"{" hidden" if not errors else ""}>{_e(errors)}</small></div>'
+                         f'<button type="button" class="plugin-toggle" role="switch" '
+                         f'aria-checked="{"true" if item["enabled"] else "false"}" '
+                         f'aria-labelledby="{_e(name_id)}" aria-describedby="{_e(desc_id)} {_e(msg_id)}" '
+                         f'aria-disabled="{"true" if state == "error" and not item["enabled"] else "false"}" '
+                         f'data-unavailable="{"true" if state == "error" else "false"}" '
+                         f'data-plugin-toggle="{_e(plugin_id)}" data-enabled="{"true" if item["enabled"] else "false"}">'
+                         '<span class="plugin-toggle-track" aria-hidden="true"><span></span></span></button>'
+                         f'<a class="plugin-open" href="/settings?section=plugins&amp;plugin={_e(plugin_id)}" '
                          f'aria-label="{_e(T("plugin.settings", name=name))}">'
-                         '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></a></div>')
+                         '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></a></div>'
+                         f'<p id="{_e(msg_id)}" class="plugin-row-message" role="status" aria-live="polite"></p></div>')
             if not plugins:
                 pane += f'<p class="set-hint">{_e(T("plugin.empty"))}</p>'
-            pane += '</div><p id="plugin-status" class="set-hint" role="status" aria-live="polite"></p>'
+            pane += '</div>'
         extra = {}
     elif section == "skills":
         tree = skill_tree(conn, config.get("skills_path"))

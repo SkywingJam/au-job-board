@@ -63,6 +63,10 @@ def _manifest(path, plugin_id):
     if not (isinstance(name, str) and 0 < len(name) <= 100 or
             isinstance(name, dict) and name and all(k in ('zh', 'en') and isinstance(v, str) and 0 < len(v) <= 100 for k, v in name.items())):
         raise ValueError('invalid name')
+    description = value.get('description', '')
+    if not (isinstance(description, str) and len(description) <= 200 or
+            isinstance(description, dict) and all(k in ('zh', 'en') and isinstance(v, str) and len(v) <= 200 for k, v in description.items())):
+        raise ValueError('invalid description')
     if value.get('compatibility') != {'host_api': 1}:
         raise ValueError('incompatible host API')
     if value.get('entry') != 'plugin.py':
@@ -126,11 +130,11 @@ def list_plugins(config: dict) -> list[dict]:
         if not _ID.fullmatch(plugin_id) or not path.is_dir() or path.is_symlink():
             continue
         item = {'id': plugin_id, 'name': plugin_id, 'version': '', 'enabled': False,
-                'status': 'disabled', 'error_count': len(read_debug(config, plugin_id)['entries'])}
+                'description': '', 'status': 'disabled', 'error_count': len(read_debug(config, plugin_id)['entries'])}
         try:
             item['enabled'] = _enabled(config, plugin_id)
             manifest = _manifest(path, plugin_id)
-            item.update(name=manifest['name'], version=manifest['version'])
+            item.update(name=manifest['name'], version=manifest['version'], description=manifest.get('description', ''))
             item['status'] = 'enabled' if item['enabled'] else 'disabled'
         except RunTimeout:
             raise
