@@ -139,7 +139,8 @@ def grant(config, manifest, expected, channel):
     try:
         atomic_json(path, {'fingerprint': expected, 'plugin_id': manifest['id'],
                     'actor': 'local_user', 'channel': channel, 'time': datetime.now(timezone.utc).isoformat()})
-        with path.open('rb') as stream:
+        # Windows fsync is FlushFileBuffers, which needs a writable handle.
+        with path.open('r+b') as stream:
             os.fsync(stream.fileno())
         _sync_directory(path.parent)
     except OSError:
@@ -265,8 +266,11 @@ def presentation_many(config: dict, uids: list[str], lang: str = 'zh') -> dict:
                 if (not isinstance(value, dict) or value.get('analysis_id') != generation
                         or not isinstance(value.get('results'), dict)):
                     continue
+                shared = value.get('views') if isinstance(value.get('views'), dict) else {}
                 for uid in uids:
                     entry = value['results'].get(uid, {})
+                    if isinstance(entry, str):
+                        entry = shared.get(entry, {})
                     view = entry.get(lang if lang in ('zh', 'en') else 'zh') if isinstance(entry, dict) else None
                     if _valid_view(view):
                         result[uid]['badges'].extend(view['badges'][:4])
@@ -412,10 +416,20 @@ def _dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: in
             if hook == 'after_fetch' and isinstance(value, dict) and value.get('errors'):
                 _log(config, plugin_id, hook, 'RefreshError')
             if hook == 'after_analyze_success':
-                if not isinstance(value, dict) or set(value) != {'analysis_id', 'results'} or value['analysis_id'] != analysis_id or not isinstance(value['results'], dict):
+                if (not isinstance(value, dict) or set(value) - {'views'} != {'analysis_id', 'results'}
+                        or value['analysis_id'] != analysis_id or not isinstance(value['results'], dict)):
                     raise ValueError('invalid result')
+                # Optional shared views: a result may name one instead of repeating
+                # identical bilingual text for every job of the same employer.
+                shared = value.get('views', {})
+                if not isinstance(shared, dict) or len(shared) > len(jobs or []) or not all(
+                        isinstance(k, str) and 0 < len(k) <= 64 for k in shared):
+                    raise ValueError('invalid presentation')
+                def bilingual(v):
+                    return isinstance(v, dict) and set(v) == {'zh', 'en'} and all(_valid_view(x) for x in v.values())
                 allowed = {j['uid'] for j in jobs or []}
-                if set(value['results']) != allowed or not all(isinstance(v, dict) and set(v) == {'zh', 'en'} and all(_valid_view(x) for x in v.values()) for v in value['results'].values()):
+                if set(value['results']) != allowed or not all(bilingual(v) for v in shared.values()) or not all(
+                        (isinstance(v, str) and v in shared) or bilingual(v) for v in value['results'].values()):
                     raise ValueError('invalid presentation')
                 if len(json.dumps(value, ensure_ascii=False).encode('utf-8')) > MAX_RESULT:
                     raise ValueError('serialized result too large')

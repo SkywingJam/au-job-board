@@ -106,6 +106,46 @@ class PluginTests(unittest.TestCase):
             self.assertIn('中文', target.read_text(encoding='utf-8'))
             self.assertEqual(host.presentation(self.config, 'synthetic:1')['sections'][0]['items'], ['中文'*100])
 
+    def test_shared_views_are_validated_and_resolved(self):
+        self.jobs = [{'uid': 'synthetic:1', 'company': 'A'}, {'uid': 'synthetic:2', 'company': 'B'},
+                     {'uid': 'synthetic:3', 'company': 'C'}]
+        result_file = host._root(self.config) / 'sample' / 'results.json'
+        # Shared key for two jobs, an inline view for the third.
+        self.code("def after_analyze_success(r):\n s={'badges':[{'text':'shared','level':'info','tooltip':'t'}],'sections':[]}\n"
+                  " own={'badges':[{'text':'own','level':'info','tooltip':'t'}],'sections':[]}\n"
+                  " return {'analysis_id':r['analysis_id'],'views':{'v0':{'zh':s,'en':s}},"
+                  "'results':{'synthetic:1':'v0','synthetic:2':'v0','synthetic:3':{'zh':own,'en':own}}}\n")
+        self.dispatch()
+        views = host.presentation_many(self.config, ['synthetic:1', 'synthetic:2', 'synthetic:3'], 'en')
+        self.assertEqual([views[u]['badges'][0]['text'] for u in ('synthetic:1', 'synthetic:2', 'synthetic:3')],
+                         ['shared', 'shared', 'own'])
+        good = result_file.read_bytes()
+        bad_bodies = [
+            # Unknown key, invalid shared view, non-string key, extra top-level field.
+            "{'analysis_id':r['analysis_id'],'views':{},'results':{j['uid']:'missing' for j in r['jobs']}}",
+            "{'analysis_id':r['analysis_id'],'views':{'v0':{'zh':{},'en':{}}},'results':{j['uid']:'v0' for j in r['jobs']}}",
+            "{'analysis_id':r['analysis_id'],'views':[],'results':{}}",
+            "{'analysis_id':r['analysis_id'],'views':{},'results':{},'extra':1}"]
+        for body in bad_bodies:
+            self.code('def after_analyze_success(r):\n return ' + body + '\n')
+            self.dispatch()
+        self.assertEqual(len(host.read_debug(self.config, 'sample')['entries']), len(bad_bodies))
+        self.assertEqual(result_file.read_bytes(), good)
+
+    def test_sponsorship_results_share_repeated_employer_views(self):
+        self.use_sponsorship()
+        self.config['plugins'] = {'sponsorship': {'enabled': True}}
+        # Thousands of jobs from a few employers stay far below the result budget.
+        jobs = [{'uid': f'synthetic:{i}', 'company': f'Imaginary Employer {i % 40} Pty Ltd'} for i in range(8000)]
+        host.dispatch(self.config, 'after_analyze_success', jobs, 1)
+        self.assertEqual(host.read_debug(self.config, 'sponsorship')['entries'], [])
+        stored = json.loads((host._root(self.config) / 'sponsorship' / 'results.json').read_text(encoding='utf-8'))
+        self.assertLessEqual(len(stored['views']), 40)
+        self.assertLess(len(json.dumps(stored).encode()), host.MAX_RESULT // 8)
+        self.assertEqual(host.presentation(self.config, 'synthetic:7999', 'en'),
+                         host.presentation(self.config, 'synthetic:39', 'en'))
+        self.assertTrue(host.presentation(self.config, 'synthetic:7999', 'en')['sections'])
+
     def test_manifest_config_and_storage_failure(self):
         self.manifest['compatibility'] = {'host_api': 2}
         self.write_manifest()

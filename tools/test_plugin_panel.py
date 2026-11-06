@@ -20,6 +20,28 @@ sys.path.insert(0, str(ROOT))
 from jobs import db, panel, panel_views, plugin_host, config_edit, run_state, i18n, cli, sources, labels
 
 
+class PanelStartupOrder(unittest.TestCase):
+    def test_embedded_mcp_sees_the_panel_config_path(self):
+        """MCP plugin review must read the live config file, not a startup copy."""
+        from jobs import mcp_http
+        seen = {}
+
+        class Stop(Exception):
+            pass
+
+        def fake_start(config, httpd):
+            seen['path'] = getattr(getattr(httpd, 'config_editor', None), 'path', None)
+            raise Stop
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'config.yaml'
+            target.write_text('panel: {host: 127.0.0.1, port: 0}\n')
+            config = {'panel': {'host': '127.0.0.1', 'port': 0}}
+            with patch.object(mcp_http, 'start', fake_start), self.assertRaises(Stop):
+                panel.serve(config, config_path=str(target))
+        self.assertEqual(seen['path'], target.resolve())
+
+
 class PluginPanelTests(unittest.TestCase):
     def test_cli_reports_pending_consent_for_legacy_and_changed_scope_only(self):
         def analyze():
@@ -218,6 +240,26 @@ class PluginPanelTests(unittest.TestCase):
             self.assertEqual(self.request('/settings?section=plugins')[0], 200)
             self.assertEqual(self.request('/api/plugins/debug?id=sponsorship')[0], 503)
             self.assertEqual(self.request('/api/job?uid=synthetic:one')[0], 200)
+
+    def test_cli_revoke_works_after_manifest_becomes_invalid(self):
+        config = yaml.safe_load(self.path.read_text())
+        config['plugins']['sponsorship']['enabled'] = True
+        self.path.write_text(yaml.safe_dump(config))
+        manifest_path = self.plugin_root/'sponsorship'/'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        plugin_host.grant(config, manifest, plugin_host.fingerprint(manifest), 'cli')
+        grant_file = plugin_host._grant_path(config, 'sponsorship')
+        self.assertTrue(grant_file.exists())
+        manifest_path.write_text('{broken')
+
+        def run(action):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                return cli.main(['--config', str(self.path), 'plugin', action, 'sponsorship'])
+        self.assertEqual(run('review'), 1)
+        self.assertEqual(run('grant'), 1)
+        self.assertEqual(run('revoke'), 0)
+        self.assertFalse(grant_file.exists())
+        self.assertFalse(yaml.safe_load(self.path.read_text())['plugins']['sponsorship']['enabled'])
 
     def test_cli_hooks_with_plugin_failure_preserve_core_and_manual_results(self):
         # Real fetch/analyze entrypoints, mock recruitment source, no real network.

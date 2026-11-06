@@ -990,7 +990,9 @@ def cmd_plugin(args):
     try:
         result = editor.read_plugins()
         item = next((p for p in result['plugins'] if p['id'] == args.plugin_id), None)
-        if not item or 'consent' not in item:
+        # Revoke must still work when a manifest became invalid: it only
+        # disables the plugin and deletes the stored grant.
+        if not item or ('consent' not in item and args.plugin_action != 'revoke'):
             print('Plugin unavailable or manifest invalid.', file=sys.stderr)
             return 1
         print(json.dumps(item, ensure_ascii=False, indent=2))

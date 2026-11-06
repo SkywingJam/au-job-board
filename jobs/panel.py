@@ -522,9 +522,10 @@ def serve(config: dict, config_path=None, rules_path=None, skills_path=None) -> 
     httpd = ThreadingHTTPServer((host, port), handler)
     mcp = None
     try:
+        # MCP reads plugin state through the editor's path; create it first.
+        httpd.config_editor = ConfigEditor(config, config_path, rules_path)
         from .mcp_http import start
         mcp = start(config, httpd)
-        httpd.config_editor = ConfigEditor(config, config_path, rules_path)
         httpd.update_manager = UpdateManager(config, config_path, rules_path=rules_path,
                                             skills_path=skills_path)
     except BaseException:

@@ -136,7 +136,7 @@ def after_analyze_success(request):
             if ato_dir == baseline:
                 ato_sources[lang] += '（随包基线）' if zh else ' (bundled baseline)'
         source_lines[lang] = sources
-    results = {}
+    results, shared = {}, {}
     for job in request['jobs']:
         company = job.get('company') or ''
         views = {lang: {'badges': [], 'sections': []} for lang in ('zh', 'en')}
@@ -201,5 +201,10 @@ def after_analyze_success(request):
                 items.append(('来源：' if zh else 'Sources: ') + (' · '.join(sources) if sources else ('暂无可用名单。' if zh else 'No reference lists available.')))
                 views[lang]['sections'].append({'title': '雇主信息' if zh else 'Employer facts',
                     'status': _summary(lang, acc, sanction, bool(accredited_files), abf_available), 'items': items})
-        results[job['uid']] = views
-    return {'analysis_id': request['analysis_id'], 'results': results}
+        # Employers repeat across jobs; store each distinct view once.
+        key = json.dumps(views, ensure_ascii=False, sort_keys=True)
+        if key not in shared:
+            shared[key] = (f'v{len(shared)}', views)
+        results[job['uid']] = shared[key][0]
+    return {'analysis_id': request['analysis_id'], 'results': results,
+            'views': {name: views for name, views in shared.values()}}
