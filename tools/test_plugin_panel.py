@@ -61,7 +61,8 @@ class PluginPanelTests(unittest.TestCase):
             worker.assert_not_called()
         self.assertIn('sponsorship', notice)
         self.assertIn('consent required', notice)
-        self.assertIn(str(self.path), notice)
+        # Windows temp paths may be 8.3 short names; the notice shows the resolved path.
+        self.assertIn(str(self.path.resolve()), notice)
         self.assertIn('plugin review sponsorship', notice)
         self.assertIn('Settings > Plugins', notice)
         manifest_path = self.plugin_root/'sponsorship'/'manifest.json'

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Synthetic offline consent, worker and download boundary checks."""
+from contextlib import closing
 import json
 import io
 from contextlib import redirect_stdout, redirect_stderr
@@ -38,7 +39,8 @@ class ConsentTests(unittest.TestCase):
         self.config_path = self.base / 'config.yaml'
         self.config_path.write_text('plugins:\n  sample:\n    enabled: true\n')
         self.config = {'db_path':str(self.base/'test.db'), 'plugins':{'sample':{'enabled':True}}}
-        with sqlite3.connect(self.config['db_path']) as conn:
+        # Close explicitly: Windows cannot delete a temp DB with an open handle.
+        with closing(sqlite3.connect(self.config['db_path'])) as conn, conn:
             conn.execute('create table runs (run_id integer, kind text)')
             conn.execute("insert into runs values (1, 'analyze')")
         self.patcher = patch.object(host, 'PLUGIN_ROOT', self.plugins)

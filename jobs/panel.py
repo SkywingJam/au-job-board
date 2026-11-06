@@ -312,6 +312,34 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
         self._json({key: summary[name] for key, name in STAT_KEYS.items()}, 200, started)
 
+    def _drain(self, length: int, limit: int = 256 * 1024, seconds: float = 2.0) -> None:
+        """Read a bounded rejected body so the 400 is not lost to a TCP reset.
+
+        Closing a socket with unread data makes some systems (notably macOS)
+        reset the connection while the client is still sending."""
+        remaining = min(max(length, 0), limit)
+        if not remaining:
+            return
+        deadline = time.monotonic() + seconds
+        previous = self.connection.gettimeout()
+        try:
+            while remaining > 0:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(remaining, 8192))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
+        finally:
+            try:
+                self.connection.settimeout(previous)
+            except OSError:
+                pass
+
     def _local_json(self, started: float, max_bytes=4096, strict: bool = False):
         """Validate local-origin JSON writes before reaching any mutable state.
 
@@ -328,6 +356,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.headers.get_content_type() != "application/json" or not 0 < length <= max_bytes:
             self.close_connection = True
+            self._drain(length)
             self._json({"error": "invalid_request"}, 400, started)
             return
         try:
