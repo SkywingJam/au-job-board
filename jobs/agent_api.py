@@ -574,6 +574,10 @@ class Handler(BaseHTTPRequestHandler):
         pass  # Never log headers, query values, job content or credentials.
 
     def _json(self, value, status=200):
+        if status >= 400:
+            if not hasattr(self, '_unread'):
+                self._unread = self._declared_length()
+            self._drain()
         body = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
         self.close_connection = True
         try:
@@ -769,6 +773,8 @@ class Handler(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
         except OSError:
             pass
+        finally:
+            self._unread = 0
 
     do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = do_TRACE = do_CONNECT = _not_allowed
 
