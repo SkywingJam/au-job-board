@@ -4,6 +4,7 @@ Handwritten synthetic jobs, a temporary SQLite file and a loopback listener
 only. The MCP tool is covered by the opt-in tools/test_mcp*.py entries.
 """
 from contextlib import closing
+from io import BytesIO
 import http.client
 import json
 import os
@@ -405,6 +406,26 @@ class BatchHTTPBoundary(BatchBase):
     def valid(self):
         return {'items': [{'uid': 'synthetic:c', 'action': 'saved'}]}
 
+    def test_rejected_methods_consume_a_bounded_body_before_responding(self):
+        # Model the Windows reset boundary deterministically: inspect bytes
+        # still unread at the instant the handler sends its 405 response.
+        for body in (json.dumps(self.valid()).encode(), b'x' * (api.DRAIN_LIMIT + 1)):
+            with self.subTest(size=len(body)):
+                handler = object.__new__(api.Handler)
+                handler.headers = {'Content-Length': str(len(body))}
+                handler.rfile = BytesIO(body)
+                handler._authorized = lambda: True
+                replies = []
+
+                def respond(value, status=200):
+                    self.assertEqual(handler.rfile.tell(), min(len(body), api.DRAIN_LIMIT),
+                                     'rejected bodies must be drained before replying, within the limit')
+                    replies.append((status, value))
+
+                handler._json = respond
+                handler._not_allowed()
+                self.assertEqual(replies, [(405, {'error': 'method_not_allowed'})])
+
     def test_authentication_host_and_origin(self):
         before = self.dump()
         self.no_write_connection()
@@ -781,6 +802,85 @@ class BatchClient(unittest.TestCase):
             client.post(PATH, {'items': [{'uid': 'synthetic:nope', 'action': 'applied'}]})
         self.assertIn('HTTP 400: unknown_uid at item 0', str(caught.exception))
         self.assertEqual(live.effective('b')['action'], 'applied')
+
+
+class CommittedResponseFailures(BatchBase):
+    """Real synthetic writes commit before their HTTP response is damaged."""
+
+    def setUp(self):
+        super().setUp()
+        parent = self.server.RequestHandlerClass
+
+        class DamagedResponse(parent):
+            def _json(self, value, status=200):
+                if status != 200:
+                    return super()._json(value, status)
+                self.server.transport_hits += 1
+                self.close_connection = True
+                mode = self.server.response_mode
+                if mode == 'bad-status':
+                    self.wfile.write(b'synthetic-private-status-text\r\n\r\n')
+                elif mode == 'broken-chunk':
+                    self.wfile.write(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n'
+                                     b'Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n10\r\n{}')
+                else:
+                    bodies = {'wrong-type': ('text/html', b'<html>synthetic-private-response</html>'),
+                              'non-object': ('application/json', b'["synthetic-private-response"]'),
+                              'invalid-json': ('application/json', b'{synthetic-private-response')}
+                    ctype, body = bodies[mode]
+                    self.send_response(200)
+                    self.send_header('Content-Type', ctype)
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                return True
+
+        self.server.RequestHandlerClass = DamagedResponse
+        self.server.transport_hits = 0
+        self.client = agent_client.APIClient('http://127.0.0.1:%d' % self.server.server_port, TOKEN)
+
+    def failure(self, mode, *, write=False):
+        self.server.response_mode = mode
+        before = self.server.transport_hits
+        caught = None
+        try:
+            if write:
+                self.client.post(PATH, {'items': [{'uid': 'synthetic:a', 'action': 'saved'}]})
+            else:
+                self.client.get('/api/v1/jobs/synthetic%3Aa', {})
+        except Exception as exc:
+            caught = exc
+        if write:
+            with closing(api.read_connection(self.path)) as conn:
+                self.assertEqual(labels.get_labels(conn)['synthetic:a']['action'], 'saved',
+                                 'the response failure happened after the write committed')
+        self.assertIsInstance(caught, agent_client.ClientError)
+        message = str(caught)
+        self.assertEqual(self.server.transport_hits - before, 1, 'failed calls are never retried automatically')
+        for private in (TOKEN, 'synthetic-private', '127.0.0.1', 'synthetic:a'):
+            self.assertNotIn(private, message)
+        return message
+
+    def test_protocol_read_errors_are_sanitized(self):
+        for mode in ('bad-status', 'broken-chunk'):
+            message = self.failure(mode)
+            self.assertIn('HTTP response', message)
+
+    def test_protocol_write_errors_keep_unknown_result_after_commit(self):
+        for mode in ('bad-status', 'broken-chunk'):
+            message = self.failure(mode, write=True)
+            self.assertIn('may or may not have been applied', message)
+            self.assertIn('read the current state before resending', message)
+
+    def test_invalid_write_responses_keep_unknown_result_after_commit(self):
+        for mode in ('wrong-type', 'non-object', 'invalid-json'):
+            message = self.failure(mode, write=True)
+            self.assertIn('may or may not have been applied', message)
+            self.assertIn('read the current state before resending', message)
+
+    def test_invalid_read_responses_are_classified_without_echoing_text(self):
+        for mode in ('wrong-type', 'non-object'):
+            self.assertIn('invalid response', self.failure(mode))
 
 
 if __name__ == '__main__':

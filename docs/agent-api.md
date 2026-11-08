@@ -172,6 +172,26 @@ are intentional; a query is never silently truncated. Unknown/expired
 snapshots return 410, malformed/restarted cursors 400, a too-large snapshot 413,
 and cache exhaustion 429. Existing unexpired snapshots are not evicted to make
 room for another query. Finish within the TTL or restart the complete query.
+In-progress builds reserve slots too; a full cache returns `429
+snapshot_capacity` without waiting for other builds. Prefer one list query and
+reuse its snapshot for detail reads and cursor pages. Starting nine independent
+queries still requires more than the default eight slots.
+
+Database loading and serialization run outside the shared cache lock, so an
+unrelated build does not block existing details or pagination. Source records,
+human state and history remain frozen in the original read transaction.
+Eligibility excerpts are computed from those frozen descriptions only for the
+requested page or detail, instead of scanning every description for every list.
+
+New list requests check a 25-second build deadline before publication, while
+freezing source records and while preparing the first page. Overdue builds return
+`503 snapshot_timeout` and release their reservation; blocking database calls
+are not forcibly interrupted. Failed initial-response sends release only the
+new snapshot, preserving existing snapshots. The reference HTTP reader opts in
+to `X-Jobs-Cancel-On-Disconnect: 1`: it never half-closes a live request, so a
+closed read connection cancels publication with `408 request_cancelled`.
+Generic HTTP clients may still half-close sending while reading the response.
+
 Both standalone HTTP and app-owned MCP read `agent_api.snapshots` from the
 application configuration. Positive integer settings are `ttl_seconds`,
 `max_snapshots`, `max_rows`, `max_snapshot_mib` and `max_total_mib`. The single

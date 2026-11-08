@@ -9,6 +9,7 @@ from .file_security import validate_private_file, set_private
 
 import argparse
 import datetime as dt
+from http.client import HTTPException
 import json
 import os
 from pathlib import Path
@@ -28,9 +29,20 @@ WRITE_ERROR_CODES = frozenset({
     'unsupported_media_type', 'label_not_effective', 'data_unavailable',
     'schema_upgrade_required',
 })
+READ_ERROR_CODES = WRITE_ERROR_CODES | frozenset({
+    'snapshot_capacity', 'snapshot_too_large', 'snapshot_expired_or_unknown',
+    'snapshot_timeout', 'request_cancelled', 'source_not_in_snapshot',
+    'batch_not_found', 'batch_membership_unavailable', 'batch_not_finalized',
+    'invalid_cursor', 'cursor_query_mismatch', 'invalid_snapshot', 'invalid_day',
+    'invalid_filter', 'invalid_scope', 'invalid_view', 'job_not_found',
+})
 
 
 class ClientError(Exception):
+    pass
+
+
+class _InvalidResponse(ValueError):
     pass
 
 
@@ -70,11 +82,35 @@ class APIClient:
 
     def get(self, path, params):
         request = Request(self.base + path + '?' + urlencode(params, doseq=True),
-                          headers={'Authorization': 'Bearer '+self.token})
+                          headers={'Authorization': 'Bearer '+self.token,
+                                   'X-Jobs-Cancel-On-Disconnect': '1'})
         return self._send(
             request,
-            lambda exc: 'API rejected request (HTTP '+str(exc.code)+'); restart the query if its snapshot expired',
-            'API unavailable or invalid JSON; export not completed')
+            self._read_rejected, self._read_failure)
+
+    @classmethod
+    def _read_rejected(cls, exc):
+        code = cls._code(exc, READ_ERROR_CODES)
+        if exc.code == 429:
+            hint = '; reuse an existing snapshot or wait for capacity before starting another query'
+        elif exc.code == 410:
+            hint = '; restart the complete query because its snapshot expired'
+        else:
+            hint = '; export not completed'
+        return 'API rejected request (HTTP '+str(exc.code)+code+')'+hint
+
+    @staticmethod
+    def _read_failure(exc):
+        reason = exc.reason if isinstance(exc, URLError) else exc
+        if isinstance(reason, TimeoutError):
+            return 'API request timed out after 30 seconds; export not completed'
+        if isinstance(exc, _InvalidResponse):
+            return 'API returned an invalid response; export not completed'
+        if isinstance(exc, HTTPException):
+            return 'API returned an incomplete or invalid HTTP response; export not completed'
+        if isinstance(exc, ValueError):
+            return 'API returned invalid JSON; export not completed'
+        return 'API connection failed; export not completed'
 
     def post(self, path, body):
         """Send one JSON object; the server applies it atomically or not at all."""
@@ -90,19 +126,19 @@ class APIClient:
         return self._send(
             request,
             lambda exc: 'API rejected write (HTTP '+str(exc.code)+self._code(exc)+'); nothing is reported as applied',
-            'API unavailable or invalid response; the write may or may not have been applied, '
+            lambda _exc: 'API unavailable or invalid response; the write may or may not have been applied, '
             'so read the current state before resending (not retried automatically)')
 
     @staticmethod
-    def _code(exc):
+    def _code(exc, allowed=WRITE_ERROR_CODES):
         # Fixed server vocabulary and an item position only; anything else
         # (including a foreign server's text) is dropped.
         try:
             body = json.loads(exc.read(4096))
             value, index = body.get('error'), body.get('index')
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError, AttributeError, HTTPException):
             return ''
-        if not isinstance(value, str) or value not in WRITE_ERROR_CODES:
+        if not isinstance(value, str) or value not in allowed:
             return ''
         at = ' at item '+str(index) if type(index) is int and 0 <= index < 1000 else ''
         return ': '+value+at
@@ -111,19 +147,19 @@ class APIClient:
         try:
             with self.opener.open(request, timeout=30) as response:
                 if response.status != 200 or response.headers.get_content_type() != 'application/json':
-                    raise ClientError('Unexpected API response')
+                    raise _InvalidResponse()
                 raw = response.read(MAX_RESPONSE+1)
                 if len(raw) > MAX_RESPONSE:
-                    raise ClientError('API response exceeds client limit')
+                    raise _InvalidResponse()
                 value = json.loads(raw)
                 if not isinstance(value, dict):
-                    raise ClientError('Invalid API response')
+                    raise _InvalidResponse()
                 return value
         except HTTPError as exc:
             # No body/header/URL echo: error messages must not expose private data.
             raise ClientError(rejected(exc)) from None
-        except (URLError, OSError, ValueError):
-            raise ClientError(unavailable) from None
+        except (URLError, OSError, ValueError, HTTPException) as exc:
+            raise ClientError(unavailable(exc)) from None
 
 
 def read_jobs(base_url, token, query, *, max_records=10000):

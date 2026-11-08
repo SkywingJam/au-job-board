@@ -11,8 +11,8 @@ def enabled(filters):
     return bool(filters.get("geo"))
 
 
-def decorate(conn, row, legacy_labels, index, *, target=None):
-    row = report.decorate([dict(row)], legacy_labels, index)[0]
+def decorate(conn, row, legacy_labels, index, *, target=None, snippets=True):
+    row = report.decorate([dict(row)], legacy_labels, index, snippets=snippets)[0]
     row["_geo_match"] = (locations.match_tier(
         locations.parse_listing(row.get("location")), target)
         if target is not None else None)
@@ -64,7 +64,7 @@ def _scope_groups(conn, view, pool, filters, candidate_uids):
 
 
 def query(conn, config, view, offset, limit, filters, since, skills_cfg, *,
-          candidate_uids=None):
+          candidate_uids=None, snippets=True):
     from . import panel_data
 
     kept, excluded, labels, index = report.load(conn, config, deduplicate=False)
@@ -123,7 +123,7 @@ def query(conn, config, view, offset, limit, filters, since, skills_cfg, *,
 
     total = len(ordered)
     page = [
-        decorate(conn, row, labels, index, target=target)
+        decorate(conn, row, labels, index, target=target, snippets=snippets)
         for row in ordered[offset:offset + limit]
     ]
     return page, total

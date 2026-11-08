@@ -49,6 +49,7 @@ PYTHON_TESTS = (
     ("tools/test_file_security.py", "private save permissions and shared token ACL validation", None),
     ("tools/test_platform_install.py", "timezone data, LF resources and Unicode source paths", None),
     ("tools/test_agent_api.py", "authenticated read-only snapshots and external agent client", None),
+    ("tools/test_agent_snapshot_lifecycle.py", "snapshot concurrency, cancellation and bounded lazy evidence", None),
     ("tools/test_job_history.py", "local posting history in copy text and API detail", None),
     ("tools/test_batch_labels.py",
      "opt-in batch label write API: atomic group-aware progress/priority, gates and client", None),
