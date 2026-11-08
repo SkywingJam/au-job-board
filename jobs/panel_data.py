@@ -289,14 +289,14 @@ def _resolve_since(conn, view: str, filters: dict) -> str | None:
 
 
 def _query(conn, config, view, offset, limit, filters=None, since=None,
-           skills_cfg=None, *, candidate_uids=None):
+           skills_cfg=None, *, candidate_uids=None, snippets=True):
     """返回 (页内行[已装饰], 总数)。只装饰当前页。"""
     filters = filters or {}
     from . import location_query
     if location_query.enabled(filters):
         return location_query.query(conn, config, view, offset, limit, filters,
                                     since or filters.get(SINCE_KEY) or labels_mod.freeze_marker(conn), skills_cfg,
-                                    candidate_uids=candidate_uids)
+                                    candidate_uids=candidate_uids, snippets=snippets)
     kept, excluded, labels, index = report_mod.load(conn, config, deduplicate=False)
     frozen_labels = (labels_mod.action_states_at(
         conn, since or filters.get(SINCE_KEY) or labels_mod.freeze_marker(conn))
@@ -361,7 +361,7 @@ def _query(conn, config, view, offset, limit, filters=None, since=None,
         rows = sorted(rows, key=lambda r: r["_ineligible_last"])
 
     total = len(rows)
-    page = report_mod.decorate(rows[offset:offset + limit], labels, index)
+    page = report_mod.decorate(rows[offset:offset + limit], labels, index, snippets=snippets)
     return page, total
 
 

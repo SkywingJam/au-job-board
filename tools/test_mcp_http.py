@@ -12,6 +12,7 @@ import sqlite3
 import ssl
 import subprocess
 import sys
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -21,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 import httpx2
-from jobs import agent_api, mcp_http, panel
+from jobs import __version__, agent_api, mcp_http, panel
 from jobs.http_server import ThreadingHTTPServer
 import test_mcp as fixtures
 
@@ -113,6 +114,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         async with httpx2.AsyncClient(headers={'Authorization': 'Bearer '+TOKEN}) as http:
             async with Client(streamable_http_client(service.url, http_client=http), mode='legacy') as client:
                 self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
+                self.assertEqual(client.server_info.version, __version__)
                 self.assertEqual({t.name for t in (await client.list_tools()).tools},
                     {'list_jobs','get_job','list_batches','get_batch','review_plugin_permissions'})
                 first = await client.call_tool('list_jobs', {'query': {'limit': 1}})
@@ -144,6 +146,37 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         self.assertIn('www-authenticate', {k.lower():v for k,v in headers.items()})
         self.assertNotIn('access-control-allow-origin', {k.lower():v for k,v in headers.items()})
         self.assertEqual(self.request(body=b'x'*(65536+1))[0], 413)
+
+    async def test_slow_snapshot_does_not_block_mcp_detail_or_capacity_error(self):
+        self.config['agent_api'] = {'snapshots': {'max_snapshots': 2}}
+        service = self.start()
+        entered, release = threading.Event(), threading.Event()
+        original = service.api.api._materialize
+
+        def slow(query, **kwargs):
+            entered.set()
+            if not release.wait(10):
+                raise RuntimeError('synthetic loader was not released')
+            return original(query, **kwargs)
+
+        async with await self.connect(service) as client:
+            first = await client.call_tool('list_jobs', {'query': {'limit': 1}})
+            page = first.structured_content
+            with patch.object(service.api.api, '_materialize', slow):
+                creating = asyncio.create_task(client.call_tool('list_jobs', {'query': {'q': 'Synthetic'}}))
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait, 3))
+                    detail, rejected = await asyncio.wait_for(asyncio.gather(
+                        client.call_tool('get_job', {'uid': page['items'][0]['uid'], 'snapshot_id': page['snapshot_id']}),
+                        client.call_tool('list_jobs', {'query': {'limit': 1}})), timeout=3)
+                    self.assertFalse(detail.is_error, detail.content)
+                    self.assertTrue(rejected.is_error)
+                    message = ' '.join(block.text for block in rejected.content if hasattr(block, 'text'))
+                    self.assertIn('snapshot_capacity', message)
+                    self.assertIn('reuse an existing snapshot', message)
+                finally:
+                    release.set()
+                    self.assertFalse((await asyncio.wait_for(creating, timeout=5)).is_error)
 
     async def connect(self, service):
         http = httpx2.AsyncClient(headers={'Authorization': 'Bearer '+TOKEN})

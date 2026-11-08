@@ -2,7 +2,7 @@
 import os
 import sys
 
-__version__ = "0.1.0"
+__version__ = "1.3.2.1"
 
 
 def _disable_platform_wmi(nt=os.name == 'nt', version=sys.version_info):

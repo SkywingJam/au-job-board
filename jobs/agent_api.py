@@ -21,6 +21,8 @@ import hmac
 import json
 import os
 import secrets
+import select
+import socket
 import sqlite3
 import threading
 import time
@@ -41,6 +43,7 @@ LABEL_BATCH_PATH = PREFIX + '/labels/batch'
 MAX_LABEL_BODY = 32 * 1024  # fits the 64 KiB MCP request envelope
 BODY_DEADLINE = 15  # seconds for a whole request body
 DRAIN_LIMIT = 256 * 1024  # unread bytes consumed before an early rejection
+SNAPSHOT_DEADLINE = 25  # leave time to return an error before the reader's 30 s timeout
 
 
 class APIError(Exception):
@@ -265,6 +268,7 @@ class Snapshot:
     order: tuple
     records: dict
     size: int
+    deferred_snippets: bool = False
 
 
 class SnapshotStore:
@@ -276,28 +280,52 @@ class SnapshotStore:
         self.max_snapshot_bytes, self.max_rows = max_snapshot_bytes, max_rows
         self.clock, self.lock = clock, threading.RLock()
         self.items, self.secret = {}, secrets.token_bytes(32)
+        self.pending = 0
 
     def _expire(self):
         for key, item in list(self.items.items()):
             if self.clock() - item.created >= self.ttl:
                 del self.items[key]
 
-    def create(self, loader):
+    def create(self, loader, *, check=None, deferred_snippets=False):
+        # Reserve a slot briefly; loading must not block existing snapshots.
         with self.lock:
             self._expire()
-            if len(self.items) >= self.max_snapshots:
+            if len(self.items) + self.pending >= self.max_snapshots:
                 raise APIError('snapshot_capacity', 429)
+            self.pending += 1
+        try:
+            if check:
+                check()
             metadata, order, records = loader()
+            if check:
+                check()
             size = len(json.dumps([metadata, order, records], ensure_ascii=False, allow_nan=False).encode())
             if len(order) > self.max_rows or size > self.max_snapshot_bytes:
                 raise APIError('snapshot_too_large', 413)
-            if size + sum(item.size for item in self.items.values()) > self.max_bytes:
-                raise APIError('snapshot_capacity', 429)
-            sid = secrets.token_urlsafe(24)
-            metadata.update(snapshot_id=sid, expires_at=(dt.datetime.now(UTC) + dt.timedelta(seconds=self.ttl)).isoformat(timespec='seconds'))
-            item = Snapshot(sid, self.clock(), metadata, tuple(order), records, size)
-            self.items[sid] = item
-            return item
+        except BaseException:
+            with self.lock:
+                self.pending -= 1
+            raise
+        with self.lock:
+            try:
+                self._expire()
+                if check:
+                    check()
+                if size + sum(item.size for item in self.items.values()) > self.max_bytes:
+                    raise APIError('snapshot_capacity', 429)
+                sid = secrets.token_urlsafe(24)
+                metadata.update(snapshot_id=sid, expires_at=(dt.datetime.now(UTC) + dt.timedelta(seconds=self.ttl)).isoformat(timespec='seconds'))
+                item = Snapshot(sid, self.clock(), metadata, tuple(order), records, size, deferred_snippets)
+                self.items[sid] = item
+                return item
+            finally:
+                self.pending -= 1
+
+    def discard(self, sid):
+        """Release only a newly created snapshot whose response was not delivered."""
+        with self.lock:
+            self.items.pop(sid, None)
 
     def get(self, sid):
         with self.lock:
@@ -326,11 +354,23 @@ class SnapshotStore:
             raise APIError('invalid_cursor')
         return item, offset
 
-    def page(self, item, offset=0):
+    def record(self, item, uid):
+        record = copy.deepcopy(item.records[uid])
+        if item.deferred_snippets:
+            snippet, cue = report.eligibility_snippet(record.get('description'))
+            record.update(eligibility_snippet=snippet or '', eligibility_cue=cue or '')
+        return record
+
+    def page(self, item, offset=0, *, check=None):
         limit = item.metadata['query']['limit']
         ids = item.order[offset:offset+limit]
         # Return fresh objects; response assembly cannot mutate the cache.
-        rows = [{k: v for k, v in item.records[uid].items() if k not in ('description', 'history')} for uid in ids]
+        rows = []
+        for uid in ids:
+            if check:
+                check()
+            rows.append({k: v for k, v in self.record(item, uid).items()
+                         if k not in ('description', 'history')})
         result = {**item.metadata, 'total': len(item.order), 'items': rows,
                   'next_cursor': self.cursor(item, offset+limit) if offset+limit < len(item.order) else None}
         return copy.deepcopy(result)
@@ -404,7 +444,7 @@ class AgentAPI:
                 if (stamp := _timestamp(r['first_seen_at'])) is not None and start <= stamp < end}
         return uids, None, window
 
-    def _materialize(self, query):
+    def _materialize(self, query, *, check=None):
         with closing(read_connection(self.db_path)) as conn:
             try:
                 count, body_bytes = conn.execute('SELECT COUNT(*),COALESCE(SUM(LENGTH(CAST(description AS BLOB))),0) FROM jobs').fetchone()
@@ -415,7 +455,7 @@ class AgentAPI:
                 view = query['view']
                 cfg = skills.load_skills(self.config.get('skills_path'))
                 rows, _ = panel_data._query(conn, self.config, view, 0, self.store.max_rows + 1,
-                                             filters, skills_cfg=cfg, candidate_uids=candidates)
+                                             filters, skills_cfg=cfg, candidate_uids=candidates, snippets=False)
                 kept, excluded, legacy, index = report.load(conn, self.config, deduplicate=False)
                 pool = [r for r in kept+excluded if candidates is None or r['uid'] in candidates]
                 records = {}
@@ -425,9 +465,11 @@ class AgentAPI:
                 def facts(row):
                     group = row.get('dedupe_group')
                     return history.build(row, groups.get(group, []) if group else None, reference)
-                for row in pool:
-                    target = locations.parse_target(filters['geo']) if filters.get('geo') else None
-                    decorated = location_query.decorate(conn, row, legacy, index, target=target)
+                target = locations.parse_target(filters['geo']) if filters.get('geo') else None
+                for offset, row in enumerate(pool):
+                    if check and offset % 64 == 0:
+                        check()
+                    decorated = location_query.decorate(conn, row, legacy, index, target=target, snippets=False)
                     records[row['uid']] = serialize(conn, decorated, self.panel_base, filters, facts(row))
                 for row in rows:
                     records[row['uid']] = serialize(conn, row, self.panel_base, filters, facts(row))
@@ -446,14 +488,22 @@ class AgentAPI:
             finally:
                 conn.close()
 
-    def jobs(self, qs):
+    def jobs(self, qs, *, check=None):
         if 'cursor' in qs:
             if set(qs) != {'cursor'} or len(qs['cursor']) != 1 or not qs['cursor'][0]:
                 raise APIError('cursor_query_mismatch')
             item, offset = self.store.resume(qs['cursor'][0])
-            return self.store.page(item, offset)
+            return self.store.page(item, offset, check=check)
         query = normalize_query(qs)
-        return self.store.page(self.store.create(lambda: self._materialize(query)))
+        item = self.store.create(lambda: self._materialize(query, check=check), check=check, deferred_snippets=True)
+        try:
+            result = self.store.page(item, check=check)
+            if check:
+                check()
+            return result
+        except BaseException:
+            self.store.discard(item.snapshot_id)
+            raise
 
     def detail(self, uid, qs):
         if set(qs) - {'snapshot_id'} or any(len(v) != 1 for v in qs.values()):
@@ -465,7 +515,7 @@ class AgentAPI:
             item = self.store.get(sid)
             if uid not in item.records:
                 raise APIError('source_not_in_snapshot', 404)
-            result = copy.deepcopy(item.records[uid])
+            result = self.store.record(item, uid)
             as_of = item.metadata['as_of']
         else:
             with closing(read_connection(self.db_path)) as conn:
@@ -525,18 +575,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self, value, status=200):
         body = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Connection', 'close')
-        if status == 401:
-            self.send_header('WWW-Authenticate', 'Bearer')
-        self.end_headers()
         self.close_connection = True
-        if self.command != 'HEAD':
-            self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Connection', 'close')
+            if status == 401:
+                self.send_header('WWW-Authenticate', 'Bearer')
+            self.end_headers()
+            if self.command != 'HEAD':
+                self.wfile.write(body)
+        except OSError:
+            return False
+        return True
+
+    def _snapshot_check(self, deadline):
+        if time.monotonic() >= deadline:
+            raise APIError('snapshot_timeout', 503)
+        # The built-in reader opts in: it never half-closes a live request.
+        # Generic HTTP clients may half-close sending and still read the answer.
+        if self.headers.get_all('X-Jobs-Cancel-On-Disconnect') == ['1']:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            if readable and not self.connection.recv(1, socket.MSG_PEEK):
+                raise APIError('request_cancelled', 408)
 
     def _authorized(self):
         auth = self.headers.get_all('Authorization') or []
@@ -552,6 +616,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._authorized():
             return
+        created_sid = None
         try:
             if len(self.path) > 4096:
                 raise APIError('query_too_large', 414)
@@ -564,7 +629,10 @@ class Handler(BaseHTTPRequestHandler):
                     raise APIError('invalid_query')
                 result = self.server.api.plugins()
             elif parsed.path == PREFIX+'/jobs':
-                result = self.server.api.jobs(qs)
+                deadline = time.monotonic() + SNAPSHOT_DEADLINE
+                result = self.server.api.jobs(qs, check=lambda: self._snapshot_check(deadline))
+                if 'cursor' not in qs:
+                    created_sid = result['snapshot_id']
             elif parsed.path.startswith(PREFIX+'/jobs/'):
                 uid = unquote(parsed.path[len(PREFIX+'/jobs/'):], errors='strict')
                 if not uid or len(uid) > 512:
@@ -579,7 +647,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.api.batches(bid, qs)
             else:
                 raise APIError('not_found', 404)
-            self._json(result)
+            if not self._json(result) and created_sid:
+                self.server.api.store.discard(created_sid)
         except APIError as exc:
             self._json({'error': exc.code}, exc.status)
         except (ValueError, UnicodeError):

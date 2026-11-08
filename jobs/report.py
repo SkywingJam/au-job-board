@@ -73,12 +73,13 @@ def label_of(row: dict, labels: dict[str, dict], group_index: dict[str, list[str
 
 
 def _decorate(rows: list[dict], labels: dict[str, dict],
-              group_index: dict[str, list[str]]) -> list[dict]:
+              group_index: dict[str, list[str]], *, snippets=True) -> list[dict]:
     """把资格摘录、tag、标注写进行里，供 CSV / md 共用。"""
     for row in rows:
-        snippet, cue = eligibility_snippet(row.get("description"))
-        row["eligibility_snippet"] = snippet or ""
-        row["eligibility_cue"] = cue or ""
+        if snippets:
+            snippet, cue = eligibility_snippet(row.get("description"))
+            row["eligibility_snippet"] = snippet or ""
+            row["eligibility_cue"] = cue or ""
         row["tags"] = " ".join(tag_texts(row))
 
         merged = label_of(row, labels, group_index)
@@ -186,9 +187,9 @@ def load(conn, config: dict, *, deduplicate: bool = True):
     return kept, excluded, labels, index
 
 
-def decorate(rows, labels, index) -> list[dict]:
+def decorate(rows, labels, index, *, snippets=True) -> list[dict]:
     """给指定的行补上资格句 / tag / 标注。入参应为已切片的小集合。"""
-    return _decorate(list(rows), labels, index)
+    return _decorate(list(rows), labels, index, snippets=snippets)
 
 
 def has_labels(row: dict, labels: dict[str, dict], index: dict[str, list[str]]) -> bool:
