@@ -4,6 +4,7 @@ Handwritten synthetic jobs, a temporary SQLite file and a loopback listener
 only. The MCP tool is covered by the opt-in tools/test_mcp*.py entries.
 """
 from contextlib import closing
+from email.message import Message
 from io import BytesIO
 import http.client
 import json
@@ -15,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
@@ -425,6 +427,43 @@ class BatchHTTPBoundary(BatchBase):
                 handler._json = respond
                 handler._not_allowed()
                 self.assertEqual(replies, [(405, {'error': 'method_not_allowed'})])
+
+    def test_authentication_rejections_consume_a_bounded_body_before_responding(self):
+        # Unauthorized, bad Host and foreign Origin are all rejected before the
+        # normal request-body reader. Windows can reset the response if that
+        # declared body remains unread.
+        server = SimpleNamespace(token=TOKEN, server_port=8291)
+        valid_host = f'127.0.0.1:{server.server_port}'
+        cases = [
+            ('missing-token', None, valid_host, None, 401),
+            ('wrong-token', 'Bearer wrong', valid_host, None, 401),
+            ('bad-host', 'Bearer ' + TOKEN, 'evil.invalid', None, 403),
+            ('foreign-origin', 'Bearer ' + TOKEN, valid_host, 'http://evil.invalid', 403),
+        ]
+        body = json.dumps(self.valid()).encode()
+        for name, authorization, host, origin, expected_status in cases:
+            with self.subTest(name):
+                handler = object.__new__(api.Handler)
+                handler.server = server
+                handler.command = 'POST'
+                handler.headers = Message()
+                handler.headers['Content-Length'] = str(len(body))
+                handler.headers['Host'] = host
+                if authorization is not None:
+                    handler.headers['Authorization'] = authorization
+                if origin is not None:
+                    handler.headers['Origin'] = origin
+                handler.rfile = BytesIO(body)
+                handler.wfile = BytesIO()
+                statuses = []
+                handler.send_response = lambda status, message=None: statuses.append(status)
+                handler.send_header = lambda name, value: None
+                handler.end_headers = lambda: None
+
+                self.assertFalse(handler._authorized())
+                self.assertEqual(handler.rfile.tell(), len(body),
+                                 'authentication rejections must consume the body before replying')
+                self.assertEqual(statuses, [expected_status])
 
     def test_authentication_host_and_origin(self):
         before = self.dump()

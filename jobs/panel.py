@@ -354,6 +354,7 @@ class Handler(BaseHTTPRequestHandler):
             host_ok, length = False, 0
         if not host_ok:
             self.close_connection = True
+            self._drain(length)
             self._json({"error": "origin_rejected"}, 403, started)
             return
         if self.headers.get_content_type() != "application/json" or not 0 < length <= max_bytes:
