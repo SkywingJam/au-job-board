@@ -233,9 +233,9 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
             # Observe the real HTTP handler's parsed query, not just urlencode().
             original = self.server.api.jobs
             captured = []
-            def capture(qs):
+            def capture(qs, **kwargs):
                 captured.append(qs)
-                return original(qs)
+                return original(qs, **kwargs)
             with patch.object(self.server.api, 'jobs', side_effect=capture):
                 await self.call(client, 'list_jobs', {'query': {'skill': ['python', 'rust']}})
             self.assertEqual(captured[0]['skill'], ['python', 'rust'])
