@@ -658,6 +658,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _not_allowed(self):
         if self._authorized():
+            self._unread = self._declared_length()
+            self._drain()
             self._json({'error': 'method_not_allowed'}, 405)
 
     def _read_chunks(self, size):

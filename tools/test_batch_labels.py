@@ -4,6 +4,7 @@ Handwritten synthetic jobs, a temporary SQLite file and a loopback listener
 only. The MCP tool is covered by the opt-in tools/test_mcp*.py entries.
 """
 from contextlib import closing
+from io import BytesIO
 import http.client
 import json
 import os
@@ -404,6 +405,26 @@ class BatchRejection(BatchBase):
 class BatchHTTPBoundary(BatchBase):
     def valid(self):
         return {'items': [{'uid': 'synthetic:c', 'action': 'saved'}]}
+
+    def test_rejected_methods_consume_a_bounded_body_before_responding(self):
+        # Model the Windows reset boundary deterministically: inspect bytes
+        # still unread at the instant the handler sends its 405 response.
+        for body in (json.dumps(self.valid()).encode(), b'x' * (api.DRAIN_LIMIT + 1)):
+            with self.subTest(size=len(body)):
+                handler = object.__new__(api.Handler)
+                handler.headers = {'Content-Length': str(len(body))}
+                handler.rfile = BytesIO(body)
+                handler._authorized = lambda: True
+                replies = []
+
+                def respond(value, status=200):
+                    self.assertEqual(handler.rfile.tell(), min(len(body), api.DRAIN_LIMIT),
+                                     'rejected bodies must be drained before replying, within the limit')
+                    replies.append((status, value))
+
+                handler._json = respond
+                handler._not_allowed()
+                self.assertEqual(replies, [(405, {'error': 'method_not_allowed'})])
 
     def test_authentication_host_and_origin(self):
         before = self.dump()
