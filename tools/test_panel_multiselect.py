@@ -10,13 +10,16 @@ gates) is exercised by tools/test_panel_navigation.mjs.
 from __future__ import annotations
 
 import datetime as dt
+from email.message import Message
 import http.client
+from io import BytesIO
 import json
 import re
 import sqlite3
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -271,6 +274,26 @@ class PanelMultiselectTests(unittest.TestCase):
             client_headers = {"Content-Type": "application/json"}
             status, _ = self.raw(PATH, "POST", json.dumps({"items": items}), client_headers)
             self.assertEqual(status, 200)
+
+    def test_foreign_origin_consumes_the_body_before_responding(self):
+        body = json.dumps({"items": [{"uid": self.uid(1), "action": "saved"}]}).encode()
+        handler = object.__new__(panel.Handler)
+        handler.headers = Message()
+        handler.headers["Content-Type"] = "application/json"
+        handler.headers["Content-Length"] = str(len(body))
+        handler.rfile = BytesIO(body)
+        handler.connection = SimpleNamespace(gettimeout=lambda: 10, settimeout=lambda value: None)
+        handler._same_origin = lambda: False
+        replies = []
+
+        def respond(value, status=200, started=None):
+            self.assertEqual(handler.rfile.tell(), len(body),
+                             "origin rejection must consume the body before replying")
+            replies.append((status, value))
+
+        handler._json = respond
+        self.assertIsNone(handler._local_json(0, panel.LABEL_BATCH_MAX_BYTES, strict=True))
+        self.assertEqual(replies, [(403, {"error": "origin_rejected"})])
 
     # -- failure and transaction ownership -------------------------------------------
     def test_database_failure_is_503_and_helper_rollback_leaves_no_partial_state(self):
