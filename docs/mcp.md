@@ -28,7 +28,7 @@ cursor reads. Eligibility excerpts are prepared only for requested records,
 using the frozen source text. If all eight default slots are occupied, the tool
 returns `HTTP 429: snapshot_capacity` with guidance to reuse an existing snapshot
 or wait for capacity. A new query does not free an old one. The reader separately
-reports transport timeouts, connection failures and invalid JSON, without
+reports transport timeouts, connection failures, malformed HTTP and invalid JSON, without
 echoing private response text. See [snapshot limits](agent-api.md#stable-pagination-and-limits).
 
 ## Streamable HTTP with the application (recommended)

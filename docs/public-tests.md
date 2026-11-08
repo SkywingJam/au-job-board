@@ -59,7 +59,7 @@ nothing in the suite fetches listings.
 | `tools/test_agent_snapshot_lifecycle.py` | Existing reads during builds, pending-slot and byte budgets, disconnected readers and response failures, build deadlines, deferred frozen excerpts, half-closed HTTP readers, safe error classification | all |
 | `tools/test_job_history.py` | Copy-job and API/MCP posting history: bounded related postings with locations, unknown vs zero, latest successful batch reference, frozen snapshots, no verdict wording | all |
 | `tools/test_plugin_settings_race.mjs` | A delayed initial plugin read cannot overwrite a switch saved on the page | all |
-| `tools/test_batch_labels.py` | Opt-in batch label write: gate and config, one-transaction group-aware action/priority assignment, explicit clears, no-op repeats, whole-batch rejection, rollback/retry, concurrent partial edits, schema/missing DB, HTTP boundaries and the client transport (the MCP tool is in the opt-in MCP entries) | all |
+| `tools/test_batch_labels.py` | Opt-in batch label write: gate and config, one-transaction group-aware action/priority assignment, explicit clears, no-op repeats, whole-batch rejection, rollback/retry, concurrent partial edits, schema/missing DB, HTTP boundaries and the client transport; malformed HTTP and invalid responses after a committed write retain safe unknown-result guidance without retry (the MCP tool is in the opt-in MCP entries) | all |
 | `tools/test_batches.py` | Exact fetch membership, source transactions and schema 3 recovery | all |
 | `tools/test_location_http.py` | Group-level writes, location query guidance and same-origin protection | all |
 | `tools/test_locations.py` | Offline Australian geography, ambiguity, three-tier matching and the ABS metropolitan-area reference | all |

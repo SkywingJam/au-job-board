@@ -9,6 +9,7 @@ from .file_security import validate_private_file, set_private
 
 import argparse
 import datetime as dt
+from http.client import HTTPException
 import json
 import os
 from pathlib import Path
@@ -38,6 +39,10 @@ READ_ERROR_CODES = WRITE_ERROR_CODES | frozenset({
 
 
 class ClientError(Exception):
+    pass
+
+
+class _InvalidResponse(ValueError):
     pass
 
 
@@ -99,6 +104,10 @@ class APIClient:
         reason = exc.reason if isinstance(exc, URLError) else exc
         if isinstance(reason, TimeoutError):
             return 'API request timed out after 30 seconds; export not completed'
+        if isinstance(exc, _InvalidResponse):
+            return 'API returned an invalid response; export not completed'
+        if isinstance(exc, HTTPException):
+            return 'API returned an incomplete or invalid HTTP response; export not completed'
         if isinstance(exc, ValueError):
             return 'API returned invalid JSON; export not completed'
         return 'API connection failed; export not completed'
@@ -127,7 +136,7 @@ class APIClient:
         try:
             body = json.loads(exc.read(4096))
             value, index = body.get('error'), body.get('index')
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError, AttributeError, HTTPException):
             return ''
         if not isinstance(value, str) or value not in allowed:
             return ''
@@ -138,18 +147,18 @@ class APIClient:
         try:
             with self.opener.open(request, timeout=30) as response:
                 if response.status != 200 or response.headers.get_content_type() != 'application/json':
-                    raise ClientError('Unexpected API response')
+                    raise _InvalidResponse()
                 raw = response.read(MAX_RESPONSE+1)
                 if len(raw) > MAX_RESPONSE:
-                    raise ClientError('API response exceeds client limit')
+                    raise _InvalidResponse()
                 value = json.loads(raw)
                 if not isinstance(value, dict):
-                    raise ClientError('Invalid API response')
+                    raise _InvalidResponse()
                 return value
         except HTTPError as exc:
             # No body/header/URL echo: error messages must not expose private data.
             raise ClientError(rejected(exc)) from None
-        except (URLError, OSError, ValueError) as exc:
+        except (URLError, OSError, ValueError, HTTPException) as exc:
             raise ClientError(unavailable(exc)) from None
 
 
