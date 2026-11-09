@@ -12,6 +12,7 @@ const ref={schema_version:1,reference_version:'fixture',files:[{path:'one.geojso
 const feature=pc=>({type:'Feature',properties:{postcode:pc},geometry:{type:'Polygon',coordinates:[pc==='3000'?[[144,-38],[146,-38],[146,-36],[144,-36],[144,-38]]:[[150,-34],[152,-34],[152,-32],[150,-32],[150,-34]]]}});
 const items=[{uid:'b',title:'Second',company:'Company',core_order:2,location_fact:{precision:'postcode',postcodes:['3000'],reason:'explicit_postcode'}},{uid:'a',title:'First',core_order:1,location_fact:{precision:'locality',postcodes:['3000'],reason:'unique_locality'}},{uid:'c',title:'Sydney',core_order:3,location_fact:{precision:'postcode',postcodes:['2000']}},{uid:'d',title:'Broad city',core_order:4,location_fact:{precision:'city',postcodes:[]}},{uid:'e',title:'Ambiguous',core_order:5,location_fact:{precision:'locality',postcodes:['3000'],reason:'ambiguous_locality'}},{uid:'f',title:'Missing boundary',core_order:6,location_fact:{precision:'postcode',postcodes:['9999']}},{uid:'g',title:'Melbourne city',core_order:7,location_fact:{precision:'city',city:'Melbourne',states:['VIC'],postcodes:[]}},{uid:'h',title:'Sydney city',core_order:8,location_fact:{precision:'city',city:'Sydney',states:['NSW'],postcodes:[]}},{uid:'i',title:'WA only',core_order:9,location_fact:{precision:'state',states:['WA'],postcodes:[]}}];
 if(new URLSearchParams(location.search).get('only')==='wa')items.splice(0,items.length,...items.filter(x=>['a','i'].includes(x.uid)));
+if(new URLSearchParams(location.search).has('perth')){ref.postcodes['6000']={point:[115.86,-31.95],bbox:[115.8,-32,115.9,-31.9],file:'one.geojson.gz'};items.push({uid:'p',title:'Perth city',core_order:10,location_fact:{precision:'city',city:'Perth',states:['WA'],postcodes:[]}});}
 if(new URLSearchParams(location.search).has('many'))for(let i=0;i<150;i++)items.push({uid:'m'+i,title:'Bulk '+i,core_order:100+i,location_fact:{precision:'postcode',postcodes:['3000']}});
 window.respond=(m,ok,result)=>frame.contentWindow.postMessage({type:'jobs-plugin-response',channel:'token',id:m.id,ok,...(ok?{result}:{error:{code:result,message:result}})},'*');
 window.addEventListener('message',e=>{if(e.source!==frame.contentWindow)return;let m=e.data;if(m.type==='jobs-plugin-ready'){frame.contentWindow.postMessage({type:'jobs-plugin-context',channel:'token',context:{plugin_id:'map',lang:'en',theme:'light'}},'*');return;}if(m.type!=='jobs-plugin-request'||m.channel!=='token')return;calls.push(m);if(m.operation==='load'){if(delay){held.push(m);return;}if(fail){respond(m,false,fail);return;}respond(m,true,{snapshot_id:'s'+(++version),count_unit:unit,items,total:items.length});}else if(m.operation==='reference'){if(failReference && m.payload.file!=='index.json')respond(m,false,'reference_error');else respond(m,true,m.payload.file==='index.json'?ref:{type:'FeatureCollection',features:[feature('3000'),feature('2000')]});}else if(m.operation==='open_job' && expireOpen>0){expireOpen--;respond(m,false,'snapshot_expired');}else if(m.operation==='open_job' && fail)respond(m,false,fail);else respond(m,true,{});});</script>`;
@@ -163,6 +164,12 @@ assert.ok(await frame.locator('#unmapped').isHidden(),'no "Other locations (0)" 
 for(let i=0;i<12;i++)await frame.locator('#zoom-out').click();
 assert.ok(await frame.locator('#unmapped').isVisible());
 assert.equal(await text('#unmapped'),'Other locations (1)');
+// "Show all results" also reveals capital-city markers outside the first (postcode) view.
+await page.goto(base+'?perth=1');
+await frame.locator('.marker').first().waitFor();
+assert.ok(!(await frame.locator('.city').allTextContents()).some(x=>x.startsWith('Perth')),'first view stays on postcode results');
+await frame.locator('#reset').click();
+assert.ok((await frame.locator('.city').allTextContents()).includes('Perth citywide1'),'show all results reaches every placeable job');
 // Long lists render in batches of 60 as the list is scrolled.
 await page.goto(base+'?many=1');
 await frame.locator('.marker').first().waitFor();

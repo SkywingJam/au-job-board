@@ -215,8 +215,11 @@ async function outline(pc) {
   }
   renderMap();
 }
-function resultsBox() {
+// Bounds of the placed results. "Show all results" also includes capital-city markers so
+// every placeable job becomes reachable; the first view stays on the postcode results.
+function resultsBox(withCities = false) {
   const boxes = [...groups.keys()].map(pc => index.postcodes[pc].bbox).filter(Boolean);
+  if (withCities) for (const city of cityJobs.keys()) { const p = cityPoint(city); if (p) boxes.push([p[0], p[1], p[0], p[1]]); }
   if (!boxes.length) return AUSTRALIA.slice();
   const b = [Math.min(...boxes.map(b => b[0])), Math.min(...boxes.map(b => b[1])),
              Math.max(...boxes.map(b => b[2])), Math.max(...boxes.map(b => b[3]))];
@@ -610,7 +613,7 @@ function zoom(factor) {
 $('zoom-in').onclick = () => zoom(.7);
 $('zoom-out').onclick = () => zoom(1 / .7);
 $('reset').onclick = () => {
-  box = groups.size ? resultsBox() : AUSTRALIA.slice();
+  box = groups.size || cityJobs.size ? resultsBox(true) : AUSTRALIA.slice();
   if (map) map.fitBounds(bounds(box), {duration: 300, padding: 30, maxZoom: 13, bearing: 0, pitch: 0});
   render(); saveState();
 };
