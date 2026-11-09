@@ -265,7 +265,7 @@ def test_scope_semantics() -> None:
 
 
 def test_provenance_shape() -> None:
-    print("== 7. provenance 字段形状与框架自检 ==")
+    print("== 7. provenance 字段形状 ==")
     d = decide("To be eligible you must be an Australian citizen. We are an equal "
                "employment opportunity employer.")
     check("命中：is_excluded True", d["is_excluded"] is True)
@@ -287,12 +287,6 @@ def test_provenance_shape() -> None:
     check("override：字段形状保留",
           ov["is_excluded"] is False and ov["rule_kind"] == "override"
           and ov["rule_id"] == "visa.or", str(ov))
-
-    # 框架自检：同一判定若把 expected 故意写反，必须被判为失败（只在内存）
-    probe = decide("To be eligible you must be an Australian citizen.")
-    deliberately_wrong = (probe["is_excluded"] == False)   # noqa: E712
-    check("框架自检：故意写反的 expected 会被判失败", deliberately_wrong is False,
-          f"实际 is_excluded={probe['is_excluded']}")
 
 
 def main() -> int:

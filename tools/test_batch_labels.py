@@ -18,12 +18,13 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from jobs import agent_api as api, agent_client, config as config_mod, db, labels, migrations
+from jobs.http_server import ThreadingHTTPServer
 
 TOKEN = 'synthetic-batch-token-not-a-real-secret-0000'
 PATH = '/api/v1/labels/batch'
@@ -752,7 +753,7 @@ class Stub(BaseHTTPRequestHandler):
 
 class BatchClient(unittest.TestCase):
     def stub(self, script):
-        server = HTTPServer(('127.0.0.1', 0), Stub)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Stub)
         server.hits, server.script = [], script
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()

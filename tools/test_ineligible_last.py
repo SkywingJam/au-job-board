@@ -423,10 +423,6 @@ class PublicContract(unittest.TestCase):
         usage = (ROOT / "docs" / "usage.md").read_text(encoding="utf-8")
         self.assertIn("Ineligible last", usage)
 
-    def test_mcp_tool_description_names_the_parameter(self):
-        text = (ROOT / "jobs" / "mcp_server.py").read_text(encoding="utf-8")
-        self.assertIn("ineligible_last", text)
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -25,3 +25,8 @@ class ThreadingHTTPServer(_ThreadingHTTPServer):
         socketserver.TCPServer.server_bind(self)
         self.server_name = self.server_address[0]
         self.server_port = self.server_address[1]
+
+    def serve_forever(self, poll_interval=0.05):
+        # shutdown() blocks until serve_forever next wakes from its select poll;
+        # the stdlib default of 0.5 s makes every stop wait up to half a second.
+        super().serve_forever(poll_interval)

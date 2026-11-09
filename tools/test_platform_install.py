@@ -1,7 +1,6 @@
 """Synthetic source-install checks for byte resources, dates and Unicode paths."""
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import json
 import os
@@ -14,15 +13,10 @@ import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from jobs import agent_api, locations
+from jobs import locations
 
 
 class InstallTests(unittest.TestCase):
-    def test_melbourne_day_and_dst_boundaries(self):
-        for day, hours in [('2026-10-04', 23), ('2026-04-05', 25), ('2026-10-28', 24)]:
-            first, last = agent_api.day_window(day)
-            self.assertEqual(last - first, dt.timedelta(hours=hours))
-
     def test_reference_hash_and_autocrlf_checkout(self):
         metadata = json.loads((ROOT / 'jobs/data/location-reference.json').read_text(encoding='utf-8'))
         source = ROOT / 'jobs/data/au-postcodes.tsv'

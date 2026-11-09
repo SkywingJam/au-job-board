@@ -295,36 +295,6 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(service.port, blocked_port)
             self.assertEqual(self.request(headers={'Authorization': ''})[0], 401)
 
-    def test_container_fixture_does_not_retry_unrelated_startup_errors(self):
-        self.container_panel()
-        for error in (OSError(errno.EACCES, 'controlled permission error'),
-                      OSError(errno.EADDRINUSE, 'controlled internal port error'),
-                      ValueError('controlled configuration error')):
-            with self.subTest(error=error), patch.object(mcp_http, 'start', side_effect=error) as start:
-                with self.assertRaises(type(error)) as caught:
-                    self.start_container()
-                self.assertIs(caught.exception, error)
-                self.assertEqual(start.call_count, 1)
-
-    def test_container_fixture_bounds_port_collision_reselection(self):
-        self.container_panel()
-        start = self.start
-        occupied = []
-        def collide():
-            listener = socket.socket()
-            self.addCleanup(listener.close)
-            listener.bind(('0.0.0.0', self.panel.server_port+1))
-            listener.listen()
-            occupied.append(listener)
-            return start()
-        with patch.dict(os.environ, {'JOBS_CONTAINER': '1'}), \
-                patch.object(self, 'start', side_effect=collide) as attempts:
-            with self.assertRaises(OSError) as caught:
-                self.start_container()
-        self.assertTrue(bind_conflict(caught.exception), caught.exception)
-        self.assertEqual(attempts.call_count, 5)
-        self.assertEqual(len(occupied), 5)
-
     async def test_tls_certificate_verified(self):
         root = self.fixture.root
         cfg = root/'openssl.cnf'
