@@ -237,13 +237,15 @@ def test_panel_binding() -> None:
         def __init__(self, address, handler):
             self.address = address
             self.handler = handler
+            self.served = False
+            self.closed = False
             created.append(self)
 
         def serve_forever(self):
-            pass
+            self.served = True
 
         def server_close(self):
-            pass
+            self.closed = True
 
     original_server = panel.ThreadingHTTPServer
     original_config = panel.Handler.config
@@ -255,6 +257,8 @@ def test_panel_binding() -> None:
         check("panel binds 127.0.0.1:8090",
               bool(created) and created[0].address == ("127.0.0.1", 8090),
               str(created[0].address if created else None))
+        check("serve_forever was called", bool(created) and created[0].served)
+        check("server_close was called", bool(created) and created[0].closed)
 
         bad = copy.deepcopy(cfg)
         bad["panel"]["host"] = "0.0.0.0"
