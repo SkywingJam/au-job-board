@@ -25,6 +25,7 @@ import httpx2
 from jobs import __version__, agent_api, mcp_http, panel
 from jobs.http_server import ThreadingHTTPServer
 import test_mcp as fixtures
+from test_mcp import payload
 
 TOKEN = fixtures.TOKEN
 
@@ -124,19 +125,19 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                     {'list_jobs','get_job','list_batches','get_batch','review_plugin_permissions'})
                 first = await client.call_tool('list_jobs', {'query': {'limit': 1}})
                 self.assertFalse(first.is_error)
-                page = first.structured_content
+                page = payload(first)
                 uid, sid = page['items'][0]['uid'], page['snapshot_id']
                 with closing(agent_api.read_connection(self.fixture.path)) as conn:
                     with self.assertRaises(sqlite3.OperationalError):
                         conn.execute('DELETE FROM jobs')
                 next_page = await client.call_tool('list_jobs', {'query': {'cursor': page['next_cursor']}})
-                self.assertEqual(next_page.structured_content['snapshot_id'], sid)
+                self.assertEqual(payload(next_page)['snapshot_id'], sid)
                 detail = await client.call_tool('get_job', {'uid': uid, 'snapshot_id': sid})
-                self.assertTrue(detail.structured_content['item']['description'])
+                self.assertTrue(payload(detail)['item']['description'])
                 batches = await client.call_tool('list_batches', {'limit': 1})
-                bid = batches.structured_content['items'][0]['batch_id']
+                bid = payload(batches)['items'][0]['batch_id']
                 batch = await client.call_tool('get_batch', {'batch_id': bid})
-                self.assertEqual(batch.structured_content['item']['batch_id'], bid)
+                self.assertEqual(payload(batch)['item']['batch_id'], bid)
                 bad = await client.call_tool('list_jobs', {'query': {'view': 'recommend', 'geo': 'VIC'}})
                 self.assertTrue(bad.is_error)
 
@@ -166,7 +167,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
 
         async with await self.connect(service) as client:
             first = await client.call_tool('list_jobs', {'query': {'limit': 1}})
-            page = first.structured_content
+            page = payload(first)
             with patch.object(service.api.api, '_materialize', slow):
                 creating = asyncio.create_task(client.call_tool('list_jobs', {'query': {'q': 'Synthetic'}}))
                 try:
@@ -215,16 +216,15 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                 expected = (False, True, True, False) if name == 'batch_label_jobs' else (True, False, True, False)
                 self.assertEqual((note.read_only_hint, note.destructive_hint,
                                   note.idempotent_hint, note.open_world_hint), expected, name)
-            self.assertIsInstance(tools['batch_label_jobs'].output_schema, dict)
+            self.assertEqual({t.output_schema for t in tools.values()}, {None})
             result = await client.call_tool('batch_label_jobs', {'items': [
                 {'uid': 'synthetic:b', 'action': 'applied', 'priority': True},
                 {'uid': 'synthetic:c', 'action': 'skipped'}]})
             self.assertFalse(result.is_error, result.content)
-            text = result.content[0].text
-            self.assertEqual(json.loads(text), result.structured_content)
-            self.assertEqual(text, json.dumps(result.structured_content, ensure_ascii=False,
+            data, text = payload(result), result.content[0].text
+            self.assertEqual(text, json.dumps(data, ensure_ascii=False,
                                               separators=(',', ':'), allow_nan=False))
-            self.assertEqual((result.structured_content['updated'], result.structured_content['unchanged']), (2, 0))
+            self.assertEqual((data['updated'], data['unchanged']), (2, 0))
             bad = await client.call_tool('batch_label_jobs', {'items': [
                 {'uid': 'synthetic:d', 'action': 'saved'}, {'uid': 'synthetic:missing', 'action': 'saved'}]})
             self.assertTrue(bad.is_error)
@@ -278,11 +278,11 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         async with httpx2.AsyncClient(headers={'Authorization': 'Bearer '+TOKEN}) as http:
             async with Client(streamable_http_client(service.url, http_client=http), mode='legacy') as client:
                 self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
-                page = (await client.call_tool('list_jobs', {'query': {'limit': 1}})).structured_content
+                page = payload(await client.call_tool('list_jobs', {'query': {'limit': 1}}))
                 detail = await client.call_tool('get_job', {'uid': page['items'][0]['uid'],
                                                          'snapshot_id': page['snapshot_id']})
                 self.assertFalse(detail.is_error)
-                self.assertTrue(detail.structured_content['item']['panel_url'].startswith(
+                self.assertTrue(payload(detail)['item']['panel_url'].startswith(
                     f'http://127.0.0.1:{self.panel.server_port}/'))
 
     async def test_container_fixture_recovers_from_port_handoff_collision(self):
