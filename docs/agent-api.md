@@ -150,8 +150,8 @@ same facts the panel's "Copy job" text carries. List pages omit it.
 
 These are observations only. Not appearing in a later fetch can mean the
 search no longer matched it; it does not establish that the job closed. A
-related posting is not asserted to be the same position, and nothing here
-scores whether a job is genuine. Within a snapshot the history is read in the
+related posting is not asserted to be the same position, and nothing here scores
+whether a job is genuine. Within a snapshot the history is read in the
 same transaction as the rest of the record.
 
 ## Stable pagination and limits
@@ -181,7 +181,7 @@ Database loading and serialization run outside the shared cache lock, so an
 unrelated build does not block existing details or pagination. Source records,
 human state and history remain frozen in the original read transaction.
 Eligibility excerpts are computed from those frozen descriptions only for the
-requested page or detail, instead of scanning every description for every list.
+requested page or detail.
 
 New list requests check a 25-second build deadline before publication, while
 freezing source records and while preparing the first page. Overdue builds return
@@ -204,7 +204,7 @@ representatives after de-duplication. Every source in a group shares the same
 group-level human state. `human_scope`, `location`,
 `location_match`, original source text and machine evidence remain
 distinguishable. `panel_url` opens the exact current source in the normal panel.
-The panel is live, not a frozen snapshot; its left list/order can differ. Never
+The panel is live; its left list/order can differ from the snapshot. Never
 rebuild an Indeed/source URL by guessing from a UID.
 
 ## Optional batch label write

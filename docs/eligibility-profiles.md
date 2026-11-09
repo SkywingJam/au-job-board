@@ -79,7 +79,7 @@ Field order is fixed: `australian_citizen`, `permanent_resident`,
   fall back to a default.
 - **No `eligibility` section:** a valid mapping returns the `485` template with
   `config_source: legacy_default`. This is only a migration default of this
-  project and not a statement about anyone's visa rights.
+  project.
 - **An explicit `eligibility` section must be fully valid**, otherwise a
   `ValueError` names the field path: `null`, an empty object, a list, a missing
   `profile`, an unknown profile, a misspelled field, a preset carrying `custom`, a
@@ -131,7 +131,7 @@ filtering:
 
 An explicit `profile_v1` or any other value is rejected during `analyze` before
 the database is opened (`resolve_filtering` in `jobs/config.py`). It is a
-configuration error gate, not a switch for an alternative filtering mode.
+configuration error gate.
 
 ## Status
 
@@ -139,5 +139,4 @@ configuration error gate, not a switch for an alternative filtering mode.
   command.
 - Not connected to: filtering, scoring, `analyze`, the database or the panel.
 - A candidate-by-candidate eligibility parser and assessment were explored and
-  then removed. They are not part of the current code and should not be treated
-  as a recommended direction.
+  then removed. They are not part of the current code.

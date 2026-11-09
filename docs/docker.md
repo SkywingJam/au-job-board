@@ -194,7 +194,7 @@ docker compose exec -T panel python -c 'from pathlib import Path; import sys; Pa
 docker compose restart panel
 ```
 
-That direct maintenance write is not the browser's validated save endpoint;
+That direct maintenance write bypasses the browser's validated save endpoint;
 validate your YAML and preserve private unknown fields. The settings form itself
 checks versions, validates allowed fields and writes atomically.
 
@@ -241,8 +241,8 @@ docker compose cp panel:/app/out out/docker-backup/reports
 Use a fresh backup directory for each backup. Preserve the DB, sidecars and
 manual notes together; protect these files as private. Restore into writable
 volumes owned by UID/GID 10001:10001 before starting any process. Test a restored
-copy before relying on a backup. Exporting container data is not a deployment
-or migration instruction for another machine.
+copy before relying on a backup. Moving to another machine is a separate
+deployment step that container data export does not cover.
 
 ## Offline synthetic verification
 
@@ -257,7 +257,7 @@ and any failed check; it never reads your normal Compose volumes.
 
 The strict `.dockerignore` allowlist excludes personal config, databases,
 reports, `.git`, screenshots and tests from the build context. Runtime volumes
-are private data and are not image content. Never publish them with the image.
+are private data and stay outside the image. Never publish them with the image.
 
 ## Maintainer image workflow
 

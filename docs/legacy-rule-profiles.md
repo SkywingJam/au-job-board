@@ -17,8 +17,7 @@ Australia.
   enabled for every preset. So even with `citizen` or `permanent_resident`, a job
   can still be excluded by an overlapping condition in that rule, and turning off
   `citizenship.or_pr` does not guarantee that every PR-friendly job is kept. You
-  can switch the mixed rule off explicitly, but doing so is blunt rather than
-  precise.
+  can switch the mixed rule off explicitly, but doing so is blunt.
 
 ## Configuration
 
@@ -72,11 +71,10 @@ The current `rules.yaml` has eight exclude rules and one override:
 Things the presets deliberately do not do:
 
 - The clearance rules, `indigenous.identified` and `adf.enlistment` stay on for
-  every preset. Holding a citizenship or visa does not imply a held clearance or
-  any other qualification.
-- `student_visa` and `485` have the same switches. That is a statement about the
-  software, **not** that the two have the same work rights. There is no hours
-  logic.
+  every preset. No preset derives a clearance or any other qualification from a
+  citizenship or visa.
+- `student_visa` and `485` have the same switches. That describes the software's switches
+  only. There is no hours logic.
 - `visa.or` keeps the semantics of the original global override: it can rescue
   other matches too. The profile only gives you its on/off switch; it does not
   change its scope or priority.
