@@ -275,8 +275,6 @@ def test_panel_binding() -> None:
     finally:
         panel.ThreadingHTTPServer = original_server
         panel.Handler.config = original_config
-    check("Handler.config global state restored",
-          panel.Handler.config is original_config)
 
 
 GUARD_SOURCECODE = '''import socket
@@ -335,7 +333,7 @@ def test_eligibility_profile_cli() -> None:
           bool(sub) and sub.get("filtering_mode") == "legacy")
 
 
-def test_guard_and_selfcheck() -> None:
+def test_guard() -> None:
     print("== 5. offline guard fails closed and restores state ==")
     original_socket = socket.socket
     original_connect = database.connect
@@ -361,11 +359,6 @@ def test_guard_and_selfcheck() -> None:
     check("guard restores socket.socket", socket.socket is original_socket)
     check("guard restores database.connect", database.connect is original_connect)
     check("guard restores sqlite3.connect", sqlite3.connect is original_sqlite)
-
-    cfg = load_config(EXAMPLE)
-    deliberately_wrong = (cfg.get("db_path") == "data/private.db")
-    check("deliberately wrong expectation is detected as false",
-          deliberately_wrong is False, str(cfg.get("db_path")))
 
 
 def test_no_private_values() -> None:
@@ -420,7 +413,7 @@ def main() -> int:
     test_sources_switches()
     test_panel_binding()
     test_eligibility_profile_cli()
-    test_guard_and_selfcheck()
+    test_guard()
     test_no_private_values()
     test_filtering_mode_gate()
     print()

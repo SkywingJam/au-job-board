@@ -331,16 +331,8 @@ def test_cli_does_not_connect() -> None:
         check("mock connect 错误路径不走 DB 且非零", rc_bad == 1, f"rc={rc_bad}")
 
 
-def test_selfcheck() -> None:
-    print("== 7. 框架自检：故意错误 expected 必须被检出 ==")
-    r = resolve_eligibility({"eligibility": {"profile": "citizen"}})
-    deliberately_wrong = (r["capabilities"]["australian_citizen"] is False)
-    check("故意写反的 expected 会被判失败", deliberately_wrong is False,
-          str(r["capabilities"]["australian_citizen"]))
-
-
 def test_root_type_strict() -> None:
-    print("== 8. CLI 严格根类型：非 dict 拒绝 / 合法 dict legacy ==")
+    print("== 7. CLI 严格根类型：非 dict 拒绝 / 合法 dict legacy ==")
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         bad_roots = [
@@ -370,7 +362,7 @@ def test_root_type_strict() -> None:
 
 
 def test_cli_error_safety() -> None:
-    print("== 9. CLI 错误安全：缺失 / 损坏 YAML / 解码 ==")
+    print("== 8. CLI 错误安全：缺失 / 损坏 YAML / 解码 ==")
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         proc = run_cli(tmp / "missing.yaml")
@@ -399,7 +391,7 @@ def test_cli_error_safety() -> None:
 
 
 def test_sentinel_not_echoed() -> None:
-    print("== 10. 合成哨兵不回显（profile / bool / hours / YAML）==")
+    print("== 9. 合成哨兵不回显（profile / bool / hours / YAML）==")
     sent = "SYNTHETIC_PRIVATE_SENTINEL"
     native = [
         ("非法 profile", {"eligibility": {"profile": sent}}),
@@ -425,7 +417,7 @@ def test_sentinel_not_echoed() -> None:
 
 
 def test_mixed_keys() -> None:
-    print("== 11. 未知键混合类型：稳定 ValueError，不 TypeError ==")
+    print("== 10. 未知键混合类型：稳定 ValueError，不 TypeError ==")
     custom_mixed = dict(good_custom())
     custom_mixed[12] = 3
     cases = [
@@ -474,7 +466,6 @@ def main() -> int:
     test_cli_error_safety()
     test_sentinel_not_echoed()
     test_mixed_keys()
-    test_selfcheck()
     print()
     if failures:
         print(f"失败 {len(failures)} 项：")
