@@ -426,9 +426,7 @@ class PluginPanelTests(unittest.TestCase):
         self.assertIn("if(turningOn&&c&&c.status!=='granted')", section)
 
     def test_consent_copy_exists_in_both_languages(self):
-        zh = {k for k in i18n.STRINGS['zh'] if k.startswith('plugin.')}
-        en = {k for k in i18n.STRINGS['en'] if k.startswith('plugin.')}
-        self.assertEqual(zh, en)
+        zh = {k for k in i18n.STRINGS['zh'] if k.startswith('plugin.')}   # zh/en key parity: test_panel_i18n
         script = (ROOT/'jobs'/'panel_assets'/'settings.js').read_text()
         for key in set(re.findall(r"T\('(plugin\.[a-z_]+)'[,)]", script)):
             self.assertIn(key, zh, key)

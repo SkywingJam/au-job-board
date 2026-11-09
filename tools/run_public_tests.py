@@ -17,8 +17,15 @@ Boundary:
 The same inventory is the one .github/workflows/offline-tests.yml runs; the
 workflow only calls this script.
 
+Entries run concurrently (``--jobs N``, default min(4, cpu count)); each
+entry's output is buffered and printed as one block when it finishes, followed
+by an ordered summary. ``--jobs 1`` runs the entries one after another in
+inventory order with live output. The entries in SERIAL_TESTS are never run
+beside another entry: they run alone, after the parallel group has finished.
+
 Usage:
     .venv/bin/python tools/run_public_tests.py
+    .venv/bin/python tools/run_public_tests.py --jobs 1
     .venv/bin/python tools/run_public_tests.py --list
 
 Exit status:
@@ -30,10 +37,14 @@ Exit status:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -137,12 +148,28 @@ MCP_TESTS = (
     ("tools/test_mcp_http.py", "optional Streamable HTTP / app lifecycle / capacity", None),
 )
 
+# Entries that must not share the machine with any other entry. They run one
+# at a time, alone, after the parallel group has finished.
+SERIAL_TESTS = {
+    # Reserves a panel port and relies on "panel port + 1" staying free
+    # between its probe and the real bind; any concurrent ephemeral listener
+    # could take that port.
+    "tools/test_mcp_http.py": "derived panel-port+1 probe-then-bind",
+    # Snapshots every file in the checkout before and after the demo run and
+    # fails on any change, so no other entry may write there meanwhile.
+    "tools/test_demo.py": "whole-checkout before/after file snapshot",
+}
+
 
 def build_env() -> dict:
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUTF8"] = "1"
     return env
+
+
+def default_jobs() -> int:
+    return max(1, min(4, os.cpu_count() or 1))
 
 
 def applicable(platforms) -> bool:
@@ -162,17 +189,144 @@ def node_version() -> str:
     return proc.stdout.strip()
 
 
-def run_one(index: int, total: int, label: str, command: list, env: dict) -> bool:
-    print("[%d/%d] %s" % (index, total, label))
-    print("        $ " + " ".join(command))
+_live_lock = threading.Lock()
+_live: dict = {}  # pid -> Popen for every child that is still running
+_stopping = False  # set once an interrupt starts; no new child may start
+
+
+def _kill_tree(proc: subprocess.Popen, force: bool) -> None:
+    """Stop a child and everything it started (POSIX: its own session)."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           capture_output=True)
+        else:
+            os.killpg(proc.pid, signal.SIGKILL if force else signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        pass
+
+
+def kill_all_children() -> None:
+    global _stopping
+    with _live_lock:
+        _stopping = True
+        procs = list(_live.values())
+    for proc in procs:
+        _kill_tree(proc, force=False)
+    deadline = time.monotonic() + 5
+    for proc in procs:
+        try:
+            proc.wait(timeout=max(0.1, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            pass
+    for proc in procs:
+        _kill_tree(proc, force=True)  # also reaps stragglers in the group
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _on_sigterm(_signum, _frame):
+    raise KeyboardInterrupt
+
+
+def run_command(command: list, env: dict, capture: bool):
+    """Run one command; return (returncode, output bytes or None, seconds)."""
     started = time.monotonic()
-    proc = subprocess.run(command, cwd=str(ROOT), env=env)
-    elapsed = time.monotonic() - started
-    ok = proc.returncode == 0
-    print("        -> %s (rc=%s, %.1fs)" % (
-        "PASS" if ok else "FAIL", proc.returncode, elapsed))
+    kwargs = {"cwd": str(ROOT), "env": env}
+    if os.name != "nt":
+        kwargs["start_new_session"] = True  # lets us kill the whole tree
+    # Output goes to a temporary file rather than a pipe, so waiting only
+    # depends on the test process itself, as with inherited stdout before.
+    sink = tempfile.TemporaryFile() if capture else None
+    try:
+        if sink is not None:
+            kwargs.update(stdout=sink, stderr=subprocess.STDOUT)
+        with _live_lock:
+            if _stopping:
+                raise KeyboardInterrupt
+            proc = subprocess.Popen(command, **kwargs)
+            _live[proc.pid] = proc
+        try:
+            proc.wait()
+        finally:
+            with _live_lock:
+                _live.pop(proc.pid, None)
+        output = None
+        if sink is not None:
+            sink.seek(0)
+            output = sink.read()
+    finally:
+        if sink is not None:
+            sink.close()
+    return proc.returncode, output, time.monotonic() - started
+
+
+def emit(data: bytes) -> None:
+    sys.stdout.flush()
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(data)
+        buffer.flush()
+    else:
+        sys.stdout.write(data.decode("utf-8", "replace"))
+        sys.stdout.flush()
+
+
+class Entry:
+    def __init__(self, index, path, label, command, error=None):
+        self.index = index
+        self.path = path
+        self.label = label
+        self.command = command  # None when the entry cannot run
+        self.error = error      # failure reason when it cannot run
+        self.serial = path in SERIAL_TESTS
+        self.ok = False
+        self.rc = None
+        self.seconds = 0.0
+
+
+def print_header(entry: Entry, total: int) -> None:
+    print("[%d/%d] %s" % (entry.index, total, entry.label))
+    if entry.command:
+        print("        $ " + " ".join(entry.command))
+
+
+def print_result(entry: Entry) -> None:
+    if entry.command is None:
+        print("        -> FAIL (%s)" % entry.error)
+    else:
+        print("        -> %s (rc=%s, %.1fs)" % (
+            "PASS" if entry.ok else "FAIL", entry.rc, entry.seconds))
     print()
-    return ok
+
+
+def execute(entry: Entry, env: dict, capture: bool):
+    rc, output, seconds = run_command(entry.command, env, capture)
+    entry.rc, entry.seconds, entry.ok = rc, seconds, rc == 0
+    return output
+
+
+def run_parallel(entries: list, total: int, env: dict, jobs: int) -> None:
+    """Run entries concurrently; print each one as a block when it finishes."""
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=jobs)
+    try:
+        futures = {pool.submit(execute, e, env, True): e for e in entries}
+        for future in concurrent.futures.as_completed(futures):
+            entry = futures[future]
+            output = future.result()
+            print_header(entry, total)
+            if output:
+                emit(output)
+                if not output.endswith(b"\n"):
+                    print()
+            print_result(entry)
+    except BaseException:
+        kill_all_children()
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
 
 
 def print_inventory() -> None:
@@ -183,6 +337,8 @@ def print_inventory() -> None:
     print("Public Python tests:")
     for path, label, platforms in PYTHON_TESTS:
         scope = "all platforms" if platforms is None else "/".join(platforms)
+        if path in SERIAL_TESTS:
+            scope += ", runs alone"
         print("  %-52s %s  [%s]" % (path, label, scope))
     print()
     print("Public Node (maintainer UI) tests:")
@@ -195,6 +351,10 @@ def print_inventory() -> None:
     print("  tools/regression_corpus.py         needs a private corpus")
     print("  tools/build_metro_reference.py     maintainer rebuild of the ABS metropolitan reference")
     print("  Optional --with-mcp: tools/test_mcp.py and tools/test_mcp_http.py (requirements-mcp.txt)")
+    print()
+    print("Run alone, after the parallel group (--jobs > 1):")
+    for path, reason in SERIAL_TESTS.items():
+        print("  %-52s %s" % (path, reason))
 
 
 def main(argv=None) -> int:
@@ -204,7 +364,12 @@ def main(argv=None) -> int:
                         help="print the inventory and exit without running")
     parser.add_argument("--with-mcp", action="store_true",
                         help="also run the optional MCP integration test (requires requirements-mcp.txt)")
+    parser.add_argument("--jobs", type=int, default=default_jobs(), metavar="N",
+                        help="entries to run at once (default: min(4, CPU count)); "
+                             "1 runs them sequentially in inventory order")
     args = parser.parse_args(argv)
+    if args.jobs < 1:
+        parser.error("--jobs must be at least 1")
 
     if args.list:
         print_inventory()
@@ -216,66 +381,73 @@ def main(argv=None) -> int:
     print("Platform: %s" % sys.platform)
     nv = node_version()
     print("Node: %s" % (nv if nv else "not found (needed for the maintainer UI test)"))
+    print("Jobs: %d%s" % (args.jobs, " (sequential)" if args.jobs == 1 else ""))
     print()
 
     env = build_env()
-    passed = 0
-    failed = 0
-    failures: list = []
 
     python_tests = PYTHON_TESTS + (MCP_TESTS if args.with_mcp else ())
     py_applicable = [(p, d, pl) for (p, d, pl) in python_tests if applicable(pl)]
     node_applicable = [(p, d, pl) for (p, d, pl) in NODE_TESTS if applicable(pl)]
     total = len(py_applicable) + len(node_applicable)
-    index = 0
+    node = shutil.which("node")
 
-    for path, label, _platforms in py_applicable:
-        index += 1
-        target = ROOT / path
-        if not target.is_file():
-            failed += 1
-            failures.append(path)
-            print("[%d/%d] %s" % (index, total, label))
-            print("        -> FAIL (missing required test file: %s)" % path)
-            print()
-            continue
-        if run_one(index, total, label, [sys.executable, str(target)], env):
-            passed += 1
-        else:
-            failed += 1
-            failures.append(path)
-
-    if node_applicable:
-        node = shutil.which("node")
-        for path, label, _platforms in node_applicable:
-            index += 1
+    entries: list = []
+    for runtime, group in ((sys.executable, py_applicable), (node, node_applicable)):
+        for path, label, _platforms in group:
+            index = len(entries) + 1
             target = ROOT / path
             if not target.is_file():
-                failed += 1
-                failures.append(path)
-                print("[%d/%d] %s" % (index, total, label))
-                print("        -> FAIL (missing required test file: %s)" % path)
-                print()
-                continue
-            if not node:
-                failed += 1
-                failures.append(path)
-                print("[%d/%d] %s" % (index, total, label))
-                print("        -> FAIL (node not found on PATH; this maintainer")
-                print("           UI test is required for the full public suite)")
-                print()
-                continue
-            if run_one(index, total, label, [node, str(target)], env):
-                passed += 1
+                entries.append(Entry(index, path, label, None,
+                                     "missing required test file: %s" % path))
+            elif not runtime:
+                entries.append(Entry(index, path, label, None,
+                                     "node not found on PATH; this maintainer UI test is "
+                                     "required for the full public suite"))
             else:
-                failed += 1
-                failures.append(path)
+                entries.append(Entry(index, path, label, [runtime, str(target)]))
+
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, _on_sigterm)
+    try:
+        for entry in entries:
+            if entry.command is None:  # cannot run: report immediately
+                print_header(entry, total)
+                print_result(entry)
+        runnable = [e for e in entries if e.command is not None]
+        if args.jobs == 1:
+            for entry in runnable:
+                print_header(entry, total)
+                sys.stdout.flush()
+                execute(entry, env, capture=False)
+                print_result(entry)
+        else:
+            run_parallel([e for e in runnable if not e.serial], total, env, args.jobs)
+            for entry in (e for e in runnable if e.serial):
+                # Exclusive: nothing else is running while this one does.
+                run_parallel([entry], total, env, 1)
+    except KeyboardInterrupt:
+        kill_all_children()
+        print()
+        print("Interrupted: child test processes were stopped.")
+        return 130
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+
+    passed = sum(1 for e in entries if e.ok)
+    failures = [e.path for e in entries if not e.ok]
+    failed = len(failures)
 
     not_applicable = [p for (p, _d, pl) in PYTHON_TESTS + NODE_TESTS
                       if not applicable(pl)]
     skipped = len(not_applicable)
 
     print("=" * 64)
+    print("Results in inventory order:")
+    for entry in entries:
+        print("  %-4s %6.1fs  %s" % ("PASS" if entry.ok else "FAIL",
+                                     entry.seconds, entry.path))
+    print("-" * 64)
     print("Summary: %d passed, %d failed, %d not applicable" % (
         passed, failed, skipped))
     if not_applicable:

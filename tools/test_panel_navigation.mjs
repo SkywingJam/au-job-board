@@ -51,6 +51,43 @@ function eq(label, got, want) {
 }
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/* 可控时钟：只替换面板沙箱里的 setTimeout / clearTimeout / Date，测试用 advance(ms)
+   按先后顺序触发到期的定时器，不再真实等待。测试进程自己的 tick() 仍用真实定时器。 */
+class FakeClock {
+  constructor() {
+    this.now = Date.now();
+    this.seq = 0;
+    this.timers = new Map();
+    const clock = this;
+    this.setTimeout = (fn, ms = 0, ...args) => {
+      const id = ++clock.seq;
+      clock.timers.set(id, { at: clock.now + Math.max(0, Number(ms) || 0), id, fn, args });
+      return id;
+    };
+    this.clearTimeout = (id) => { clock.timers.delete(id); };
+    this.Date = class extends Date {
+      constructor(...a) { a.length ? super(...a) : super(clock.now); }
+      static now() { return clock.now; }
+    };
+  }
+  pending() { return this.timers.size; }
+  /* 前进 ms：到期定时器按 (时间, 登记顺序) 依次运行，运行时 now 就是它的到期时刻。 */
+  advance(ms) {
+    const target = this.now + ms;
+    for (;;) {
+      let next = null;
+      for (const timer of this.timers.values()) {
+        if (timer.at <= target && (!next || timer.at < next.at || (timer.at === next.at && timer.id < next.id))) next = timer;
+      }
+      if (!next) break;
+      this.timers.delete(next.id);
+      this.now = Math.max(this.now, next.at);
+      next.fn(...next.args);
+    }
+    this.now = target;
+  }
+}
+
 class ClassList {
   constructor() { this.set = new Set(); }
   add(...names) { names.forEach((n) => this.set.add(n)); }
@@ -114,7 +151,7 @@ class El {
   scrollIntoView() { this.scrolled = (this.scrolled || 0) + 1; }
 }
 
-function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], owners = [], portrait = false, keys = "", i18n = {} } = {}) {
+function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], owners = [], portrait = false, keys = "", i18n = {}, fakeClock = false } = {}) {
   const ids = new Map();
   const reg = {};
   const docListeners = new Map();
@@ -152,6 +189,8 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
     confirm: () => false,
     fetch: async () => { throw new Error("fetch 未配置"); },
   };
+  const clock = fakeClock ? new FakeClock() : null;
+  if (clock) Object.assign(sandbox, { setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout, Date: clock.Date });
   sandbox.window = sandbox;
   Object.assign(sandbox, {
     __I18N__: i18n, __LABELS__: {}, __NOTE_TAGS__: [], __NOTE_TAG_LABELS__: {}, __SKILLS__: skills,
@@ -201,7 +240,7 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   vm.runInContext(src, sandbox, { filename: "panel.js" });
   const t = {
     api: sandbox.__T__, sandbox, document, ids, reg, pane, prev, next, pos, cards: cardEls,
-    reloads: () => reloads, local,
+    reloads: () => reloads, local, clock,
     key: (ev) => (docListeners.get("keydown") || []).forEach((fn) => fn({ target: body, preventDefault() { this.prevented = true; }, ...ev })),
     calls: [],
     docEvent: (type, ev) => (docListeners.get(type) || []).forEach(fn => fn(ev)),
@@ -783,8 +822,8 @@ async function testDetailOpenRefreshesLabel() {
     JSON.stringify({action:"applied",note:"New synthetic note；"}));
 }
 
-function filterFixture(portrait) {
-  const t = loadPanel({ portrait });
+function filterFixture(portrait, opts = {}) {
+  const t = loadPanel({ portrait, ...opts });
   const sel = (key, value, options) => {
     const picker = new El("div"); picker.className = "choicepick";
     picker.dataset.choiceDefault = options[0][0];
@@ -966,16 +1005,18 @@ async function testFilterDrawer() {
   }
   {
     // 搜索防抖窗口内打开抽屉：定时器作废，搜索词进草稿
-    const f = filterFixture(true); const { t } = f;
+    const f = filterFixture(true, { fakeClock: true }); const { t } = f;
     const start = t.sandbox.location.href;
     f.q.value = "python sql"; t.api.searchTyping({ target: f.q });
     t.api.toggleMore(true);
-    await new Promise((r) => setTimeout(r, 450));
+    t.clock.advance(450);   // 越过 380ms 搜索防抖窗口（可控时钟，不真实等待）
+    await tick();
     eq("防抖内打开抽屉：不跳转", t.sandbox.location.href, start);
     eq("搜索词计入未提交草稿", t.api.filterDraftCount(), 1);
     f.q.value = "python sql aws"; t.api.searchTyping({ target: f.q });
     t.api.applyFilter();
-    await new Promise((r) => setTimeout(r, 450));
+    t.clock.advance(450);
+    await tick();
     eq("抽屉内继续输入 / 直接 applyFilter：只更新草稿", [t.sandbox.location.href, t.api.filterDraftCount()], [start, 1]);
     t.api.moreDone(); await tick();
     eq("应用：搜索词一起提交",
@@ -1943,12 +1984,12 @@ async function testMultiSelect() {
 
   console.log("\n-- 卡片多选：触屏长按（宽布局：模式里长按切换，点击规则同电脑） --");
   {
-    const t = selPanel();
+    const t = selPanel({ fakeClock: true });
     t.api.HOLD.ms = 25;
     const pt = (x, y) => ({ clientX: x, clientY: y });
     const down = (uid, x = 100, y = 200, extra = {}) => t.docEvent("touchstart", { target: t.target("card", uid), touches: [pt(x, y)], changedTouches: [pt(x, y)], ...extra });
     const up = () => t.docEvent("touchend", { target: t.document.body, touches: [], changedTouches: [pt(100, 200)] });
-    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const wait = async (ms) => { t.clock.advance(ms); await tick(); };
     down("B"); await wait(60);
     eq("长按到时：选中并进入多选", [t.sel(), document_is(t, "selecting"), t.api.selState().holdClick], [["B"], true, true]);
     const compat = { type: "click", target: t.target("card", "B"), button: 0, detail: 1, clientX: 102, clientY: 203, pointerType: "touch",
@@ -2103,12 +2144,12 @@ async function testMultiSelect() {
 
   console.log("\n-- 竖屏（手机）多选：模式独立于选中数，只有“取消”退出 --");
   {
-    const t = selPanel({ portrait: true });
+    const t = selPanel({ portrait: true, fakeClock: true });
     t.api.HOLD.ms = 25;
     const pt = (x, y) => ({ clientX: x, clientY: y });
     const down = (uid, x = 100, y = 200) => t.docEvent("touchstart", { target: t.target("card", uid), touches: [pt(x, y)], changedTouches: [pt(x, y)] });
     const up = () => t.docEvent("touchend", { target: t.document.body, touches: [], changedTouches: [pt(100, 200)] });
-    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const wait = async (ms) => { t.clock.advance(ms); await tick(); };
     const tapEvent = (kind, uid, extra = {}) => ({ type: "click", target: t.target(kind, uid), button: 0, detail: 1, clientX: 100, clientY: 200, pointerType: "touch",
       preventDefault() { this.p = true; }, stopPropagation() { this.s = true; }, ...extra });
     // 普通模式：短按看 JD、长按进入

@@ -27,7 +27,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from jobs import db as database  # noqa: E402
-from jobs import i18n, labels as labels_mod, panel, panel_views  # noqa: E402
+from jobs import labels as labels_mod, panel, panel_views  # noqa: E402
 
 PATH = "/api/labels/batch"
 LONG_TITLE = 'Title with "quotes" & <tags> ' + "very long " * 12
@@ -412,15 +412,6 @@ class PanelMultiselectTests(unittest.TestCase):
                 self.assertIn('tabindex="0"', card)
                 self.assertEqual(html.count('class="card-check"'), html.count('class="card'
                                                                               + '" data-uid=') + html.count('class="card done" data-uid='))
-
-    def test_script_strings_exist_in_both_languages_with_matching_placeholders(self):
-        zh, en = i18n.js_strings("zh"), i18n.js_strings("en")
-        keys = [k for k in zh if k.startswith("sel.")]
-        self.assertGreaterEqual(len(keys), 15)
-        for key in keys:
-            with self.subTest(key):
-                self.assertIn(key, en)
-                self.assertEqual(sorted(re.findall(r"\{(\w+)\}", zh[key])), sorted(re.findall(r"\{(\w+)\}", en[key])))
 
     def test_card_render_is_pure_and_selection_hooks_do_not_change_other_card_fields(self):
         row = {"uid": "seek:x", "title": "T", "company": "C", "location": "L", "source": "seek", "total_score": 5,
