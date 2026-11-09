@@ -19,6 +19,8 @@ import json
 import sqlite3
 import os
 import time
+import threading
+import re
 from http.server import BaseHTTPRequestHandler
 from .http_server import ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -49,6 +51,7 @@ EDIT_MAX_BYTES = 64 * 1024  # Complete JSON body; allow notes larger than update
 # 100 items x (512-char uid + fields) stays well below this.
 LABEL_BATCH_MAX_BYTES = 128 * 1024
 LABEL_BATCH_PATH = "/api/labels/batch"
+_PAGE_STORE_LOCK = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -60,9 +63,10 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _send(self, body: bytes, status: int = 200, ctype: str = "text/html; charset=utf-8",
-              started: float | None = None):
+              started: float | None = None, extra_headers=()):
         raw_len = len(body)
         headers = [("Content-Type", ctype), ("Cache-Control", "no-store")]
+        headers.extend(extra_headers)
         if raw_len > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
             body = gzip.compress(body, 6)
             headers.append(("Content-Encoding", "gzip"))
@@ -93,6 +97,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query, keep_blank_values=True)
         lang, theme = self._prefs()
+        if parsed.path.startswith(('/plugins/', '/api/plugin-view/')):
+            self._plugin_page(parsed.path, qs, started)
+            return
         if parsed.path in ("/api/plugins", "/api/plugins/debug"):
             try:
                 allowed = self._same_origin()
@@ -181,8 +188,13 @@ class Handler(BaseHTTPRequestHandler):
                 filters.pop("mode", None)
             if view not in INELIGIBLE_LAST_VIEWS:
                 filters.pop(INELIGIBLE_LAST_KEY, None)
+            requested_display = (qs.get('display') or ['list'])[0]
+            from . import plugin_host
+            pages = plugin_host.page_plugins(config)
+            display = requested_display if any(p['id'] == requested_display for p in pages) else 'list'
             page = render_page(conn, config, view, offset, limit, started, filters,
-                               lang, theme, i18n.lang_pref(self.headers.get("Cookie")))
+                               lang, theme, i18n.lang_pref(self.headers.get("Cookie")),
+                               display=display, display_pages=pages)
             self._send(page.encode("utf-8"), 200, "text/html; charset=utf-8", started)
         except ValueError as exc:
             self._send(str(exc).encode(), 400, "text/plain; charset=utf-8", started)
@@ -269,7 +281,7 @@ class Handler(BaseHTTPRequestHandler):
             if conn is not None:
                 conn.close()
 
-    def _same_origin(self) -> bool:
+    def _same_origin(self, *, public_frame_asset=False) -> bool:
         """Host (and Origin, when sent) must name this listener. A malformed
         port raises ValueError; callers treat that as a rejection."""
         request_host = urlparse("//" + self.headers.get("Host", ""))
@@ -286,6 +298,8 @@ class Handler(BaseHTTPRequestHandler):
                    and (request_host.port or 80) == bound_port
                    and not request_host.username and not request_host.password)
         origin = self.headers.get("Origin")
+        if public_frame_asset and origin == 'null':
+            return host_ok
         if origin is not None:
             parsed = urlparse(origin)
             host_ok = host_ok and (parsed.scheme == "http"
@@ -293,6 +307,76 @@ class Handler(BaseHTTPRequestHandler):
                                   and not parsed.path and not parsed.query
                                   and not parsed.fragment)
         return host_ok
+
+    def _plugin_page(self, path, qs, started):
+        from . import plugin_pages
+        from .agent_api import APIError
+        created = None
+        store = None
+        try:
+            parts = path.strip('/').split('/')
+            public = parts[0] == 'plugins'
+            plugin_id = parts[1 if public else 2] if len(parts) >= 3 else ''
+            if (not re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', plugin_id)
+                    or not self._same_origin(public_frame_asset=public)):
+                raise APIError('forbidden', 403)
+            config = self._plugin_config()
+            plugin_pages.require_page(config, plugin_id)
+            if public:
+                if parts == ['plugins', plugin_id, 'frame']:
+                    relative = 'index.html'
+                elif len(parts) >= 4 and parts[2] == 'assets':
+                    relative = '/'.join(parts[3:])
+                else:
+                    raise APIError('not_found', 404)
+                body, mime = plugin_pages.resource(config, plugin_id, relative)
+                # Build the CSP only from the validated host:port, never the raw header,
+                # and scope local sources to this plugin's own paths (not /api/*).
+                raw_host = self.headers.get('Host', '')
+                host = urlparse('//' + raw_host)
+                if host.netloc != raw_host or not host.hostname:
+                    raise APIError('forbidden', 403)
+                name = f'[{host.hostname}]' if ':' in host.hostname else host.hostname
+                base = f'http://{name}:{host.port or 80}/plugins/{plugin_id}/'
+                tiles = 'https://tiles.openfreemap.org'
+                csp = ("default-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts; "
+                       f"script-src {base} blob:; style-src {base} 'unsafe-inline'; "
+                       f"worker-src {base} blob: data:; connect-src {base} {tiles}; "
+                       f"img-src {base} {tiles} data: blob:; font-src {base} {tiles}; frame-ancestors 'self'")
+                self._send(body, 200, mime, started, [('Access-Control-Allow-Origin', '*'),
+                    ('Referrer-Policy', 'origin'), ('X-Content-Type-Options', 'nosniff'),
+                    ('Content-Security-Policy', csp)])
+                return
+            if len(parts) != 4 or parts[:3] != ['api', 'plugin-view', plugin_id]:
+                raise APIError('not_found', 404)
+            operation = parts[3]
+            if operation == 'reference':
+                if set(qs) != {'file'} or len(qs['file']) != 1:
+                    raise APIError('invalid_reference', 400)
+                result = plugin_pages.reference(config, plugin_id, qs['file'][0])
+            else:
+                with _PAGE_STORE_LOCK:
+                    if not hasattr(self.server, 'page_snapshots'):
+                        self.server.page_snapshots = plugin_pages.PageSnapshots()
+                    store = self.server.page_snapshots
+                if operation == 'jobs':
+                    created, result = store.load(config, plugin_id, qs)
+                elif operation == 'member':
+                    if set(qs) != {'snapshot_id', 'uid'} or any(len(v) != 1 for v in qs.values()):
+                        raise APIError('invalid_snapshot', 400)
+                    result = store.membership(config, plugin_id, qs['snapshot_id'][0], qs['uid'][0])
+                else:
+                    raise APIError('not_found', 404)
+            try:
+                self._json(result, 200, started)
+            except BaseException:
+                if created:
+                    store.store.discard(created)
+                raise
+        except APIError as exc:
+            self._json({'error': {'code': exc.code, 'message': exc.code}}, exc.status, started)
+        except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
+            self._json({'error': {'code': 'plugin_page_unavailable', 'message': 'Plugin page unavailable'}}, 503, started)
 
     def _stats(self, started: float):
         """Read-only header counters, re-fetched after a label/note write.

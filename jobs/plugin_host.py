@@ -36,6 +36,13 @@ _EMPTY = {'badges': [], 'sections': []}
 SPONSOR_NETWORK = [{'purpose': 'sponsorship_reference', 'timing': 'after_fetch',
                     'targets': ['www.abf.gov.au', 'www.asx.com.au', 'data.gov.au'],
                     'request_data': 'no_job_data'}]
+PAGE_ICONS = ('map',)   # display-switch icons the core draws; plugins supply no markup
+PAGE_JOB_FIELDS = ['uid', 'group_id', 'title', 'company', 'location_raw',
+                   'location_fact', 'salary', 'work_type', 'listing_date',
+                   'total_score', 'priority', 'core_order', 'panel_url']
+MAP_NETWORK = [{'purpose': 'map_tiles', 'timing': 'view_open',
+                'targets': ['tiles.openfreemap.org'],
+                'request_data': 'tile_coordinates_and_browser_metadata'}]
 
 
 def _read(path, limit):
@@ -71,6 +78,8 @@ def _manifest(path, plugin_id):
     if not (isinstance(description, str) and len(description) <= 200 or
             isinstance(description, dict) and all(k in ('zh', 'en') and isinstance(v, str) and len(v) <= 200 for k, v in description.items())):
         raise ValueError('invalid description')
+    if value.get('compatibility') == {'host_api': 2}:
+        return _page_manifest(value)
     if value.get('compatibility') != {'host_api': 1}:
         raise ValueError('incompatible host API')
     if value.get('entry') != 'plugin.py':
@@ -93,8 +102,33 @@ def _manifest(path, plugin_id):
     return value
 
 
+def _page_manifest(value):
+    """Structured, front-end-only pages. Never imports installed Python code."""
+    page = value.get('page')
+    if (not isinstance(page, dict) or not {'id', 'label', 'entry'} <= set(page) <= {'id', 'label', 'entry', 'icon'}
+            or page.get('icon', 'map') not in PAGE_ICONS
+            or page['id'] != value['id'] or page['entry'] != 'web/index.html'
+            or not isinstance(page['label'], dict) or set(page['label']) != {'zh', 'en'}
+            or not all(isinstance(v, str) and 0 < len(v) <= 32 for v in page['label'].values())):
+        raise ValueError('invalid page')
+    if (value.get('entry') != page['entry'] or value.get('hooks') != []
+            or value.get('network') != 'view_open' or value.get('display') is not True
+            or value.get('i18n') != ['zh', 'en']):
+        raise ValueError('invalid page capabilities')
+    if value.get('permissions') != {
+            'job_fields': PAGE_JOB_FIELDS, 'files': ['plugin_reference'],
+            'network': MAP_NETWORK, 'execution': ['browser_frame'],
+            'display': ['page', 'display_mode']}:
+        raise ValueError('unknown page permissions')
+    return value
+
+
 def fingerprint(manifest):
     scope = {key: manifest.get(key) for key in ('id', 'hooks', 'network', 'display', 'permissions')}
+    if manifest.get('compatibility') == {'host_api': 2}:
+        scope.update({key: manifest.get(key) for key in ('compatibility', 'entry', 'page')})
+        if isinstance(scope['page'], dict):   # the display icon is cosmetic, not a permission
+            scope['page'] = {k: v for k, v in scope['page'].items() if k != 'icon'}
     return hashlib.sha256(json.dumps(scope, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
 
 
@@ -112,6 +146,32 @@ def consent(config, manifest):
     except Exception:
         previous = None
     status = 'granted' if previous == current else ('changed' if previous else 'required')
+    if manifest.get('compatibility') == {'host_api': 2}:
+        entries = [
+            ('identity', '插件来源', 'Plugin source',
+             '请只安装来自可信维护者的插件。', 'Only install plugins from maintainers you trust.'),
+            ('jobs', '读取岗位摘要', 'Reads job summaries',
+             '读取当前筛选结果中每个岗位的标题、公司、地点、薪资、工作类型、发布日期、匹配分和星标，用来在地图上显示。不读取岗位正文、备注、历史记录、简历或账号信息。',
+             'Reads the title, company, location, salary, work type, listing date, score and star of each job in the current results to show them on the map. It never reads job descriptions, notes, history, your CV or account details.'),
+            ('files', '自带的邮编数据', 'Built-in postcode data',
+             '使用插件自带的澳洲统计局公开邮编范围数据，不需要联网下载。地图位置只记在当前浏览器标签页里；关闭或卸载插件不会删除这些数据文件。',
+             'Uses public Australian Bureau of Statistics postcode areas shipped with the plugin; nothing is downloaded. The map position is only kept in this browser tab. Turning off or removing the plugin does not delete these data files.'),
+            ('network', '加载底图', 'Loads the background map',
+             '只在打开地图时，浏览器会从 tiles.openfreemap.org 加载底图。对方能看到你的 IP 地址、正在查看的地图范围，以及你访问看板用的网址（只含开头的地址，不含具体页面），但收不到岗位、公司、正文、备注或搜索词。关闭插件后不再加载。',
+             'Only while the map is open, your browser loads the background map from tiles.openfreemap.org. They can see your IP address, which part of the map you are viewing and the address you use to open this board (the site address only, not the page), but never jobs, companies, descriptions, notes or searches. Nothing loads after you turn the plugin off.'),
+            ('execution', '独立运行', 'Runs separately',
+             '地图在看板中一块独立区域里运行，只能拿到上面的岗位摘要，或请看板打开某个岗位的详情。它不能修改岗位、标注或备注。',
+             'The map runs in a separate area of the board. It can only get the job summaries above or ask the board to open a job. It cannot change jobs, labels or notes.'),
+            ('display', '列表 / 地图切换', 'List / map switch',
+             '在搜索栏旁加入列表和地图的切换按钮。在地图上移动或选择区域只影响地图，不会改变看板的筛选、排序、匹配分或你的标注。',
+             'Adds a list / map switch next to the search box. Moving around or picking an area on the map only affects the map, never the board’s filters, sorting, scores or your labels.'),
+        ]
+        return {'status': status, 'fingerprint': current,
+                'permissions': [{'id': i, 'title': {'zh': z, 'en': e},
+                                 'description': {'zh': dz, 'en': de}}
+                                for i, z, e, dz, de in entries],
+                'limits': {'zh': '请只使用可信来源的插件。地图在一块独立区域里运行，能加载的内容和联网范围都有限制，读不到你的文件，也改不了看板里的数据。但这些限制不能完全防住恶意插件，比如它仍可能让这块区域跳转到别的网页，所以请不要安装来源不明的插件。',
+                           'en': 'Only use plugins you trust. The map is kept in a separate area with limits on what it can load and connect to, and it cannot read your files or change data on the board. These limits are not airtight: a plugin could still send its own area to another web page, so never install a plugin from a source you do not trust.'}}
     entries = [
         ('identity', '插件来源', 'Plugin source',
          '这是本机安装的插件，请确认安装包来自你信任的维护者。', 'This plugin is installed locally. Make sure its package comes from a maintainer you trust.'),
@@ -229,6 +289,26 @@ def list_plugins(config: dict) -> list[dict]:
             item['status'] = 'error'
         result.append(item)
     return result
+
+
+def page_plugins(config):
+    """Only authorized, compatible display registrations; disabled path is inert."""
+    if not _configured(config) or 'demo' in config:
+        return []
+    pages = []
+    for item in list_plugins(config):
+        if item['status'] != 'enabled':
+            continue
+        try:
+            manifest = _manifest(PLUGIN_ROOT / item['id'], item['id'])
+            if manifest.get('compatibility') == {'host_api': 2}:
+                pages.append({'id': item['id'], 'label': manifest['page']['label'],
+                              'icon': manifest['page'].get('icon')})
+        except RunTimeout:
+            raise
+        except (OSError, ValueError, TypeError):
+            continue
+    return pages
 
 
 def _latest(config):

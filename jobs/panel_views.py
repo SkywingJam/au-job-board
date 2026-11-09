@@ -76,6 +76,15 @@ ICON_REFRESH = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" str
                 'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
                 '<path d="M20 4v6h-6"/><path d="M20 10a8 8 0 1 0-.7 7"/></svg>')
 # 齿轮（Feather 风格）
+ICON_LIST = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+             'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/>'
+             '<circle cx="4.5" cy="18" r="1"/></svg>')
+ICON_MAP = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<path d="M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5L9 4Z"/><path d="M9 4v13.5M15 6.5V20"/></svg>')
+# Plugin pages choose a display icon from this fixed set; plugins never supply markup.
+PAGE_ICONS = {'map': ICON_MAP}
 ICON_GEAR = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
              'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
              '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 '
@@ -902,7 +911,8 @@ def _selection_bar(lang: str) -> str:
             '</div>')
 
 
-def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", skill_labels=None) -> str:
+def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", skill_labels=None,
+                *, display_pages=(), display='list', display_url=None) -> str:
     """工具栏 + 「更多筛选」面板 + 生效条件。
 
     **搜索和筛选是同一套机制**：同一个 `data-fkey` + `applyFilter()`，
@@ -951,6 +961,17 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
         out.append(_select("sort", T("filter.sort"),
                            [(v, T(f"sort.{v}")) for v in SORT_KEYS], sort, active=False))
     out.append("</div>")
+    if display_pages:
+        out.append('<div class="display-switch" role="group" aria-label="'
+                   + ('展示方式' if lang == 'zh' else 'Display') + '">')
+        for mode, title, icon in [('list', '列表' if lang == 'zh' else 'List', ICON_LIST)] + [
+                (p['id'], p['label'].get(lang, p['id']), PAGE_ICONS.get(p.get('icon'))) for p in display_pages]:
+            href = (display_url or _link(view, 0, filters)) + '&display=' + mode
+            out.append(f'<a class="fbtn{" icon" if icon else ""}{" on" if mode == display else ""}" '
+                       f'href="{_e(href)}" data-plugin-display="{_e(mode)}" '
+                       f'aria-label="{_e(title)}" title="{_e(title)}"'
+                       f'{CURRENT if mode == display else ""}>{icon or _e(title)}</a>')
+        out.append('</div>')
     if any(k != SINCE_KEY for k in filters):
         out.append(f'<a class="clear" href="#" onclick="clearFilter();return false;">'
                    f'{_e(T("filter.clear_all"))}</a>')
@@ -1134,7 +1155,8 @@ def _filters_for_view(view: str, filters: dict) -> dict:
 
 def render_page(conn, config: dict, view: str, offset: int, limit: int,
                 started: float | None = None, filters: dict | None = None,
-                lang: str = "zh", theme: str | None = None, lang_pref: str = "auto") -> str:
+                lang: str = "zh", theme: str | None = None, lang_pref: str = "auto", *,
+                display='list', display_pages=()) -> str:
     """渲染整页。
 
     `started` 现在**不在这里用**（页脚已删），但保留参数：它和
@@ -1146,6 +1168,11 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     result_generation = run_state.generation(config)
     filters = filters or {}
     since = _resolve_since(conn, view, filters)
+    display_url = _link(view, offset, filters, since)
+    page_context = ({'display': display, 'plugin_id': display if display != 'list' else None,
+                     'lang': lang, 'theme': theme, 'view': view,
+                     'query_url': display_url, 'return_url': display_url,
+                     'pages': display_pages} if display_pages else None)
     # 每次请求重读词表：词表文件很小，开销可忽略。换来的是「改了词表刷新即生效」，
     # 不用重启常驻面板（这也是把词表放数据里而不是代码里的意义）。
     skills_cfg = skills_mod.load_skills(config.get("skills_path"))
@@ -1235,7 +1262,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
                            for key in PROCESS_STATS)
 
     return "".join([
-        _head(lang, theme, T("app.title") + _demo_suffix(config, lang)),
+        _head(lang, theme, T("app.title") + _demo_suffix(config, lang),
+              'plugin-display' if display != 'list' else ''),
         _demo_banner(config, lang),
         '<header class="main-header">',
         '<div class="topbar">',
@@ -1253,7 +1281,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<a class="iconbtn setlink" href="/settings" title="{_e(T("nav.settings"))}">'
         f'{ICON_GEAR}<span>{_e(T("nav.settings"))}</span></a>',
         "</div></div>",
-        _filter_bar(view, filters, skill_counts, lang, skills_mod.display_names(skills_cfg)),
+        _filter_bar(view, filters, skill_counts, lang, skills_mod.display_names(skills_cfg),
+                    display_pages=display_pages, display=display, display_url=display_url),
         "</header>",
         '<div class="ctxbar">',
         f'<div class="ctx-desc">{ICON_INFO}<div><span class="ctx-text">'
@@ -1262,7 +1291,12 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<div class="ctx-stats">{stats_html}'
         f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span></div>',
         "</div>",
-        f'<main><div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
+        '<main>',
+        (f'<iframe id="plugin-display-frame" title="{_e(next(p["label"].get(lang, display) for p in display_pages if p["id"] == display))}" '
+         f'data-plugin-src="/plugins/{_e(display)}/frame" sandbox="allow-scripts" referrerpolicy="origin"></iframe>'
+         f'<button type="button" id="plugin-detail-back" onclick="closeDetail()">'
+         f'{_e("← 返回地图" if lang == "zh" else "← Back to map")}</button>' if display != 'list' else ''),
+        f'<div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
         cards,
         (f'<div class="pager">{"".join(pager)}</div>' if pager else ""),
         "</div>",
@@ -1302,6 +1336,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
                         "__SKILL_OWNERS__": sorted(skills_mod.canonical_tokens(skills_cfg).items()),
                         "__RESULT_GENERATION__": result_generation}),
         f"<script>{asset('panel.js')}</script>",
+        (_scripts(lang, {'__PAGE_CONTEXT__': page_context})
+         + f"<script>{asset('plugin_pages.js')}</script>" if page_context else ''),
         "</body></html>",
     ])
 

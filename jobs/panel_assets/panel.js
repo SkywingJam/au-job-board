@@ -158,6 +158,7 @@ async function openJob(uid){
   }
   selClear({keepUpdate:true});                       // 查看新 JD 才退出多选；被门拦下时选择保留
   OPEN_UID=uid;
+  if(window.__PAGE_CONTEXT__ && window.__PAGE_CONTEXT__.display!=='list')document.body.classList.add('plugin-detail-open');
   const heldCard=document.activeElement;
   document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.uid===uid));
   // 在详情请求返回前同步交接焦点，避免旧卡片的键盘环残留；竖屏保持原焦点行为。
@@ -242,6 +243,10 @@ async function closeDetail(expect){
   // 手势等保存/确认期间换了岗位（或已被别处关掉）：这次返回只属于当时那条，不关新的。
   if(expect && (OPEN_UID!==expect.uid || OPEN_SEQ!==expect.seq)) return;
   OPEN_UID=null;
+  if(document.body.classList.contains('plugin-detail-open')){
+    document.body.classList.remove('plugin-detail-open');
+    document.getElementById('plugin-display-frame')?.focus({preventScroll:true});   // 回到地图
+  }
   history.replaceState(null,"",location.pathname+location.search);
   if(UPDATE_PENDING && !SEL_MODE){applyLatestResults("");return;}
   OPEN_SEQ+=1; // Ignore pending responses and skeleton timers after closing.
@@ -344,6 +349,8 @@ function syncDetailNav(){
 }
 async function stepDetail(delta){
   if(NAV_GATES || DETAIL_LEAVING || UPDATE_APPLYING) return;
+  // 插件展示（地图）下隐藏的列表顺序与用户在地图上选的范围无关，不提供上一条/下一条。
+  if(document.body.classList.contains('plugin-display')) return;
   const list=navList(); if(!list.length) return;
   let target;
   if(!OPEN_UID) target = delta>0 ? list[0] : list[list.length-1];
@@ -1213,7 +1220,10 @@ function setLeft(px){
 /* 把当前宽度收敛到合法范围，并决定是不是竖屏。窗口缩放、拖动结束都要调它。 */
 function fitLayout(){
   const l=layoutEl(); if(!l) return;
-  const avail=l.clientWidth-gutterWidth();
+  // 插件展示（地图）时列表布局是隐藏的，宽度为 0；按 main 的宽度判断，
+  // 否则宽屏也会误切竖屏工具栏，列表/地图来回切换时工具栏会跳动。
+  const box=document.body.classList.contains('plugin-display') ? (document.querySelector('main')||l) : l;
+  const avail=box.clientWidth-gutterWidth();
   if(avail < MIN_LEFT+MIN_RIGHT){
     document.body.classList.add('portrait');
     placeFilters(true);
@@ -2463,5 +2473,11 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 async function navigatePanel(target){
   if(!await allowDetailNavigation())return;
+  if(window.__PAGE_CONTEXT__ && window.__PAGE_CONTEXT__.display!=='list'){
+    const next=new URL(target,location.origin);
+    if(next.origin===location.origin && next.pathname==='/' && !next.searchParams.has('display')){
+      next.searchParams.set('display',window.__PAGE_CONTEXT__.display);target=next.pathname+next.search+next.hash;
+    }
+  }
   DETAIL_LEAVING=true;location.href=target;
 }

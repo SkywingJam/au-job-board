@@ -1,3 +1,26 @@
+/* Optional registered plugin pages share the core header and filter controls. */
+.display-switch{display:flex;align-items:center;gap:3px;flex-shrink:0}
+.display-switch .fbtn{display:inline-flex;align-items:center;text-decoration:none}
+.display-switch .fbtn.icon{justify-content:center;width:38px;padding:0}
+body.portrait .display-switch .fbtn.icon{width:44px}
+.display-switch .on{background:var(--accent-tint);color:var(--accent-ink);border-color:var(--accent-line)}
+#plugin-display-frame{width:100%;height:100%;border:0;display:block;background:var(--paper)}
+body.plugin-display main{position:relative;min-height:0}
+body.plugin-display main>.layout{display:none}
+#plugin-detail-back{display:none}
+body.plugin-display.plugin-detail-open main>.layout{display:block;position:absolute;inset:0;z-index:5;background:var(--surface);padding-top:36px}
+body.plugin-display.plugin-detail-open .layout>.list,body.plugin-display.plugin-detail-open .gutter{display:none}
+body.plugin-display.plugin-detail-open #detail{display:block;width:100%;height:100%;position:relative;inset:auto;transform:none;overflow:auto}
+body.plugin-display.plugin-detail-open #plugin-detail-back{display:flex;align-items:center;position:absolute;top:0;left:0;right:0;z-index:6;width:100%;height:40px;text-align:left;padding:0 18px;border:0;border-bottom:1px solid var(--line);background:var(--surface);color:var(--accent);font:inherit;font-weight:600;cursor:pointer}
+body.plugin-display.plugin-detail-open main>.layout{padding-top:40px}
+/* 地图里打开的详情只有一个返回入口（返回地图），不提供按隐藏列表顺序的上一条/下一条。 */
+body.plugin-display #detail #back,body.plugin-display #detail .d-steps,body.plugin-display #detail .stepbtn{display:none!important}
+body.plugin-display main,body.plugin-display.portrait main{padding:0}   /* map fills the area under the context bar */
+#plugin-detail-back:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* 竖屏：列表/地图切换与搜索框同一行，不额外占一行。 */
+body.portrait .toolbar:has(.display-switch) .search{flex:1 1 0;min-width:0}
+body.portrait .toolbar:has(.display-switch) .spacer{display:none}
+body.portrait .display-switch .fbtn{min-height:44px}
 /* ==========================================================================
    澳洲岗位面板 · 样式
    颜色全部走 CSS 变量：:root 是浅色，[data-theme=dark] 与「跟随系统且系统为深色」

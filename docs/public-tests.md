@@ -10,8 +10,8 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 50 checks: 44 Python tests
-plus six Node behavior tests.
+be collected by accident. The entry currently has 53 checks: 46 Python tests
+plus seven Node behavior tests.
 
 Run it from the project root with the project interpreter:
 
@@ -21,10 +21,10 @@ Run it from the project root with the project interpreter:
 ```
 
 The optional MCP adapter has two opt-in integration entries:
-`python tools/run_public_tests.py --with-mcp` (52 entries on macOS).
+`python tools/run_public_tests.py --with-mcp` (55 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default local command keeps
-50 entries. Release CI installs the optional SDK and runs the platform-applicable inventory.
+53 entries. Release CI installs the optional SDK and runs the platform-applicable inventory.
 See [MCP](mcp.md).
 
 It prints one line per test with the command, the exit status and the elapsed
@@ -37,7 +37,7 @@ applicable" on a non-macOS system.
 
 - **Python 3.12** with the runtime dependencies:
   `python -m pip install -r requirements.txt`.
-- **Node.js 24.21.0** for the six panel behavior tests. Node is only
+- **Node.js 24.21.0** for the seven panel behavior tests. Node is only
   needed to run the full public suite. It is **not** part of the product
   installation, the panel does not depend on it at runtime, and a normal
   install does not need it.
@@ -49,6 +49,9 @@ nothing in the suite fetches listings.
 
 | Test | Covers | Platform |
 |---|---|---|
+| `tools/test_map_pages.py` | Registered page permission and origin checks, core query/group/order parity, summary privacy and snapshot/reference bounds | all |
+| `tools/test_map_reference.py` | Offline ABS postcode package hashes, leading zeros, parts, holes and interior points | all |
+| `tools/test_map_bridge.mjs` | Source/channel/operation validation, capacity, stale responses, membership and core detail delegation | all |
 | `tools/test_plugin_panel.py` | Plugin settings navigation, isolated debug records, roundtrip toggles, config conflicts/lock, Host/Origin validation, safe output, corrupt data and demo boundaries | all |
 | `tools/test_plugin_consent_backend.py` | Consent gate, fingerprint changes and trusted worker boundaries | all |
 | `tools/test_plugin_host.py` | Plugin process failures, bounded results and analysis generations | all |
@@ -115,7 +118,7 @@ published API/MCP port checks use a temporary bridge without fetching. See
 ## Windows coverage
 
 The same entry runs on native Windows x64 / Python 3.12. On Windows there are
-49 default entries or 51 with MCP; only the macOS LaunchAgent entry is
+52 default entries or 54 with MCP; only the macOS LaunchAgent entry is
 inapplicable. CI also runs it on GitHub-hosted `windows-2022` from the documented `.venv`,
 with `PYTHONUTF8=1` and Git for Windows' openssl; that job uses the runner's
 administrator account, so ordinary-account acceptance stays a separate native
@@ -141,6 +144,8 @@ Windows-exit cases are explicitly skipped on macOS.
 
 | Test | Why it is excluded |
 |---|---|
+| `tools/test_map_frontend.mjs` | Opt-in synthetic browser journeys. Requires a maintainer Playwright installation and Chromium; run `TEST_MODULE_CORS=1 node tools/test_map_frontend.mjs` with `CHROMIUM_PATH` and `PLAYWRIGHT_MODULE` when needed. Basemap networking is blocked. |
+| `tools/build_map_reference.py` | Maintainer-only pinned ABS package rebuild, with GIS tooling and a public source ZIP cached outside the checkout. |
 | `tools/test_public_snapshot.py` | It tests the maintainer public-snapshot planner, not the installed product. It is internal release tooling, so it does not belong in a user-facing public suite. |
 | `tools/regression_corpus.py` | It needs a private job corpus. |
 | `tools/build_metro_reference.py` | Maintainer tool that rebuilds the bundled metropolitan-area reference from three large official ABS downloads; it needs the network or a local copy of those files and is not used at runtime. |

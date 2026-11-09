@@ -478,6 +478,7 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
     const response=await fetch('/api/plugins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     let data={};try{data=await response.json();}catch(_){}
     if(!response.ok||!data.ok)throw new Error(data.error||'failed');
+    try{localStorage.setItem('jobs.plugins.changed',String(Date.now()));}catch(_){}
     return data;
   }
   /* The switch is the saved on/off setting; this line says whether it can actually run. */
