@@ -1,0 +1,20 @@
+{
+  "id": "map",
+  "name": {"zh": "岗位地图", "en": "Job map"},
+  "description": {"zh": "按邮编区域浏览当前筛选中的岗位。", "en": "Browse the current job query by postcode area."},
+  "version": "1.0.0",
+  "compatibility": {"host_api": 2},
+  "entry": "web/index.html",
+  "hooks": [],
+  "network": "view_open",
+  "display": true,
+  "i18n": ["zh", "en"],
+  "page": {"id": "map", "label": {"zh": "地图", "en": "Map"}, "entry": "web/index.html", "icon": "map"},
+  "permissions": {
+    "job_fields": ["uid", "group_id", "title", "company", "location_raw", "location_fact", "salary", "work_type", "listing_date", "total_score", "priority", "core_order", "panel_url"],
+    "files": ["plugin_reference"],
+    "network": [{"purpose": "map_tiles", "timing": "view_open", "targets": ["tiles.openfreemap.org"], "request_data": "tile_coordinates_and_browser_metadata"}],
+    "execution": ["browser_frame"],
+    "display": ["page", "display_mode"]
+  }
+}

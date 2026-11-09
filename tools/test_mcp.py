@@ -117,7 +117,8 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
             # A read tool has no confirmation argument and cannot mint a grant.
             await client.call_tool('review_plugin_permissions', {'confirmed': True})
             review = await self.call(client, 'review_plugin_permissions', {})
-            self.assertEqual(review['plugins'][0]['consent']['status'], 'required')
+            sponsorship = lambda r: next(p for p in r['plugins'] if p['id'] == 'sponsorship')
+            self.assertEqual(sponsorship(review)['consent']['status'], 'required')
             for command, expected in [('grant', 'granted'), ('revoke', 'required')]:
                 args = [sys.executable, '-B', '-m', 'jobs.cli', '--config', str(config_path),
                         'plugin', command, 'sponsorship']
@@ -126,7 +127,7 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 proc = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=15)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 review = await self.call(client, 'review_plugin_permissions', {})
-                self.assertEqual(review['plugins'][0]['consent']['status'], expected)
+                self.assertEqual(sponsorship(review)['consent']['status'], expected)
         self.assertEqual(hashlib.sha256(self.path.read_bytes()).hexdigest(), before)
 
     async def test_discovery_and_complete_frozen_read_without_writes(self):

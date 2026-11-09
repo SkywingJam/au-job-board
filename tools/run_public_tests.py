@@ -42,6 +42,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # (relative path, one-line description, applicable sys.platform values)
 # platforms=None means every platform; a tuple restricts the entry.
 PYTHON_TESTS = (
+    ("tools/test_map_pages.py", "registered map page authorization, query parity and summaries", None),
+    ("tools/test_map_reference.py", "offline postcode reference integrity and geometry", None),
     ("tools/test_plugin_panel.py", "plugin settings, debug and presentation HTTP boundaries", None),
     ("tools/test_plugin_host.py", "plugin process isolation and result generations", None),
     ("tools/test_plugin_consent_backend.py", "plugin consent and trusted worker boundaries", None),
@@ -119,6 +121,7 @@ PYTHON_TESTS = (
 )
 
 NODE_TESTS = (
+    ("tools/test_map_bridge.mjs", "plugin page bridge messages, bounds and core detail guard", None),
     ("tools/test_panel_shortcuts.mjs", "keyboard profiles, native selection and overlay guards", None),
     ("tools/test_panel_copy.mjs", "full JD clipboard, fallback and focus preservation", None),
     ("tools/test_plugin_settings_race.mjs", "plugin switches survive a late initial settings read", None),

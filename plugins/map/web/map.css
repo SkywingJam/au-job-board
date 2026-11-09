@@ -1,0 +1,118 @@
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font:14px/1.45 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif}
+body{color:#292d33;background:#f2f3f2}
+body.dark{color:#eeeff1;background:#202b31}
+#app{--paper:#fff;--ink:#292d33;--muted:#626b75;--line:#e2e5e9;--blue:#2357a6;--shadow:#25374a30;--hover:#f3f6fa;--foot:22px;
+  position:relative;height:100%;min-height:420px;overflow:hidden;background:#e9eeec;color:var(--ink)}
+body.dark #app{--paper:#202328;--ink:#eeeff1;--muted:#b1b9c2;--line:#424851;--blue:#8eb6ef;--shadow:#0008;--hover:#2a2f36;background:#26383e}
+button{font:inherit;cursor:pointer;color:inherit}
+button:focus-visible,a:focus-visible{outline:3px solid #4b87dd;outline-offset:2px}
+[hidden]{display:none!important}
+
+/* Map surface and overlays */
+#surface,#basemap,#geometry,#markers{position:absolute;inset:0}
+#surface{touch-action:none;overflow:hidden;bottom:var(--foot);z-index:0}   /* circles and pills stay under the controls */
+#geometry{width:100%;height:100%;pointer-events:none}
+#geometry path{fill:#2357a614;stroke:#2357a6;stroke-width:1.5;vector-effect:non-scaling-stroke}
+body.dark #geometry path{fill:#8eb6ef1f;stroke:#8eb6ef}
+#markers{pointer-events:none}
+
+/* Count markers: darker and larger with more jobs */
+.marker{position:absolute;transform:translate(-50%,-50%);border:2px solid var(--paper);color:#fff;border-radius:999px;
+  min-width:30px;height:30px;padding:0 6px;font-weight:700;font-size:13px;box-shadow:0 2px 5px var(--shadow);pointer-events:auto;background:#4f82cc}
+.marker.l2{background:#3468b8;min-width:34px;height:34px}
+.marker.l3{background:#2357a6;min-width:40px;height:40px;font-size:14px}
+.marker.l4{background:#163c7a;min-width:48px;height:48px;font-size:15px}
+.marker[aria-pressed=true]{outline:3px solid var(--blue);outline-offset:2px}
+/* Citywide pill: jobs that only name a capital city. Dashed, sits just above the city centre. */
+.city{position:absolute;display:flex;align-items:center;gap:6px;padding:4px 10px 4px 5px;
+  border-radius:999px;background:var(--paper);color:var(--ink);border:2px dashed #2357a6;font-size:12px;font-weight:700;white-space:nowrap;
+  box-shadow:0 3px 10px var(--shadow);pointer-events:auto;z-index:0}
+.marker{z-index:1}   /* precise postcode circles stay above the citywide pill */
+#geometry .leader{stroke:#2357a6;stroke-width:1.5;stroke-dasharray:3 3}
+#geometry .leader-dot{fill:#2357a6;stroke:var(--paper);stroke-width:1.5}
+body.dark #geometry .leader{stroke:#8eb6ef}body.dark #geometry .leader-dot{fill:#8eb6ef}
+.city .ic{width:18px;height:18px;border-radius:50%;background:#163c7a center/11px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M3 21V9l6-4v4l6-4v16H3Zm14 0V11h4v10h-4Z'/%3E%3C/svg%3E")}
+.city small{font-size:11px;font-weight:600;color:var(--muted)}
+body.dark .city{border-color:#8eb6ef}
+.city[aria-pressed=true]{outline:3px solid var(--blue);outline-offset:2px}
+
+.panel,.controls button{background:var(--paper);border:1px solid var(--line);box-shadow:0 2px 8px var(--shadow);border-radius:8px}
+
+/* Top: live "in view" summary (tap for the list) on the left, north button on the right */
+.top{position:absolute;top:14px;left:16px;right:16px;display:flex;pointer-events:none}
+.top>*{pointer-events:auto}
+#summary{display:flex;align-items:center;gap:6px;min-height:38px;padding:8px 12px;font-size:12px;font-weight:600;color:var(--ink);max-width:calc(100% - 52px)}
+#summary::after{content:'›';font-size:16px;line-height:1;color:var(--muted)}
+#north{margin-left:auto;width:38px;height:38px;padding:0;display:grid;place-items:center;color:var(--muted)}
+#north-needle{transition:transform .15s}
+#notice{position:absolute;left:50%;top:62px;transform:translateX(-50%);max-width:90%;padding:9px 14px;background:var(--paper);
+  border:1px solid var(--line);border-radius:8px;box-shadow:0 2px 8px var(--shadow);z-index:5;pointer-events:none}
+#notice button{pointer-events:auto}
+
+/* Bottom corners: other locations (left), zoom and fit (right) */
+#unmapped{position:absolute;left:16px;bottom:calc(var(--foot) + 14px);padding:9px 13px;font-size:12px}
+.controls{position:absolute;right:16px;bottom:calc(var(--foot) + 14px);display:grid;gap:4px}
+.controls button{width:38px;height:38px;padding:0;font-size:20px;display:grid;place-items:center}
+@media (pointer:coarse){.controls .zoom{display:none}}   /* touch: pinch to zoom */
+
+/* Results card (desktop) / bottom sheet (phone) */
+.sheet{position:absolute;left:16px;top:66px;width:min(346px,calc(100% - 40px));max-height:calc(100% - 66px - var(--foot) - 66px);   /* stops above the bottom row (other locations, zoom) */
+  display:flex;flex-direction:column;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 5px 24px var(--shadow);overflow:hidden;z-index:3}
+.sheet header{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px}
+.sheet h2{font-size:16px;margin:0}
+.sheet p{font-size:12px;color:var(--muted);margin:3px 0 0}
+.sheet header button{margin-left:auto;align-self:start;border:0;background:none;font-size:24px;line-height:1}
+#jobs{overflow:auto;overscroll-behavior:contain}
+.group{position:sticky;top:0;z-index:1;margin:0;padding:8px 16px;font-size:12px;font-weight:650;color:var(--muted);background:var(--paper);border-bottom:1px solid var(--line)}
+.job{position:relative;padding:14px 16px;border-bottom:1px solid var(--line)}
+.job:last-child{border-bottom:0}
+.job:hover{background:var(--hover)}
+.job button{display:block;background:none;border:0;padding:0;text-align:left;font-weight:650;color:var(--blue)}
+.job button::after{content:'';position:absolute;inset:0}
+.job button:focus-visible{outline:none}
+.job:has(button:focus-visible){outline:3px solid #4b87dd;outline-offset:-3px}
+.job div{font-size:12px;color:var(--muted);margin-top:4px}
+#grip{display:none}
+
+/* Attribution: one slim line; "i" opens the full sources */
+footer{position:absolute;left:0;right:0;bottom:0;height:var(--foot);background:var(--paper);z-index:4}
+footer .short{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#attr-toggle{width:100%;height:100%;display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:0 8px;border:0;background:none;font-size:10px;color:var(--muted)}
+#attr-toggle .info{flex:none;width:15px;height:15px;border-radius:50%;border:1px solid var(--muted);font:italic 600 10px/13px Georgia,serif;text-align:center}
+#attr-full{position:absolute;right:8px;bottom:calc(var(--foot) + 6px);width:min(320px,calc(100vw - 16px));padding:10px 12px;font-size:11px;color:var(--ink)}
+
+@media(max-width:620px){
+  .top{left:10px;right:10px;top:10px}
+  #notice{top:58px}
+  #unmapped{left:10px}
+  .controls{right:10px}
+  /* The sheet sits flush on the attribution line: one continuous surface. */
+  .sheet{top:auto;bottom:var(--foot);left:0;right:0;width:100%;max-height:55%;border-radius:14px 14px 0 0;border-bottom:0;box-shadow:0 -4px 18px var(--shadow)}
+  .sheet.full{max-height:calc(100% - 64px)}
+  .sheet.collapsed{max-height:var(--head-h,110px)}
+  .sheet.collapsed #jobs{visibility:hidden}
+  .sheet header{padding:6px 16px 12px}
+  /* Handle and title drag the sheet; a tap on the handle collapses/expands it. */
+  #grip,.sheet header{touch-action:none}
+  #grip{display:block;border:0;background:transparent;padding:9px;width:100%;cursor:grab}
+  #grip span{display:block;width:38px;height:4px;border-radius:4px;background:var(--muted);margin:auto}
+}
+
+/* Motion (skipped when the system asks for reduced motion) */
+@media (prefers-reduced-motion: no-preference){
+  .sheet{animation:card-in .18s ease-out}
+  .sheet.leaving{animation:card-out .18s ease-in forwards}
+  #notice:not([hidden]),#attr-full:not([hidden]){animation:fade-in .15s ease-out}
+  @keyframes card-in{from{opacity:0;transform:translateY(-6px)}}
+  @keyframes card-out{to{opacity:0;transform:translateY(-6px)}}
+  @keyframes fade-in{from{opacity:0}}
+  @media(max-width:620px){
+    .sheet{animation:sheet-in .26s cubic-bezier(.2,.8,.2,1);transition:max-height .26s cubic-bezier(.2,.8,.2,1)}
+    .sheet.leaving{animation:sheet-out .2s ease-in forwards}
+    .sheet.dragging{transition:none}
+    .sheet.collapsed #jobs{transition:visibility 0s .26s}
+    @keyframes sheet-in{from{transform:translateY(100%)}}
+    @keyframes sheet-out{to{transform:translateY(100%)}}
+  }
+}
