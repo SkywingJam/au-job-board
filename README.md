@@ -38,7 +38,7 @@ and notes live in your head or in a spreadsheet.
   matched.
 - **Rank.** Scores what remains by role direction, level, stated experience and
   salary signals, and tags jobs with technologies from an editable vocabulary.
-  Scores order the list; they are not a verdict on you.
+  Scores order the list.
 - **Read, label and follow up.** The local panel lists jobs in five views
   (Recommended, All, New, Excluded, Labelled), shows the original posting text
   and the evidence sentence, and lets you record To apply, Applied or
@@ -121,7 +121,7 @@ cd au-job-board
 
 If the address is unreachable, returns 404 or you lack access, the source is not
 available from there; ask the project owner for another source. A failed clone is
-not an installation result.
+a failed step.
 
 ### Agent-assisted installation
 
@@ -154,8 +154,8 @@ to the agent:
 
 ## Limits to know about
 
-- **Not a candidate assessment.** Rules are keyword-and-pattern matches on
-  English text. They can wrongly exclude a job or wrongly keep one, which is why
+- **Rules match text.** They are keyword-and-pattern matches on
+  English text and can wrongly exclude a job or wrongly keep one, which is why
   the Excluded view and the audit report exist.
 - **Profiles are rule switches, not legal advice.** A profile such as `citizen`,
   `permanent_resident`, `485`, `whv`, `student_visa` or `custom` only decides which
@@ -193,7 +193,7 @@ Docker/Compose users can also build it locally; see the [Docker guide](docs/dock
   test workflow runs on pull requests into `main`, on pushes to `main`, and
   manually.
 
-Not verified, and the documentation does not imply otherwise:
+Not verified:
 
 - other operating systems, other Python versions, and any machine other than
   those recorded;

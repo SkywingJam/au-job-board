@@ -22,8 +22,8 @@ platforms and their access policies; compatibility does not guarantee scraping.
 ## Install in PowerShell
 
 Install Python 3.12 from [python.org](https://www.python.org/downloads/windows/)
-with the `py` launcher, and Git for Windows. Use `py -3.12` rather than `python`:
-on Windows 11, `python` may open the Microsoft Store alias instead. Do not
+with the `py` launcher, and Git for Windows. Use `py -3.12`:
+on Windows 11, `python` may open the Microsoft Store alias. Do not
 replace another installation or its private files.
 
 ```powershell

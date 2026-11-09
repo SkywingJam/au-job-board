@@ -140,15 +140,14 @@ python3.12 -m venv .runtime/mcp-venv
   --api-url http://127.0.0.1:8091 --token-file /private/path/agent.token
 ```
 
-The last command waits for an MCP client on stdin. It is not another HTTP
-server. Stdout is reserved for MCP messages; startup errors go to stderr.
+The last command waits for an MCP client on stdin. Stdout is reserved for MCP messages; startup errors go to stderr.
 The default API address is `http://127.0.0.1:8091`. Token contents are never
 arguments or tool parameters. Restart the adapter after rotating the token.
 
 For a host that supports local stdio MCP servers, the following is an example
 configuration. Replace the three absolute paths; this document does not install
 or edit any host configuration. `PYTHONPATH` allows startup from another working
-directory. Use the environment's actual executable, not a shell activation.
+directory. Use the environment's actual executable path.
 
 ```json
 {
@@ -291,4 +290,4 @@ python -B tools/run_public_tests.py --with-mcp
 
 The default public suite runs 44 entries; `--with-mcp` adds two
 entries and fails if its SDK is missing. A passing SDK client test proves the
-protocol/HTTP path, not that a particular desktop agent has installed the tools.
+protocol/HTTP path.

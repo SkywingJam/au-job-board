@@ -2,8 +2,8 @@
 
 How the pipeline behaves today: the workflow, the commands, what is stored where,
 how notes and languages work, and where the data in the panel comes from. It
-describes what the code does; it is not an installation guide (see
-[install.md](install.md)).
+describes what the code does; for installation, see
+[install.md](install.md).
 
 Run commands from the project root, or pass the right `--config` path.
 
@@ -35,7 +35,7 @@ rules or the vocabulary and re-run it in seconds without fetching again.
    or the title, a level signal from the title, a penalty for stated experience
    requirements, and a salary hint. The total orders the list.
 3. **Salary.** Salary from the platform field or, failing that, from the
-   description is parsed and annualised where it can be. A missing salary only
+   description is parsed and annualised where it can be. A missing salary
    means the source did not state it.
 4. **De-duplication.** Cross-platform copies are grouped by normalised company,
    title and city, followed by a fuzzy merge for near-identical titles from the
@@ -110,8 +110,7 @@ with the button; the list keeps its filters and scroll position.
 
 **Copy job** in the detail header copies plain text for pasting into another
 tool such as an AI assistant: UID, title, company, listing location, listing
-link, local posting history and the complete stored description, not the
-on-screen rendering. The history lists only what this installation observed:
+link, local posting history and the complete stored description. The history lists only what this installation observed:
 listing date, first/last seen, whether the posting was recorded in the latest
 fully successful fetch of its source, and up to five other postings in its duplicate group (same
 employer, similar title) with their locations and dates. It makes no judgement
@@ -241,7 +240,7 @@ a database rollback.
   *displayed* with English names. Anything you type that is not exactly one of
   the defaults is stored and shown as you wrote it. It is never translated or
   guessed.
-- Priority uses its independent star, not note text. Typing a priority-related
+- Priority uses its independent star. Typing a priority-related
   phrase into a note does not change the star or the apply queue.
 - Notes are free text. Do not assume the tool can recognise or anonymise people,
   employers or other identifying details you write into them.

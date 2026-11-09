@@ -151,8 +151,7 @@ Those two checks are the install smoke test. The full public suite
 needs Node and is not required for a normal installation. See
 [public-tests.md](public-tests.md).
 
-Then check the panel against **the generated demo database**, not your own
-`config.yaml`:
+Then check the panel against **the generated demo database**:
 
 ```bash
 .venv/bin/python -m jobs.cli --config out/demo-verify/config.yaml panel --host 127.0.0.1 --port 8090
@@ -160,15 +159,13 @@ Then check the panel against **the generated demo database**, not your own
 ```
 
 The demo is 19 fictional postings with no scraping and with links to
-`example.invalid`. See [demo.md](demo.md). Do not use your own `config.yaml`
-for this check: `panel` opens the configured database, enables WAL and creates
-the schema if it is missing, so a check against a real configuration and database
-is not a no-private-access verification.
+`example.invalid`. See [demo.md](demo.md). Use only the generated config for this check:
+`panel` opens the configured database, enables WAL and creates the schema if it
+is missing, so only the demo config keeps the check free of private access.
 
 ## 7. Start and stop the panel for normal use
 
-This is the normal-use command with **your own** `config.yaml` and database, not
-the offline verification in step 6. To use your own listings, collect them
+This is the normal-use command, run with **your own** `config.yaml` and database. To use your own listings, collect them
 first. `fetch` (and `details`) are the network steps; `analyze` is offline. See
 [usage.md](usage.md).
 
@@ -204,6 +201,6 @@ This project is released under the MIT License; see [LICENSE](../LICENSE)
 (Copyright (c) 2026 SkywingJam). Third-party dependencies such as
 `python-jobspy`, `PyYAML` and `ruamel.yaml` keep their own licenses, and job listing text
 belongs to the platforms and advertisers that published it. The MIT license
-covers this project's own code and documentation, not third-party packages or
-listing data. The install does not depend on the maintainer-only video-production
+covers this project's own code and documentation only; third-party packages and
+listing data keep their own terms. The install does not depend on the maintainer-only video-production
 tools described in [the video notes](demo-video/README.md).

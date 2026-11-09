@@ -15,7 +15,7 @@ container check. Docker Desktop on macOS runs Linux containers in a VM.
 
 The published image supports `linux/amd64` and `linux/arm64`. Docker selects the
 matching platform. Use a version tag for a specific release (for example
-`v1.3.2`), `sha-<full-main-commit>` for a specific main build, or `latest` for
+`v1.3.3`), `sha-<full-main-commit>` for a specific main build, or `latest` for
 the most recently published main build. A digest pins the exact image content.
 Publication requires the synthetic container smoke test on each native platform;
 it does not test real job sources or other operating systems.
@@ -23,7 +23,7 @@ it does not test real job sources or other operating systems.
 From a source checkout, use the image overlay with the existing Compose file:
 
 ```bash
-export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.2
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.3
 docker compose -f compose.yaml -f compose.image.yaml pull
 docker compose -f compose.yaml -f compose.image.yaml up -d --no-build
 docker compose -f compose.yaml -f compose.image.yaml logs panel
@@ -194,7 +194,7 @@ docker compose exec -T panel python -c 'from pathlib import Path; import sys; Pa
 docker compose restart panel
 ```
 
-That direct maintenance write is not the browser's validated save endpoint;
+That direct maintenance write bypasses the browser's validated save endpoint;
 validate your YAML and preserve private unknown fields. The settings form itself
 checks versions, validates allowed fields and writes atomically.
 
@@ -204,7 +204,7 @@ For a published-image installation, after updates have finished, select the
 new version and recreate the panel without building:
 
 ```bash
-export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.2
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.3
 docker compose -f compose.yaml -f compose.image.yaml pull
 docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --force-recreate
 # If the API was enabled, recreate it from the same image too:
@@ -241,8 +241,8 @@ docker compose cp panel:/app/out out/docker-backup/reports
 Use a fresh backup directory for each backup. Preserve the DB, sidecars and
 manual notes together; protect these files as private. Restore into writable
 volumes owned by UID/GID 10001:10001 before starting any process. Test a restored
-copy before relying on a backup. Exporting container data is not a deployment
-or migration instruction for another machine.
+copy before relying on a backup. Moving to another machine is a separate
+deployment step that container data export does not cover.
 
 ## Offline synthetic verification
 
@@ -257,7 +257,7 @@ and any failed check; it never reads your normal Compose volumes.
 
 The strict `.dockerignore` allowlist excludes personal config, databases,
 reports, `.git`, screenshots and tests from the build context. Runtime volumes
-are private data and are not image content. Never publish them with the image.
+are private data and stay outside the image. Never publish them with the image.
 
 ## Maintainer image workflow
 

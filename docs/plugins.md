@@ -39,7 +39,7 @@ overlay with one Back to map control (Esc also returns, focus goes back to the
 map); previous/next is hidden because the hidden list order is not the map
 selection. The map has no area mode: a live summary counts the jobs whose
 postcode marker is in view and opens them as a list. List switching uses the
-toolbar, not a control in the frame.
+toolbar.
 
 Map uses local MapLibre GL JS and bundled ABS POA 2026 boundaries with
 OpenFreeMap/OpenStreetMap tiles. No user key is required. Core metropolitan

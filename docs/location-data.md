@@ -34,7 +34,7 @@ fields were removed.
 
 Postal codes stay four-character strings, including `0800`. The relationship is
 many-to-many: `2620` has ACT and NSW rows; `0872` has NT, SA and WA rows. These
-are publisher associations, not inferred boundaries.
+are publisher associations.
 
 Eight capital cities have a separately maintained CBD postcode:
 
@@ -56,7 +56,7 @@ locality precision.
 ## Metropolitan-area reference (ABS)
 
 A capital or CBD-postcode search also needs to know which other places belong to
-that city. This is not a hand-written list of suburbs or a distance guess: it is
+that city. The reference is
 the Australian Bureau of Statistics' Greater Capital City Statistical Area
 (GCCSA, ASGS Edition 3, 2021) applied to postcodes.
 
@@ -133,8 +133,7 @@ is `hidden`, like a place in another state. `unknown` here also holds state-only
 (`VIC`), country-only and undisclosed listings, and places that are undetermined
 under the rules above. Suburb, non-CBD postcode, state and national searches keep
 their meaning. Clearing the search passes
-`target=None`; a blank target is an input error rather than silently clearing
-the box.
+`target=None`; a blank target is an input error.
 
 `parse_listing(raw) -> dict` returns one query-time fact for the first listed
 location. It removes observed work-mode words for geography parsing but does not

@@ -5,7 +5,7 @@ These two files are generic, configurable macOS user LaunchAgent examples:
 - `launchd/panel.plist.example`: a long-running local web panel.
 - `launchd/fetch.plist.example`: a daily scheduled full pipeline run.
 
-They are templates, not a working installation. They have only been validated
+They are templates. They have only been validated
 offline: nothing has been bootstrapped, loaded, started or registered by this
 repository. They are for your own setup and must not be copied over a service you
 already run.
@@ -17,8 +17,7 @@ already run.
   verified.
 - You have your own configuration file, rules and skill vocabulary.
 - You have created the log directory you name in `__LOG_DIR__`.
-- This is a macOS user LaunchAgent (`gui/$(id -u)` domain), not a
-  system daemon.
+- This is a macOS user LaunchAgent (`gui/$(id -u)` domain).
 
 ## Placeholders
 
@@ -224,11 +223,10 @@ copy the examples over an existing deployment.
   `ThrottleInterval` 10 and `ProcessType Background`. It is a
   resident service that binds to `127.0.0.1` only.
 - The fetch example uses `StartCalendarInterval` and deliberately has no
-  `KeepAlive` and `RunAtLoad` false. It is a timer, not a
-  resident service. The 07:30 schedule is an example in local time; choose your
+  `KeepAlive` and `RunAtLoad` false. It is a timer. The 07:30 schedule is an example in local time; choose your
   own time.
 - The `run` subcommand fetches over the network, analyzes and writes
-  your database and reports. It is not an offline smoke test and needs working
+  your database and reports. It needs working
   network and data sources.
 - The service `Label` values are generic, so they do not collide with a service
   you may already run under another name.

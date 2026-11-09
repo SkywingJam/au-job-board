@@ -136,8 +136,8 @@ commit. The virtual environment, `out/` and other generated files are ignored by
   workflow (recorded in the next section), other operating systems or Python
   versions, a different machine, or the same Node version as CI. It also does not cover real fetching from SEEK, Indeed or LinkedIn,
   installing the macOS LaunchAgent templates, or the correctness of every
-  eligibility rule or source. A new virtual environment on this machine is not a
-  separate physical machine.
+  eligibility rule or source. A fresh virtual environment on the same machine
+  still counts as this machine.
 
 ## GitHub access and cloud CI (2026-10-08)
 

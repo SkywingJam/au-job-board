@@ -4,7 +4,7 @@ A self-contained demo of the job panel that runs on 19 hand-written, fictional
 postings (16 distinct jobs after de-duplication). It scrapes nothing, needs no
 network, reads none of your private files and writes only to its own directory.
 
-This is a demo, not a public release and not a production switch. Qualification
+This is a demo on synthetic data. Qualification
 handling stays the keyword-based hard filter described in
 [legacy-rule-profiles.md](legacy-rule-profiles.md).
 
@@ -131,7 +131,7 @@ banner (中文界面显示「演示 · 合成数据」), English and Chinese UI,
 - Not a measure of any real candidate or market. Names, companies, text and
   scores are invented; the scores come from the demo rules only.
 - Qualification is keyword-based: the "Citizen / PR" and similar tags are cues
-  in the posting text, not a verdict about any candidate. The demo uses its own
+  in the posting text. The demo uses its own
   generic synthetic rules, and its generated configuration has no rule-profile
   section, so all of those rules are on.
 - Labels and settings persist in `<root>/jobs.db` and `skills.local.yaml` until
@@ -140,13 +140,11 @@ banner (中文界面显示「演示 · 合成数据」), English and Chinese UI,
 - Cookies are per host, not per port: language and theme choices made on
   `localhost:8091` also apply to any other app served on `localhost`.
 - On a phone-width screen the detail view covers the banner while it is open.
-- Panel logic, filters, ordering and tag wording are the existing ones, not
-  demo-specific.
+- Panel logic, filters, ordering and tag wording are the existing ones.
 - Notes: the panel stores note tags separated by the full-width `；`, and the
   default tags are stored as fixed Chinese values (the English interface only
-  displays English names for them). Priority is an independent star, not a note
-  tag: the priority queue requires `action=saved` and `priority=true` in either
-  language. Choosing Chinese label text does not create a priority star.
+  displays English names for them). Priority is an independent star: the priority
+  queue requires `action=saved` and `priority=true` in either language. Choosing Chinese label text does not create a priority star.
 - The server is IPv4 only (`127.0.0.1` / `localhost`).
 
 ## Tests
@@ -174,7 +172,7 @@ page. The banner's language switch was only checked in HTML output.
 A separate set of 130 direct browser screenshots lives in
 [`docs/demo-screenshots/`](demo-screenshots/README.md), including location search,
 the four Settings sections, and mobile filter/label drawers.
-It is **not** Demo mode: a hand-written synthetic mock database is analysed with the
+It runs outside Demo mode: a hand-written synthetic mock database is analysed with the
 normal `analyze` command and served by the ordinary `jobs.cli panel` entry, so no
 Demo banner appears. It is independent of the generator and tests described above.
 
@@ -187,5 +185,5 @@ A 44-second, 1920x1080 walkthrough of v1.3:
 on screen come from the normal panel, HTTP API and MCP at `eb56c4f` running on a
 generated synthetic dataset. How it was made, the storyboard and the versions are in
 [`docs/demo-video/README.md`](demo-video/README.md). The composition and its tools are
-development-only and are **not** part of the public candidate; the finished video,
-cover and banners are. The video is not a product dependency.
+development-only and stay outside the public candidate; the finished video,
+cover and banners are included. The product runs without the video.

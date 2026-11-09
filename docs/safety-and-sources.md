@@ -75,15 +75,15 @@ network; clicking **Update jobs** in the panel starts `run`. See
 
 Listing text, company names, links and salary figures belong to the platforms
 and advertisers that published them. They are stored locally for your own use.
-Any license chosen for this project's code would cover the code, not the content
-you fetch.
+Any license chosen for this project's code would cover the code; the content
+you fetch stays with its publishers.
 
 - Do not publish or share your database, raw descriptions, reports or label
   exports.
 - The demo, screenshots, banners and video use hand-written fictional data, with
-  links to the reserved `example.invalid` domain. This says nothing about the
-  rest of the repository: what a public release will contain, and the private
-  history of the development checkout, still need their own review.
+  links to the reserved `example.invalid` domain. The rest of the
+  repository (what a public release will contain, and the private history of
+  the development checkout) still needs its own review.
 - Do not add fetched text to the repository, to tests or to an issue. See
   [contributing.md](contributing.md).
 

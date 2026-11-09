@@ -117,7 +117,7 @@ Keep these out of anything you share or publish:
 
 Ignoring a path in Git does not remove content that was already committed, and it
 does not erase it from existing history. Which files a public release will ship
-is decided separately and is not defined by this page.
+is decided separately.
 
 ### Optional skill display labels
 

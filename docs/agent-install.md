@@ -1,9 +1,9 @@
 # Agent-assisted installation
 
 This page is a short procedure for an AI coding agent that installs the pipeline
-**on behalf of a user**. It is install assistance, not an automatic release, a
-production-operations authorization, or permission to fetch listings, schedule
-services or expose a panel. The agent follows exactly the same steps as a human
+**on behalf of a user**. It is install assistance only; releases, production
+operations, fetching listings, scheduling services and exposing a panel each need
+separate permission. The agent follows exactly the same steps as a human
 in [install.md](install.md); it does not invent a different implementation.
 
 On macOS, recommend source installation first. If the user explicitly chooses
@@ -77,10 +77,9 @@ The source is at `https://github.com/SkywingJam/au-job-board`.
 
   If the address is unreachable, returns 404 or you have no access, stop and
   report that the source is unavailable; ask the user for another source, such
-  as a downloaded copy. A failed download or clone is a failed step, not a
-  success. Do not guess another repository, do not use the maintainer's private
-  development remote, and do not create, publish or change the visibility of a
-  repository to make the address work. Use the default branch unless the user
+  as a downloaded copy. A failed download or clone is a failed step. Do not guess
+  another repository, do not use the maintainer's private development remote,
+  and do not create, publish or change the visibility of a repository to make the address work. Use the default branch unless the user
   explicitly says otherwise. Clone into a non-existent new directory; do not
   reset, clean or overwrite an existing checkout. Getting the source may use the
   network. Do not push anything to GitHub.
@@ -164,8 +163,8 @@ configuration is still pending. Do not fill it in with guessed values.
    has passed and the user has confirmed the personal configuration, follow
    "Optional fetching and macOS automation" and then "Optional MCP connection
    for this agent" below. Ask only about choices that the user has not already
-   made. Declining these options does not make the
-   installation incomplete.
+   made. The installation is complete without
+   these options.
 9. **Report, then stop.** Give the install path, the exact start and stop
    commands, the resolved Python and dependency versions, a pass/fail line for
    each check, and which personal settings remain unconfirmed. Report whether
@@ -249,7 +248,7 @@ Then connect this agent:
    undo it: remove your client registration, set `mcp.enabled: false`, delete
    the token file if no separate API still uses it, and restart the panel.
 
-Declining MCP does not make the installation incomplete. Enabling it does not
+The installation is complete without MCP. Enabling it does not
 grant permission to fetch, schedule, expose the panel or read data beyond the
 verification call.
 
@@ -275,6 +274,6 @@ verification call.
 - Treat the panel as unauthenticated: loopback only unless the user has their own
   protected access layer.
 
-This page prepares an installation; it is not a publication step and does not
-authorize production use. The license and third-party boundaries are in
+This page prepares an installation only; publication and production use need
+separate authorization. The license and third-party boundaries are in
 [install.md](install.md) and [LICENSE](../LICENSE).
