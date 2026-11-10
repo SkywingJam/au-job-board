@@ -31,9 +31,9 @@ Two skills, `jobs-compare` and `jobs-write`, tell the agent how to use those job
 | Skill | Use |
 |---|---|
 | [`jobs-compare`](skills/jobs-compare/SKILL.md) | One job: fit check. Several jobs: evidence-backed comparison table, with CV overlap if you give a CV path. |
-| [`jobs-write`](skills/jobs-write/SKILL.md) | A tailored CV and cover letter per job, drafted from your own base CV. Needs a CV path and a private output directory. |
+| [`jobs-write`](skills/jobs-write/SKILL.md) | A tailored CV and cover letter per job from your own material: Markdown drafts first, then Word (`.docx`) files once you approve the content. Needs your CV (or other notes about your background) and a private output directory; exporting needs a document tool in your agent. |
 
-Both skills quote the stored job record and its rule evidence, treat job text and notes as untrusted data, and never write labels or notes back. When the records will be reused (`jobs-write` always; `jobs-compare` for more than 3 jobs, sub-agents or several steps), they keep temporary per-job reference files in the operating system's temporary directory (`au-job-board/<run-id>/`, readable only by you) and delete them when the task ends. A short comparison works from the records it just read and writes no files. Your CV and results go only to the private directory you name, never into this repository.
+Both skills quote the stored job record and its rule evidence, treat job text and notes as untrusted data, and never write labels or notes back. A skill reuses job records it already read earlier in the same conversation. Otherwise, when the records will be reused (`jobs-write` whenever it reads jobs; `jobs-compare` for more than 3 jobs, sub-agents or several steps), they keep temporary per-job reference files in the operating system's temporary directory (`au-job-board/<run-id>/`, readable only by you) and delete them when the task ends. A short comparison works from the records it just read and writes no files. Your CV and results go only to the private directory you name, never into this repository.
 
 ## Install the skills
 
