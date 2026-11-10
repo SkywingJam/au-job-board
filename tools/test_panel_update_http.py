@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+import temp_cleanup  # noqa: E402
 from jobs import panel, skills
 
 
@@ -32,12 +33,6 @@ class FakeUpdates:
         return self.next
 
 
-class JoinedServer(panel.ThreadingHTTPServer):
-    # server_close() then waits for handler threads, so none still holds the
-    # SQLite file when the temporary directory is removed (Windows locks it).
-    daemon_threads = False
-
-
 class UpdateHTTPTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -49,7 +44,7 @@ class UpdateHTTPTests(unittest.TestCase):
                        "panel": {"host": "panel.internal"}}
         self.manager = FakeUpdates()
         handler = type("SyntheticHandler", (panel.Handler,), {"config": self.config})
-        self.server = JoinedServer(("127.0.0.1", 0), handler)
+        self.server = panel.ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.server.update_manager = self.manager
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -59,7 +54,7 @@ class UpdateHTTPTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=3)
-        self.temp.cleanup()
+        temp_cleanup.cleanup(self.temp)
 
     def request(self, path, method="GET", body=None, headers=None):
         client = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)

@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+import temp_cleanup  # noqa: E402
 from jobs import db as database  # noqa: E402
 from jobs import labels as labels_mod  # noqa: E402
 from jobs import panel, panel_views, skills  # noqa: E402
@@ -72,7 +73,7 @@ class StatsHTTPTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=3)
-        self.temp.cleanup()
+        temp_cleanup.cleanup(self.temp)
 
     def request(self, path, method="GET", body=None, headers=None):
         client = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
@@ -236,7 +237,7 @@ class RenderHookTests(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        self.temp.cleanup()
+        temp_cleanup.cleanup(self.temp)
 
     def page(self, view, lang="zh"):
         return panel.render_page(self.conn, self.config, view, 0, 40, None, {}, lang, None)

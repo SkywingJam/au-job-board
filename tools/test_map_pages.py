@@ -15,6 +15,7 @@ from urllib.parse import urlencode, parse_qs
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+import temp_cleanup  # noqa: E402
 from jobs import db, labels, panel, panel_data, plugin_host, plugin_pages, skills
 
 
@@ -38,7 +39,7 @@ class MapPages(unittest.TestCase):
         self.patcher = patch.object(plugin_host, 'PLUGIN_ROOT', self.plugin_root)
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
-        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(temp_cleanup.cleanup, self.tmp)
         self.config = {'db_path': str(self.root / 'jobs.db'), 'skills_path': str(self.root / 'skills.yaml'),
                        'queries': ['Synthetic'], 'plugins': {'map': {'enabled': False}}}
         (self.root / 'skills.yaml').write_text('version: 1\nskills: []\n')

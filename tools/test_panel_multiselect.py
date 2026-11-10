@@ -26,6 +26,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+import temp_cleanup  # noqa: E402
 from jobs import db as database  # noqa: E402
 from jobs import labels as labels_mod, panel, panel_views  # noqa: E402
 
@@ -78,7 +79,7 @@ class PanelMultiselectTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=3)
-        self.temp.cleanup()
+        temp_cleanup.cleanup(self.temp)
 
     # -- helpers --------------------------------------------------------------
     def raw(self, path, method="POST", body=None, headers=None):

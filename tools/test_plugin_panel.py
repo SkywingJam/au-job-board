@@ -17,6 +17,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+import temp_cleanup  # noqa: E402
 from jobs import db, panel, panel_views, plugin_host, config_edit, run_state, i18n, cli, sources, labels
 
 
@@ -112,7 +113,7 @@ class PluginPanelTests(unittest.TestCase):
         self.addCleanup(self.cleanup)
 
     def cleanup(self):
-        self.server.shutdown(); self.server.server_close(); self.thread.join(3); self.tmp.cleanup()
+        self.server.shutdown(); self.server.server_close(); self.thread.join(3); temp_cleanup.cleanup(self.tmp)
 
     def request(self, path, body=None, headers=None):
         client = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=5)

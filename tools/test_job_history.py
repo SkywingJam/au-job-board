@@ -13,6 +13,7 @@ import unittest
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import temp_cleanup  # noqa: E402
 from jobs import agent_api as api, db, history, panel, panel_views
 
 TOKEN = 'synthetic-history-token-not-a-real-secret-0000'
@@ -67,7 +68,7 @@ class JobHistory(unittest.TestCase):
         db.replace_score(conn, uid, 'T1', 0, 0, 0, 5, [], 1)
 
     def tearDown(self):
-        self.temp.cleanup()
+        temp_cleanup.cleanup(self.temp)
 
     def facts(self, uid):
         with closing(db.connect(self.path)) as conn:
