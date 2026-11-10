@@ -23,6 +23,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import string
 import time
 import urllib.error
 import urllib.parse
@@ -144,7 +145,12 @@ class _HttpsRedirects(urllib.request.HTTPRedirectHandler):
         hops = getattr(req, 'redirect_hops', 0) + 1
         if hops > MAX_REDIRECTS:
             raise InstallError(f'The download redirected more than {MAX_REDIRECTS} times.')
+        # As urllib does: percent-encode what a sloppy server left raw, give an empty path a slash.
+        target = urllib.parse.quote(target, encoding='iso-8859-1', safe=string.punctuation)
         target = urllib.parse.urldefrag(urllib.parse.urljoin(req.full_url, target))[0]
+        parts = urllib.parse.urlsplit(target)
+        if not parts.path and parts.netloc:
+            target = urllib.parse.urlunsplit(parts._replace(path='/'))
         try:
             _check_url(target)
         except InstallError:
@@ -560,9 +566,11 @@ def recover(config):
                 else:
                     # The new package is in place. Its record is only trusted when the
                     # previous one was already retired by a completed write.
-                    _remove_tree(path)
+                    # The old record goes first: left behind on its own it would later
+                    # be taken for the record of whatever package is in place.
                     if kept.exists() or kept.is_symlink():
                         kept.unlink()
+                    _remove_tree(path)
             elif re.fullmatch(r'\.(staging|removed-[a-z][a-z0-9_-]{0,63})-[0-9a-f]{32}', name) and path.is_dir():
                 _remove_tree(path)
         for path in sorted(root.iterdir()):          # a record backup whose package backup is gone
@@ -633,6 +641,10 @@ def install(config, archive, package, *, upgrade=False):
         # Undo in reverse order whatever happened; each step checks the disk.
         nonlocal restored, placed
         restored = False
+        # An interrupt can land between the rename and the flag: the new package is in
+        # place when staging is gone and (for an upgrade) the old one is still set aside.
+        if not placed and not staging.exists() and target.exists() and (backup.exists() or not upgrade):
+            placed = True
         if placed:
             record_file.unlink(missing_ok=True)
             if target.exists() and not target.is_symlink():
@@ -670,7 +682,7 @@ def install(config, archive, package, *, upgrade=False):
             _remove_tree(staging)
         except OSError:
             pass
-    for leftover in (backup, record_backup):
+    for leftover in (record_backup, backup):          # the old record first, see recover()
         try:
             if leftover.is_dir() and not leftover.is_symlink():
                 _remove_tree(leftover)

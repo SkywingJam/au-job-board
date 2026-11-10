@@ -1211,18 +1211,23 @@ def _plugin_install(args, config, upgrade):
         if not upgrade:
             # A first install is always off and ungranted, whatever an earlier
             # install of the same ID left in the configuration or grant store.
-            earlier = next((p for p in plugin_host.list_plugins(config) if p['id'] == plugin_id), None)
-            cleared = bool((plugin_host._root(config) / plugin_id / 'consent.json').exists()
-                           or (config.get('plugins') or {}).get(plugin_id, {}).get('enabled')
-                           or (earlier and earlier.get('enabled')))
+            try:
+                granted = (plugin_host._root(config) / plugin_id / 'consent.json').exists()
+            except OSError:
+                raise InstallError('The earlier permission grant for this plugin ID could not be checked; '
+                                   'nothing was changed.') from None
+            section = (config.get('plugins') or {}).get(plugin_id)
+            cleared = bool(granted or (isinstance(section, dict) and section.get('enabled')))
             editor.disable_plugin_locked(plugin_id)
         try:
             plugin_install.install(config, archive, package, upgrade=upgrade)
         except InstallError as exc:
-            if cleared:     # the package was not placed, but the earlier state is not what it was
-                raise InstallError(exc.message.replace('; the previous state was kept.', '.') +
-                                   ' The plugin was not installed; the earlier setting and permission grant '
-                                   'for this ID were cleared.') from None
+            if cleared:     # the earlier state is not what it was, whatever happened to the package
+                note = ' An earlier setting or permission grant for this plugin ID was cleared.'
+                if '; the previous state was kept.' in exc.message:
+                    raise InstallError(exc.message.replace('; the previous state was kept.', '; the plugin was not installed.')
+                                       + note) from None
+                raise InstallError(exc.message + note) from None
             raise
     finally:
         lock.close()

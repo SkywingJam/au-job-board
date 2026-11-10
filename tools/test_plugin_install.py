@@ -735,7 +735,7 @@ class UpgradeAndUninstall(Base):
         config = ConfigEditor(self.config, self.config_path).plugin_config()
         seen = []
 
-        def record(config, hook, jobs=None, analysis_id=None):
+        def record(config, hook, jobs=None, analysis_id=None, recover=True):
             seen.append((hook, jobs, analysis_id))
 
         class Conn:
@@ -747,6 +747,62 @@ class UpgradeAndUninstall(Base):
         with patch.object(host, 'dispatch', side_effect=record), patch.object(host, '_analysis_jobs', return_value=[{'uid': 'synthetic:one', 'company': 'Co'}]):
             host.after_analyze(config, Conn())
         self.assertEqual(seen, [('after_analyze_success', [{'uid': 'synthetic:one', 'company': 'Co'}], 7)])
+
+    def test_analyze_with_a_failed_first_repair_never_runs_a_plugin_without_jobs(self):
+        self.install(hook_manifest())
+        self.write_config({'demo-hook': {'enabled': True}})
+        host.grant(self.config, hook_manifest(), host.fingerprint(hook_manifest()), 'test')
+        root = self.installed_root()
+        (root / 'demo-hook').rename(root / ('.old-demo-hook-' + 'e' * 32))
+        config = ConfigEditor(self.config, self.config_path).plugin_config()
+        real, attempts, ran = install.recover, [], []
+
+        def fail_once(cfg):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise install.InstallError('transient')
+            return real(cfg)
+
+        class Conn:
+            def execute(self, sql):
+                raise AssertionError('no jobs are prepared when no plugin is runnable')
+        with patch.object(install, 'recover', side_effect=fail_once), \
+                patch.object(host, '_run_worker', side_effect=lambda *a, **k: ran.append(a)):
+            host.after_analyze(config, Conn())
+        self.assertEqual((len(attempts), ran), (1, []))      # one decision, no call without jobs
+
+    def test_interrupted_cleanup_never_pairs_an_old_record_with_new_files(self):
+        self.install(sidebar_manifest())
+        root, token = self.installed_root(), '1' * 32
+        # New package placed, record not written yet; then cleanup stops half way, twice.
+        (root / 'demo-sidebar.install.json').rename(root / f'.old-demo-sidebar-{token}.json')
+        (root / 'demo-sidebar').rename(root / f'.old-demo-sidebar-{token}')
+        write_plugin(self.root / 'fresh2', sidebar_manifest(version='2.0.0')).rename(root / 'demo-sidebar')
+        with patch.object(install, '_remove_tree', side_effect=OSError('interrupted')):
+            with self.assertRaises(install.InstallError):
+                install.recover(self.config)
+        self.assertFalse((root / f'.old-demo-sidebar-{token}.json').exists())     # the old record went first
+        for _ in range(2):
+            install.recover(self.config)
+            item = self.item('demo-sidebar')
+            self.assertEqual((item['version'], item['install']), ('2.0.0', None))
+        self.assertEqual(self.landed(), ['demo-sidebar'])
+
+    def test_interrupt_between_placing_and_flagging_does_not_restore_the_old_record(self):
+        first = self.install(sidebar_manifest())
+        path, _ = self.build(sidebar_manifest(version='2.0.0'))
+        real_rename, seen = install._rename, []
+
+        def interrupt_after_placing(source, target):
+            real_rename(source, target)
+            seen.append(Path(source).name)
+            if Path(source).name.startswith('.staging-'):
+                raise KeyboardInterrupt()
+        with patch.object(install, '_rename', side_effect=interrupt_after_placing):
+            with self.assertRaises(KeyboardInterrupt):
+                self.cli('upgrade', str(path), '--yes')
+        item = self.item('demo-sidebar')          # rolled back as a whole: old files with their own record
+        self.assertEqual((item['version'], item['install']['sha256']), ('1.0.0', first))
 
     def test_record_backup_without_a_package_backup_is_given_back(self):
         first = self.install(sidebar_manifest())
@@ -779,7 +835,7 @@ class UpgradeAndUninstall(Base):
             code, _, err = self.cli('install', str(path), '--yes')
         self.assertEqual(code, 1)
         self.assertIn('was not installed', err)
-        self.assertIn('were cleared', err)
+        self.assertIn('was cleared', err)
         self.assertNotIn('previous state was kept', err)
         self.assertEqual(self.landed(), [])
 
@@ -1025,6 +1081,10 @@ class Download(Base):
         with self.assertRaises(install.InstallError) as error:
             install.download(self.URL, handlers=[FakeHTTPS({self.URL: (200, {}, b'')})], clock=lambda: next(late))
         self.assertIn('60 seconds', error.exception.message)
+        # A Location with a space or a raw non-ASCII character is percent-encoded, as urllib does.
+        spaced = FakeHTTPS({self.URL: (302, {'Location': '/package name caf\u00e9.zip'}, b''),
+                            'https://plugins.example.invalid/package%20name%20caf%E9.zip': (200, {}, data)})
+        self.assertEqual(install.download(self.URL, handlers=[spaced]), data)
         # Redirects share the budget: a slow chain is refused, and each hop only gets what is left.
         hop = 'https://example.org/hop'
         chain = FakeHTTPS({self.URL: (302, {'Location': hop + '1'}, b'x' * 10),

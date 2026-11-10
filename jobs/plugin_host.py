@@ -748,14 +748,16 @@ def _run_isolated(config, plugin_id, hook, request, *, trusted_download=False):
                 lock.close()
 
 
-def _dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: int | None = None) -> None:
+def _dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: int | None = None,
+              *, recover: bool = True) -> None:
     """Invoke enabled hooks; caller owns the run lock, never a DB transaction."""
     configured = config.get('plugins')
     if 'demo' in config or not isinstance(configured, dict) or not configured:
         return
     if all(isinstance(value, dict) and value.get('enabled', False) is False for value in configured.values()):
         return
-    _recover_packages(config)
+    if recover:
+        _recover_packages(config)
     for item in list_plugins(config):
         if item['status'] != 'enabled':
             if item['status'] == 'error' and item['id'] in configured:
@@ -832,9 +834,10 @@ def _configured(config):
                     for value in plugins.values()))
 
 
-def dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: int | None = None) -> None:
+def dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: int | None = None,
+             *, recover: bool = True) -> None:
     try:
-        _dispatch(config, hook, jobs, analysis_id)
+        _dispatch(config, hook, jobs, analysis_id, recover=recover)
     except RunTimeout:
         raise
     except Exception as exc:
@@ -858,12 +861,14 @@ def after_analyze(config, conn):
         _recover_packages(config)       # before the inventory decides whether jobs are prepared
         items = list_plugins(config)
         if not any(item['status'] == 'enabled' for item in items):
-            # Still record invalid configured plugins through the ordinary path.
-            dispatch(config, 'after_analyze_success')
+            # Still record invalid configured plugins through the ordinary path. The
+            # inventory is the one decided above: a second recovery attempt here could
+            # bring back a plugin for which no jobs were prepared.
+            dispatch(config, 'after_analyze_success', recover=False)
             return
         analysis_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         jobs = _analysis_jobs(conn)
-        dispatch(config, 'after_analyze_success', jobs, analysis_id)
+        dispatch(config, 'after_analyze_success', jobs, analysis_id, recover=False)
     except RunTimeout:
         raise
     except Exception as exc:
