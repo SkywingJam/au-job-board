@@ -9,7 +9,7 @@ description: Triage AU Job Board PR or auto-review feedback and verify fixes, or
 
 Read root AGENTS and the user's current constraints. Confirm repository, PR, base/head, actual diff and CI revision; attach the PR to the task when the app tool is available.
 
-Record the snapshot time/head and authorized stop point. “Check the latest/all issues” means one complete snapshot including older unresolved items, then authorized fixes and verification. Continuous monitoring, external replies/thread resolution, new review requests, merge, release and deployment follow current-task authorization; reuse existing permission. A no-new-review instruction persists after a push. Platform-triggered reviews differ from a manual request. Default babysitting handles the initial automatic review and one repair batch, then hands back; do not request another Codex review without explicit user authorization. Do not infer another repair cycle from a platform-triggered review after pushing.
+Record the snapshot time/head and authorized stop point. “Check the latest/all issues” means one complete snapshot including older unresolved items, then authorized fixes and verification. Continuous monitoring, external replies, resolving a human reviewer's thread, new review requests, merge, release and deployment follow current-task authorization; reuse existing permission. Threads opened by an automated or AI reviewer are yours to close under **Resolve automated-review threads** below. A no-new-review instruction persists after a push. Platform-triggered reviews differ from a manual request. Default babysitting handles the initial automatic review and one repair batch, then hands back; do not request another Codex review without explicit user authorization. Do not infer another repair cycle from a platform-triggered review after pushing.
 
 For feedback, continue to **2**. For a handoff with no feedback check requested, go to **4** once the agreed implementation/independent acceptance evidence is available.
 
@@ -46,9 +46,19 @@ Keep the agreed scope and completion criteria. Repair this change's regressions 
 
 Proceed when every collected candidate has a disposition and confirmed fixes have actual verification results or explicit gaps.
 
+### Resolve automated-review threads
+
+`main` merges only when every review thread is resolved (ruleset `required_review_thread_resolution`), so an open thread blocks the PR even with green checks. For a thread opened by an automated or AI reviewer (Codex auto review and the like), resolve it yourself once its finding has an evidenced disposition; no separate authorization is needed:
+
+- **Fixed:** the fix is pushed and its verification ran. Resolve the thread; the commit is the record.
+- **Not applicable, duplicate or deferred:** reply in the thread with one line giving the disposition and reason, then resolve it.
+- **Unresolved or escalated:** leave it open and report it.
+
+A human reviewer's thread stays open until that reviewer or the user closes it, or the user authorizes you to.
+
 ## 4. Update and hand off
 
-For an authorized PR update, describe the final problem/behavior and actual validation on the candidate. Verify base/head/diff and checks on the latest revision. Follow the contributor guide's delivery route; retain draft status while unfinished when requested, and set ready only after agreed local acceptance/review.
+For an authorized PR update, describe the final problem/behavior and actual validation on the candidate. Verify base/head/diff and checks on the latest revision, then read the PR's merge state and count open review threads: report whether GitHub shows it mergeable and name whatever still blocks it. Follow the contributor guide's delivery route; retain draft status while unfinished when requested, and set ready only after agreed local acceptance/review.
 
 Stop when this snapshot's findings have dispositions, verification/coverage gaps are reported, authorized updates are complete and the user has the remaining CI/acceptance status. Required verification or feedback coverage gaps keep the result a validation-pending candidate, not implemented, complete or merge-ready. Wait for user acceptance at that boundary.
 

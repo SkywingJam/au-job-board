@@ -89,8 +89,9 @@ Development starts from `dev`; stable changes to `main` are made through a pull 
 `macOS 15 / Python 3.12 / Node 24.21.0` (the public offline suite) runs
 automatically on the pull request and should pass; the Windows job
 `Windows 2022 / Python 3.12 / Node 24.21.0` runs alongside it and its failures
-should be investigated, although it is not yet required, and review discussions should
-be resolved, before merging. No second person's approval is required. The
+should be investigated, although it is not yet required. The `main` ruleset also
+requires every review thread to be resolved: an open thread blocks the merge even
+when the checks are green. No second person's approval is required. The
 maintainer may use an emergency exception, and only through a pull request.
 Force-pushing to `main` or deleting it is not part of the process.
 
