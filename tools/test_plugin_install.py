@@ -532,6 +532,117 @@ class UpgradeAndUninstall(Base):
         self.assertEqual(self.cli('uninstall', 'demo-sidebar', '--yes')[0], 0)
         self.assertEqual(self.config_path.read_bytes(), before)
 
+    # ---- review round: refusals and transaction boundaries --------------------------
+
+    @unittest.skipUnless(hasattr(os, 'symlink') and os.name != 'nt', 'needs POSIX symlinks')
+    def test_symlinked_or_non_directory_package_root_is_refused_before_anything_changes(self):
+        self.install(sidebar_manifest())
+        root = self.installed_root()
+        elsewhere = self.root / 'elsewhere'
+        root.rename(elsewhere)
+        os.symlink(elsewhere, root)
+        self.write_config({'demo-sidebar': {'enabled': True}})
+        before = self.config_path.read_bytes()
+        code, _, err = self.cli('uninstall', 'demo-sidebar', '--yes')
+        self.assertEqual(code, 1)
+        self.assertIn('symbolic link', err)
+        self.assertTrue((elsewhere / 'demo-sidebar' / 'manifest.json').is_file())     # nothing deleted through the link
+        self.assertEqual(self.config_path.read_bytes(), before)                        # nor disabled
+        path, _ = self.build(sidebar_manifest('demo-other'))
+        code, _, err = self.cli('install', str(path), '--yes')
+        self.assertEqual(code, 1)
+        self.assertIn('symbolic link', err)
+        self.assertFalse((elsewhere / 'demo-other').exists())
+        root.unlink()
+        root.write_text('not a directory')
+        code, _, err = self.cli('install', str(path), '--yes')
+        self.assertEqual(code, 1)
+        self.assertIn('not a directory', err)
+        self.assertNotIn('Traceback', err)
+
+    def test_first_install_is_off_and_ungranted_even_with_an_earlier_setting_and_grant(self):
+        manifest = hook_manifest()
+        self.write_config({'demo-hook': {'enabled': True}})
+        host.grant(self.config, manifest, host.fingerprint(manifest), 'test')       # left by an earlier install
+        path, _ = self.build(manifest)
+        code, out, err = self.cli('install', str(path), '--yes')
+        self.assertEqual(code, 0, err)
+        item = self.item('demo-hook')
+        self.assertEqual((item['enabled'], item['status'], item['consent']['status']), (False, 'disabled', 'required'))
+        self.assertFalse((host._root(self.config) / 'demo-hook' / 'consent.json').exists())
+        self.assertIn('It is disabled', out)
+
+    def test_directory_sync_failure_rolls_back_package_and_record(self):
+        first = self.install(sidebar_manifest())
+        path, _ = self.build(sidebar_manifest(version='2.0.0'))
+        with patch.object(host, '_sync_directory', side_effect=OSError('simulated sync failure')):
+            code, _, err = self.cli('upgrade', str(path), '--yes')
+        self.assertEqual(code, 1)
+        self.assertIn('previous state was kept', err)
+        item = self.item('demo-sidebar')
+        self.assertEqual((item['version'], item['install']['version'], item['install']['sha256']), ('1.0.0', '1.0.0', first))
+        self.assertEqual(self.landed(), ['demo-sidebar', 'demo-sidebar.install.json'])
+        other, _ = self.build(sidebar_manifest('demo-new'))
+        with patch.object(host, '_sync_directory', side_effect=OSError('simulated sync failure')):
+            self.assertEqual(self.cli('install', str(other), '--yes')[0], 1)
+        self.assertEqual(self.landed(), ['demo-sidebar', 'demo-sidebar.install.json'])
+
+    def test_configuration_pointing_elsewhere_after_the_prompt_changes_nothing(self):
+        path, _ = self.build(sidebar_manifest())
+        other_db = self.root / 'other' / 'jobs.db'
+        other_db.parent.mkdir()
+
+        def repoint(*_args, **_kwargs):
+            self.config_path.write_text(f'db_path: {json.dumps(str(other_db))}\n', encoding='utf-8')
+            return True
+        with patch.object(cli, '_confirm', side_effect=repoint):
+            code, _, err = self.cli('install', str(path))
+        self.assertEqual(code, 1)
+        self.assertIn('another database', err)
+        self.assertEqual(self.landed(), [])
+        self.assertFalse((other_db.parent / '.jobs.db.plugin-packages').exists())
+
+    def test_recovery_never_shows_old_provenance_for_new_code(self):
+        self.install(sidebar_manifest())
+        root, token = self.installed_root(), 'a' * 32
+        # State left by a crash after the new package was placed, before its record was written.
+        (root / 'demo-sidebar.install.json').rename(root / f'.old-demo-sidebar-{token}.json')
+        (root / 'demo-sidebar').rename(root / f'.old-demo-sidebar-{token}')
+        write_plugin(self.root / 'fresh', sidebar_manifest(version='2.0.0')).rename(root / 'demo-sidebar')
+        install.recover(self.config)
+        item = self.item('demo-sidebar')
+        self.assertEqual((item['version'], item['install']), ('2.0.0', None))
+        self.assertEqual(self.landed(), ['demo-sidebar'])
+        # State left by a crash before the new package was placed: everything comes back.
+        token = 'b' * 32
+        install.write_record(self.config, install.Package(manifest=sidebar_manifest(version='2.0.0'), prefix=''),
+                             install.Archive(data=b'', sha256='c' * 64, source='x.zip'))
+        (root / 'demo-sidebar.install.json').rename(root / f'.old-demo-sidebar-{token}.json')
+        (root / 'demo-sidebar').rename(root / f'.old-demo-sidebar-{token}')
+        install.recover(self.config)
+        item = self.item('demo-sidebar')
+        self.assertEqual((item['version'], item['install']['sha256']), ('2.0.0', 'c' * 64))
+        self.assertEqual(self.landed(), ['demo-sidebar', 'demo-sidebar.install.json'])
+
+    def test_upgrade_says_before_confirming_whether_new_code_runs_without_review(self):
+        self.install(sidebar_manifest())
+        same, _ = self.build(sidebar_manifest(version='2.0.0'))
+        self.write_config({'demo-sidebar': {'enabled': True}})
+        host.grant(self.config, sidebar_manifest(), host.fingerprint(sidebar_manifest()), 'test')
+        code, out, _ = self.cli('upgrade', str(same))            # no terminal, no --yes: nothing happens
+        self.assertEqual(code, 1)
+        self.assertIn('existing grant stays valid', out)
+        self.assertIn('runs without another review', out)
+        self.assertEqual(self.item('demo-sidebar')['version'], '1.0.0')
+        changed = sidebar_manifest(version='3.0.0')
+        del changed['permissions']['job_detail']
+        other, _ = self.build(changed)
+        code, out, _ = self.cli('upgrade', str(other))
+        self.assertEqual(code, 1)
+        self.assertIn('stays inactive until you review and grant', out)
+        fresh, _ = self.build(sidebar_manifest('demo-fresh'))
+        self.assertIn('turned off and without a permission grant', self.cli('install', str(fresh))[1])
+
     def test_missing_or_damaged_record_only_hides_provenance(self):
         self.install(sidebar_manifest())
         record = self.installed_root() / 'demo-sidebar.install.json'
@@ -614,6 +725,10 @@ class ArchiveRejections(Base):
         good = self.good_entries()
         with patch.object(install, 'MAX_ENTRIES', 4):
             self.refuse(raw_zip(good + [('web/a.js', b'1', None), ('web/b.js', b'2', None)]), 'more than 4 entries')
+            # The limit is applied before zipfile builds an object per record.
+            crowded = raw_zip(good + [('web/a.js', b'1', None), ('web/b.js', b'2', None)])
+            with patch.object(zipfile, 'ZipFile', side_effect=AssertionError('central directory was parsed')):
+                self.refuse(crowded, 'more than 4 entries')
         with patch.object(install, 'MAX_FILE', 1024 * 1024):
             self.refuse(raw_zip(good + [('web/big.js', b'\0' * (1024 * 1024 + 1), None)]), '64 MiB')
         with patch.object(install, 'MAX_TOTAL', 2 * 1024 * 1024):
@@ -699,6 +814,11 @@ class Download(Base):
         ticks = iter(range(0, 1000, 61))
         with self.assertRaises(install.InstallError) as error:
             install.download(self.URL, handlers=[FakeHTTPS({self.URL: (200, {}, data)})], clock=lambda: next(ticks))
+        self.assertIn('60 seconds', error.exception.message)
+        # The budget also covers the last read: time that runs out at end of data is refused.
+        late = iter([0, 0, 120, 120, 120])
+        with self.assertRaises(install.InstallError) as error:
+            install.download(self.URL, handlers=[FakeHTTPS({self.URL: (200, {}, b'')})], clock=lambda: next(late))
         self.assertIn('60 seconds', error.exception.message)
         with self.assertRaises(install.InstallError) as error:
             install.obtain(self.URL, digest, handlers=[FakeHTTPS({self.URL: (404, {}, b'')})])

@@ -1084,7 +1084,7 @@ def _cmd_plugin_package(args):
         return 0
     try:
         if action == 'uninstall':
-            return _plugin_uninstall(args, current, editor)
+            return _plugin_uninstall(args, current)
         return _plugin_install(args, current, action == 'upgrade')
     except plugin_install.InstallError as exc:
         print(exc.message, file=sys.stderr)
@@ -1104,6 +1104,24 @@ def _plugin_locked(config):
     if lock is None:
         raise InstallError('An update or another plugin change is running; try again when it has finished.')
     return lock
+
+
+def _plugin_instance(args, config):
+    """Called with the run lock held: read the configuration again and make sure
+    it still names the instance that was reviewed and locked. Returns a fresh
+    (config, editor) for the write."""
+    from .config import db_path
+    from .config_edit import ConfigEditor
+    from .plugin_install import InstallError
+    try:
+        editor = ConfigEditor(load_config(args.config), config_path=args.config)
+        fresh = editor.plugin_config()
+        same = db_path(fresh).resolve() == db_path(config).resolve()
+    except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError):
+        raise InstallError('The configuration could not be read again; nothing was changed.') from None
+    if not same:
+        raise InstallError('The configuration now points to another database; nothing was changed. Run the command again.')
+    return fresh, editor
 
 
 def _plugin_install(args, config, upgrade):
@@ -1141,6 +1159,26 @@ def _plugin_install(args, config, upgrade):
     print('SHA-256:  ' + archive.sha256)
     for permission in plugin_host.consent(config, manifest)['permissions']:
         print(f"  - {permission['title']['en']}: {permission['description']['en']}")
+    if upgrade:
+        # Say before the user confirms whether the new code will run without another review.
+        current = next((p for p in plugin_host.list_plugins(config) if p['id'] == plugin_id), None)
+        same = previous is not None and plugin_host.fingerprint(previous) == plugin_host.fingerprint(manifest)
+        granted = bool(current and (current.get('consent') or {}).get('status') == 'granted')
+        enabled = bool(current and current.get('enabled'))
+        if same and granted and enabled:
+            print('After:    its permissions are unchanged, so your existing grant stays valid and the plugin '
+                  'stays enabled: the new code runs without another review.')
+        elif same and granted:
+            print('After:    its permissions are unchanged, so your existing grant stays valid. The plugin is '
+                  'turned off now and stays off until you turn it on.')
+        elif same:
+            print('After:    its permissions are unchanged. It has no grant, so it stays inactive until you review and grant it.')
+        else:
+            print('After:    its permissions differ from the installed version, so it stays inactive until you '
+                  'review and grant them again.')
+    else:
+        print('After:    the plugin is installed turned off and without a permission grant. An earlier setting or '
+              'grant for this plugin ID, if any, is cleared.')
     verb = 'Upgrade' if upgrade else 'Install'
     if not _confirm(args, f'{verb} this plugin?'):
         print(f'Nothing was {"upgraded" if upgrade else "installed"}: confirm by typing yes, '
@@ -1148,7 +1186,14 @@ def _plugin_install(args, config, upgrade):
         return 1
     lock = _plugin_locked(config)
     try:
+        config, editor = _plugin_instance(args, config)
+        plugin_install.checked_root(config)
         plugin_install.recover(config)
+        plugin_install.check_installable(config, package, upgrade=upgrade)
+        if not upgrade:
+            # A first install is always off and ungranted, whatever an earlier
+            # install of the same ID left in the configuration or grant store.
+            editor.disable_plugin_locked(plugin_id)
         plugin_install.install(config, archive, package, upgrade=upgrade)
     finally:
         lock.close()
@@ -1178,7 +1223,7 @@ def _plugin_command(args, action, plugin_id):
     return shlex.join(command_args)
 
 
-def _plugin_uninstall(args, config, editor):
+def _plugin_uninstall(args, config):
     from . import plugin_host, plugin_install
     from .plugin_install import InstallError
     plugin_id = args.plugin_id
@@ -1187,6 +1232,7 @@ def _plugin_uninstall(args, config, editor):
     if plugin_id in plugin_host.RESERVED_IDS or plugin_id in plugin_host.bundled_ids():
         raise InstallError(f'"{plugin_id}" is bundled with the board and cannot be uninstalled; '
                            'disable it in Settings > Plugins instead.')
+    plugin_install.checked_root(config)
     if not plugin_install.installed(config, plugin_id) and not plugin_install.record_path(config, plugin_id).exists():
         raise InstallError(f'"{plugin_id}" is not an installed plugin.')
     print(f'Uninstall {plugin_id}: its package is removed, it is disabled and its permission grant is revoked. '
@@ -1197,7 +1243,12 @@ def _plugin_uninstall(args, config, editor):
         return 1
     lock = _plugin_locked(config)
     try:
+        config, editor = _plugin_instance(args, config)
+        # Refuse a symlinked or damaged package location before anything changes.
+        plugin_install.checked_root(config)
         plugin_install.recover(config)
+        if not plugin_install.installed(config, plugin_id) and not plugin_install.record_path(config, plugin_id).exists():
+            raise InstallError(f'"{plugin_id}" is not an installed plugin.')
         # Inert first: if removing the files then fails, nothing can run.
         editor.disable_plugin_locked(plugin_id)
         plugin_install.uninstall(config, plugin_id)

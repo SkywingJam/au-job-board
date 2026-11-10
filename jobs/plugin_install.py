@@ -140,17 +140,26 @@ def download(url, *, handlers=(), clock=time.monotonic):
     request = urllib.request.Request(urllib.parse.urldefrag(url)[0], headers={'User-Agent': USER_AGENT})
     deadline = clock() + DOWNLOAD_TIMEOUT
     chunks, size = [], 0
+
+    def on_time():
+        # One budget for connecting, redirects and the whole body. Each socket
+        # operation also has its own timeout, so a stalled peer cannot hold on.
+        if clock() > deadline:
+            raise InstallError(f'The download took longer than {DOWNLOAD_TIMEOUT} seconds.')
     try:
         with opener.open(request, timeout=DOWNLOAD_TIMEOUT) as response:
+            on_time()
             final = response.geturl() if hasattr(response, 'geturl') else url
             _check_url(final)
             length = response.headers.get('Content-Length') if getattr(response, 'headers', None) else None
             if length is not None and length.strip().isdigit() and int(length) > MAX_ARCHIVE:
                 raise InstallError('The download is larger than the 128 MiB package limit.')
+            # read1 returns after one underlying read, so a slow trickle is
+            # checked against the deadline between reads instead of blocking.
+            read = getattr(response, 'read1', None) or response.read
             while True:
-                if clock() > deadline:
-                    raise InstallError(f'The download took longer than {DOWNLOAD_TIMEOUT} seconds.')
-                chunk = response.read(min(_CHUNK, MAX_ARCHIVE + 1 - size))
+                chunk = read(min(_CHUNK, MAX_ARCHIVE + 1 - size))
+                on_time()
                 if not chunk:
                     break
                 chunks.append(chunk)
@@ -258,9 +267,44 @@ def _read_entry(archive, info):
     return b''.join(chunks)
 
 
+def _check_directory_size(data):
+    """Walk the central directory the way zipfile will and stop at the entry
+    limit, before zipfile allocates an object per record."""
+    import struct
+    bad = InstallError('The package is not a valid .zip file.')
+    end = -1
+    if len(data) >= 22 and data[-22:-18] == b'PK\x05\x06' and data[-2:] == b'\x00\x00':
+        end = len(data) - 22
+    else:
+        end = data.rfind(b'PK\x05\x06', max(0, len(data) - 65557))
+    if end < 0 or end + 22 > len(data):
+        raise bad
+    size, offset = struct.unpack_from('<LL', data, end + 12)
+    stop = end
+    if end >= 20 and data[end - 20:end - 16] == b'PK\x06\x07':          # zip64 locator
+        where = struct.unpack_from('<Q', data, end - 12)[0]
+        if where + 56 > len(data) or data[where:where + 4] != b'PK\x06\x06':
+            raise bad
+        size, offset = struct.unpack_from('<QQ', data, where + 40)
+        stop = where
+    start = stop - size
+    if size < 0 or start < 0:
+        raise bad
+    position, count = start, 0
+    while position < stop:
+        if position + 46 > stop or data[position:position + 4] != b'PK\x01\x02':
+            raise bad
+        count += 1
+        if count > MAX_ENTRIES:
+            raise InstallError(f'The package has more than {MAX_ENTRIES} entries.')
+        name, extra, comment = struct.unpack_from('<HHH', data, position + 28)
+        position += 46 + name + extra + comment
+
+
 def _open_archive(data):
     if len(data) > MAX_ARCHIVE:
         raise InstallError('The package is larger than the 128 MiB limit.')
+    _check_directory_size(data)
     try:
         return zipfile.ZipFile(io.BytesIO(data))
     except RunTimeout:
@@ -409,16 +453,26 @@ def installed(config, plugin_id):
         return False
 
 
-def _prepare_root(config):
+def checked_root(config, *, create=False):
+    """The packages root, refused when it is a symbolic link or not a directory.
+    Every operation that renames, deletes or writes goes through this first."""
     root = plugin_host.packages_root(config)
-    if root.is_symlink():
-        raise InstallError('The plugin package directory is a symbolic link; refusing to write through it.')
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if not root.is_dir():
-        raise InstallError('The plugin package location is not a directory.')
-    if os.name != 'nt':
-        os.chmod(root, 0o700)
+    try:
+        if root.is_symlink():
+            raise InstallError('The plugin package directory is a symbolic link; refusing to change anything through it.')
+        if root.exists() and not root.is_dir():
+            raise InstallError('The plugin package location exists and is not a directory.')
+        if create and not root.exists():
+            root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if create and os.name != 'nt':
+            os.chmod(root, 0o700)
+    except OSError as exc:
+        raise InstallError('The plugin package directory could not be prepared (' + type(exc).__name__ + ').') from None
     return root
+
+
+def _prepare_root(config):
+    return checked_root(config, create=True)
 
 
 def _rename(source, target):
@@ -446,18 +500,38 @@ def recover(config):
     `.old-<id>-*` is the previous package while an upgrade swaps it: put it
     back when `<id>` is missing, otherwise drop it. Staging and removed
     directories are always dropped."""
-    root = plugin_host.packages_root(config)
-    if root.is_symlink() or not root.is_dir():
+    root = checked_root(config)
+    if not root.is_dir():
         return
-    for path in sorted(root.iterdir()):
-        name = path.name
-        if path.is_symlink() or not name.startswith('.'):
-            continue
-        old = re.fullmatch(r'\.old-([a-z][a-z0-9_-]{0,63})-[0-9a-f]{32}', name)
-        if old and not (root / old.group(1)).exists() and not (root / old.group(1)).is_symlink():
-            _rename(path, root / old.group(1))
-        elif old or re.fullmatch(r'\.(staging|removed-[a-z][a-z0-9_-]{0,63})-[0-9a-f]{32}', name):
-            _remove_tree(path)
+    try:
+        for path in sorted(root.iterdir()):
+            name = path.name
+            if path.is_symlink() or not name.startswith('.'):
+                continue
+            old = re.fullmatch(r'\.old-([a-z][a-z0-9_-]{0,63})-[0-9a-f]{32}', name)
+            if old and path.is_dir():
+                target, kept = root / old.group(1), root / (name + '.json')
+                record = record_path(config, old.group(1))
+                if not target.exists() and not target.is_symlink():
+                    # The swap never completed: the previous package and its record come back.
+                    _rename(path, target)
+                    record.unlink(missing_ok=True)
+                    if kept.is_file() and not kept.is_symlink():
+                        _rename(kept, record)
+                else:
+                    # The new package is in place. Its record is only trusted when the
+                    # previous one was already retired by a completed write.
+                    _remove_tree(path)
+                    if kept.exists() or kept.is_symlink():
+                        kept.unlink()
+            elif re.fullmatch(r'\.(staging|removed-[a-z][a-z0-9_-]{0,63})-[0-9a-f]{32}', name) and path.is_dir():
+                _remove_tree(path)
+        for path in sorted(root.iterdir()):          # a record backup whose package backup is gone
+            if (re.fullmatch(r'\.old-[a-z][a-z0-9_-]{0,63}-[0-9a-f]{32}\.json', path.name)
+                    and not (root / path.name[:-5]).exists()):
+                path.unlink()
+    except OSError as exc:
+        raise InstallError('An interrupted plugin change could not be cleaned up (' + type(exc).__name__ + ').') from None
 
 
 def _write_file(path, content):
@@ -504,39 +578,60 @@ def install(config, archive, package, *, upgrade=False):
     staging = root / ('.staging-' + token)
     target = root / package.plugin_id
     backup = root / ('.old-' + package.plugin_id + '-' + token)
+    record_file = record_path(config, package.plugin_id)
+    record_backup = root / (backup.name + '.json')
+    restored = True
+    placed = False          # the new package sits at `target`
+
+    def roll_back():
+        # Undo in reverse order whatever happened; each step checks the disk.
+        nonlocal restored, placed
+        restored = False
+        if placed:
+            record_file.unlink(missing_ok=True)
+            if target.exists() and not target.is_symlink():
+                _rename(target, staging)
+            placed = False
+        if backup.exists() and not target.exists():
+            _rename(backup, target)
+        if record_backup.exists() and not record_file.exists():
+            _rename(record_backup, record_file)
+        restored = True
     try:
         _extract(archive.data, package, staging)
-        if upgrade:
-            _rename(target, backup)
-            try:
-                _rename(staging, target)
-                record = write_record(config, package, archive)
-            except BaseException:
-                if target.exists() and not target.is_symlink():
-                    _rename(target, staging)
-                _rename(backup, target)
-                raise
-        else:
+        try:
+            if upgrade:
+                # The old record leaves with the old package, so a crash can never
+                # show the previous version and hash for new code.
+                if record_file.is_file() and not record_file.is_symlink():
+                    _rename(record_file, record_backup)
+                _rename(target, backup)
             _rename(staging, target)
-            try:
-                record = write_record(config, package, archive)
-            except BaseException:
-                _rename(target, staging)
-                raise
-        plugin_host._sync_directory(root)
+            placed = True
+            record = write_record(config, package, archive)
+            plugin_host._sync_directory(root)
+        except BaseException:
+            roll_back()
+            raise
     except (InstallError, RunTimeout):
         raise
     except OSError as exc:
-        raise InstallError('Writing the plugin package failed (' + type(exc).__name__ + '); the previous state was kept.') from None
+        state = ('the previous state was kept' if restored else
+                 'the previous state could not be fully restored; run the command again to repair it')
+        raise InstallError('Writing the plugin package failed (' + type(exc).__name__ + '); ' + state + '.') from None
     finally:
         try:
             _remove_tree(staging)
         except OSError:
             pass
-    try:
-        _remove_tree(backup)
-    except OSError:
-        pass        # an `.old-*` leftover is ignored and cleaned by the next operation
+    for leftover in (backup, record_backup):
+        try:
+            if leftover.is_dir() and not leftover.is_symlink():
+                _remove_tree(leftover)
+            else:
+                leftover.unlink(missing_ok=True)
+        except OSError:
+            pass        # an `.old-*` leftover is ignored and cleaned by the next operation
     return record
 
 
@@ -547,7 +642,7 @@ def uninstall(config, plugin_id):
         raise InstallError('Plugin ids are lowercase letters, digits, "_" or "-", starting with a letter.')
     if plugin_id in plugin_host.RESERVED_IDS or plugin_id in plugin_host.bundled_ids():
         raise InstallError(f'"{plugin_id}" is bundled with the board and cannot be uninstalled; disable it in Settings > Plugins instead.')
-    root = plugin_host.packages_root(config)
+    root = checked_root(config)
     target, record = root / plugin_id, record_path(config, plugin_id)
     if not installed(config, plugin_id) and not record.exists():
         raise InstallError(f'"{plugin_id}" is not an installed plugin.')
@@ -565,6 +660,8 @@ def uninstall(config, plugin_id):
                 removed = root / ('.removed-' + plugin_id + '-' + uuid.uuid4().hex)
                 _rename(path, removed)
                 _remove_tree(removed)
+            elif path.name.endswith('.json') and backup.fullmatch(path.name[:-5]):
+                path.unlink()
         record.unlink(missing_ok=True)
         if root.is_dir():
             plugin_host._sync_directory(root)
