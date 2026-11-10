@@ -571,7 +571,7 @@ body.portrait .selbar-msg{margin-top:6px}
 body.portrait .search{flex:1 1 100%;max-width:none;min-height:44px}
 body.portrait .search input{font-size:16px}
 body.portrait #primary-filters,body.portrait #tail-filters,body.portrait .more-btn,body.portrait a.clear{display:none}
-body.portrait .sheet-btn{display:inline-flex;position:absolute;top:8px;right:8px;min-height:44px;border:0;background:transparent;color:var(--ink)}
+body.portrait .sheet-btn{display:inline-flex;position:absolute;top:6px;right:8px;min-height:44px;border:0;background:transparent;color:var(--ink)}
 body.portrait .sheet-btn[aria-expanded="true"]{background:transparent;color:var(--ink)}
 body.portrait .chips{flex-wrap:nowrap;overflow-x:auto;padding:0 14px 10px;scrollbar-width:none}
 body.portrait .chips::-webkit-scrollbar{display:none}
