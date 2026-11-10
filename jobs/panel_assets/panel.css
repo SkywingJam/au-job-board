@@ -1163,6 +1163,10 @@ body.portrait .geo-suggest-panel{left:0;right:0;min-width:0;width:auto}
 /* Plugin permission: state line, review entry, detail sections and the consent dialog.
    Tone carries meaning only together with text (granted / needs approval / unavailable). */
 .plugin-version{margin-left:6px;font-weight:400;font-size:var(--fs-xs);color:var(--ink3);white-space:nowrap}
+.plugin-origin{display:inline-block;margin-left:6px;padding:0 7px;border:1px solid var(--line3);border-radius:999px;font-weight:400;font-size:var(--fs-xs);line-height:1.5;color:var(--ink3);white-space:nowrap}
+.plugin-state.is-note{color:var(--ink2)}
+.plugin-toggle[hidden]{display:none}
+.plugin-cli-hint{margin-top:16px}
 .plugin-state.is-ok{color:var(--good-ink)}
 .plugin-state.is-cue{color:var(--cue-ink)}
 .plugin-state.is-bad{color:var(--bad-ink)}
@@ -1196,6 +1200,11 @@ body.portrait .geo-suggest-panel{left:0;right:0;min-width:0;width:auto}
 .plugin-limits{margin-top:12px;padding:10px 12px;border-radius:var(--r-ctl);background:var(--surface2);border:1px solid var(--line);font-size:var(--fs-sm)}
 .plugin-limits b{display:block;margin-bottom:4px;color:var(--ink)}
 .plugin-limits p{margin:0;line-height:1.7;color:var(--ink2);white-space:pre-line;overflow-wrap:anywhere}
+.plugin-source-facts{display:grid;gap:6px;margin:0;font-size:var(--fs-sm);line-height:1.6}
+.plugin-source-facts>div{display:grid;grid-template-columns:minmax(64px,auto) minmax(0,1fr);gap:12px}
+.plugin-source-facts dt{color:var(--ink3)}
+.plugin-source-facts dd{margin:0;overflow-wrap:anywhere}
+.plugin-source-facts .plugin-sha{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .plugin-fp{margin:10px 0 0;font-size:var(--fs-xs);color:var(--ink3);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
 .modal.plugin-consent{align-items:center;padding:32px 16px}
 .plugin-consent .dialog{max-width:620px;max-height:calc(100vh - 64px);max-height:calc(100dvh - 64px)}
@@ -1225,5 +1234,6 @@ body.portrait .geo-suggest-panel{left:0;right:0;min-width:0;width:auto}
  .plugin-consent .dialog-foot button{flex:1 1 0}
  .plugin-consent .dialog-foot .spacer{display:none}
  .plugin-grant{padding:12px}
+ .plugin-source-facts>div{grid-template-columns:minmax(0,1fr);gap:0}
 }
 @media (prefers-reduced-motion:reduce){.plugin-toggle-track>span,.plugin-facts>summary::before{transition:none}}

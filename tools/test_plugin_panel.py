@@ -462,5 +462,174 @@ class PluginPanelTests(unittest.TestCase):
         item = data['plugins'][0]
         self.assertEqual((item['enabled'], item['consent']['status']), (False, 'required'))
 
+    @staticmethod
+    def markup(page):
+        """The server-rendered page body: no inline CSS, script or translation table."""
+        return page[page.index('<main'):].split('<script>')[0]
+
+    # ---- origin, install record, incompatible plugins (Settings > Plugins display) -----------
+    HOSTILE = '<img src=x onerror=alert(1)>'
+
+    def new_item(self, **extra):
+        item = self.plugin_item('granted', True)
+        item['name'] = {'zh': '雇主信息', 'en': 'Employer facts'}
+        item.update(extra)
+        return item
+
+    def incompatible_item(self, **extra):
+        fields = {'status': 'incompatible', 'origin': 'installed', 'compatibility': {'host_api': 1, 'core': '>=9.0.0'},
+                  'incompatible': {'core': '1.4.0', 'requires': '>=9.0.0'}}
+        fields.update(extra)
+        return self.new_item(**fields)
+
+    def test_origin_marker_sits_next_to_the_version_in_both_languages(self):
+        for lang in ('zh', 'en'):
+            for origin in ('builtin', 'installed'):
+                with self.subTest(lang=lang, origin=origin):
+                    page = self.settings_page(self.new_item(origin=origin), lang)
+                    label = i18n.t(lang, 'plugin.origin_' + origin)
+                    self.assertIn(f'<span class="plugin-origin">{label}</span></b>', page)
+                    self.assertIn('</span><span class="plugin-origin">', page)   # directly after the version
+                    detail = self.settings_page(self.new_item(origin=origin), lang, detail=True)
+                    self.assertIn(i18n.t(lang, 'plugin.version', version='1.1.0') + ' · ' + label + ' · sponsorship', detail)
+
+    def test_old_shape_items_render_without_any_new_markup(self):
+        item = self.plugin_item('granted', True)
+        for detail in (False, True):
+            body = self.markup(self.settings_page(item, 'en', detail=detail))
+            for new in ('class="plugin-origin"', 'plugin-source', 'is-note', 'Built in', 'Installed'):
+                self.assertNotIn(new, body)
+            self.assertIn('data-plugin-toggle=' if not detail else 'data-plugin-debug=', body)
+
+    def test_installed_plugin_shows_source_hash_prefix_and_date_as_text(self):
+        record = {'version': '1.1.0', 'sha256': 'abcdef0123456789' + '0' * 48, 'source': self.HOSTILE,
+                  'installed_at': '2026-11-10T01:02:03+00:00'}
+        for lang in ('zh', 'en'):
+            with self.subTest(lang=lang):
+                item = self.new_item(origin='installed', install=record)
+                detail = self.settings_page(item, lang, detail=True)
+                self.assertIn('<section class="plugin-source"', detail)
+                self.assertIn(i18n.t(lang, 'plugin.provenance_title'), detail)
+                self.assertIn('<dd>&lt;img src=x onerror=alert(1)&gt;</dd>', detail)
+                self.assertNotIn('<img src=x', self.markup(detail))
+                self.assertIn('<dd class="plugin-sha">abcdef012345</dd>', detail)
+                self.assertNotIn('abcdef0123456', detail)               # only the first 12 characters
+                self.assertIn('<dd>2026-11-10</dd>', detail)
+                # Not permanent clutter: the list row carries the marker only.
+                row = self.markup(self.settings_page(item, lang))
+                self.assertNotIn('abcdef012345', row)
+                self.assertNotIn('plugin-source', row)
+
+    def test_installed_plugin_without_or_with_damaged_record_still_renders(self):
+        for record in (None, {}, 'text', [], {'source': 5, 'sha256': 7, 'installed_at': None}):
+            with self.subTest(record=record):
+                item = self.new_item(origin='installed', install=record)
+                self.assertNotIn('plugin-source', self.markup(self.settings_page(item, 'en', detail=True)))
+                self.assertIn('class="plugin-origin">Installed<', self.settings_page(item, 'en'))
+        item = self.new_item(origin='installed', install={'sha256': 'f' * 64, 'installed_at': 'sometime <b>soon</b>'})
+        detail = self.settings_page(item, 'en', detail=True)
+        self.assertIn('<dd>sometime &lt;b&gt;soon&lt;/b&gt;</dd>', detail)
+        self.assertNotIn('<dt>Source</dt>', detail)
+
+    def test_long_source_is_cut_and_hostile_version_stays_text(self):
+        item = self.new_item(origin='installed', version='<script>x</script>',
+                             install={'source': 'https://example.invalid/' + 'a' * 400})
+        detail = self.settings_page(item, 'en', detail=True)
+        self.assertNotIn('<script>x</script>', self.markup(detail))
+        self.assertIn('v&lt;script&gt;x&lt;/script&gt;', detail)
+        self.assertNotIn('a' * 300, detail)
+
+    def test_incompatible_row_has_one_plain_sentence_and_no_switch_or_review(self):
+        for lang, sentence in (('en', 'Needs Job Board 9.0.0 or later; this is 1.4.0. It stays off until you upgrade the plugin or Job Board.'),
+                               ('zh', '需要 Job Board 9.0.0 或更高版本，当前是 1.4.0。在升级插件或 Job Board 之前它保持关闭。')):
+            with self.subTest(lang=lang):
+                # Even with a stored grant and "enabled" in the configuration, nothing to switch or review.
+                page = self.settings_page(self.incompatible_item(), lang)
+                body = self.markup(page)
+                self.assertIn(f'class="plugin-state is-note" data-consent="">{sentence}<', body)
+                for gone in ('role="switch"', 'data-plugin-toggle', 'data-plugin-review', 'plugin-review-link',
+                             i18n.t(lang, 'plugin.review_enable'), i18n.t(lang, 'plugin.consent_required_short'),
+                             i18n.t(lang, 'plugin.consent_granted_short'), 'is-bad'):
+                    self.assertNotIn(gone, body)
+                self.assertIn('plugin=sponsorship', body)   # details and debug stay reachable
+                self.assertIn('class="plugin-origin"', body)
+
+    def test_incompatible_detail_keeps_the_reason_and_drops_grant_actions(self):
+        for lang in ('zh', 'en'):
+            with self.subTest(lang=lang):
+                page = self.settings_page(self.incompatible_item(), lang, detail=True)
+                body = self.markup(page)
+                needs = i18n.t(lang, 'plugin.range_min', a='9.0.0')
+                self.assertIn('data-grant-state data-consent="">' + i18n.t(lang, 'plugin.incompatible', requires=needs, core='1.4.0') + '<', body)
+                # A compatibility matter, not a permission one; a kept grant can still be revoked.
+                self.assertIn('>' + i18n.t(lang, 'plugin.compat_section') + '</h3>', body)
+                self.assertIn(i18n.t(lang, 'plugin.incompatible_hint'), body)
+                self.assertIn('data-plugin-revoke="sponsorship" hidden', body)
+                for gone in ('data-grant-switch', 'data-plugin-review', 'data-plugin-scope',
+                             'plugin.consent_required', i18n.t(lang, 'plugin.consent_required_short')):
+                    self.assertNotIn(gone, body)
+                self.assertIn('data-plugin-debug="sponsorship"', body)
+
+    def test_version_range_is_shown_in_words(self):
+        from jobs import panel_views
+        self.assertEqual(panel_views._plugin_range_text('>=1.5.0,<2.0.0', 'en'), '1.5.0 or later, below 2.0.0')
+        self.assertEqual(panel_views._plugin_range_text('<2', 'en'), 'a version below 2')
+        self.assertEqual(panel_views._plugin_range_text('>=1.5', 'zh'), '1.5 或更高版本')
+        self.assertEqual(panel_views._plugin_range_text('~1.5', 'en'), '~1.5')          # unexpected: as written
+
+    def test_incompatible_text_escapes_the_reason_and_falls_back_without_one(self):
+        item = self.incompatible_item(incompatible={'core': '<b>1</b>', 'requires': '"><script>'})
+        body = self.markup(self.settings_page(item, 'en'))
+        self.assertNotIn('<script>', body)
+        self.assertIn('&lt;b&gt;1&lt;/b&gt;', body)
+        for reason in (None, {}, {'core': '1.4.0'}, 'text', {'core': 1, 'requires': 2}):
+            with self.subTest(reason=reason):
+                page = self.settings_page(self.incompatible_item(incompatible=reason), 'en')
+                self.assertIn(i18n.t('en', 'plugin.incompatible_generic'), page)
+                self.assertNotIn('role="switch"', self.markup(page))
+
+    def test_list_page_points_to_the_command_line_and_offers_no_install_path(self):
+        for lang in ('zh', 'en'):
+            with self.subTest(lang=lang):
+                page = self.settings_page(self.new_item(origin='builtin'), lang)
+                body = self.markup(page)
+                hint = re.search(r'<p class="set-hint plugin-cli-hint">(.*?)</p>', body).group(1)
+                self.assertIn('python -m jobs.cli plugin install', hint)
+                self.assertIn('docs/plugins.md', hint)
+                # The hint is the last thing in the plugin list, after the rows.
+                self.assertGreater(body.index('plugin-cli-hint'), body.rindex('class="plugin-row"'))
+                for gone in ('<form', 'type="file"', 'type="url"', 'data-plugin-install', 'data-plugin-upload', '<textarea'):
+                    self.assertNotIn(gone, body)
+                self.assertNotIn('plugin-cli-hint', self.markup(self.settings_page(self.new_item(), lang, detail=True)))
+        with patch.object(plugin_host, 'list_plugins', return_value=[]):
+            _, page = self.request('/settings?section=plugins', headers={'Cookie': 'jobs_lang=en'})
+        self.assertIn('No plugins installed.', page)
+        self.assertIn('plugin-cli-hint', page)    # a fresh instance is told how to install too
+
+    def test_settings_script_has_no_install_or_upload_path(self):
+        """The panel has no authentication: its script only reads and toggles, never installs."""
+        script = (ROOT/'jobs'/'panel_assets'/'settings.js').read_text()
+        section = script[script.index('/* Plugins: only validated data'):]
+        urls = set(re.findall(r"fetch\('([^']+)'", section))
+        self.assertEqual(urls, {'/api/plugins', '/api/plugins/debug?id='})
+        for word in ('FormData', "type='file'", 'type="file"', '.files', 'XMLHttpRequest', 'sendBeacon'):
+            self.assertNotIn(word, section, word)
+        for route in ('plugin-install', 'plugins/install', 'plugin_install'):
+            self.assertNotIn(route, section)
+        self.assertNotIn('install', ' '.join(re.findall(r"post\(\{[^}]*\}\)", section)))
+
+    def test_new_copy_exists_in_both_languages_with_the_same_placeholders(self):
+        keys = ['plugin.origin_builtin', 'plugin.origin_installed', 'plugin.incompatible', 'plugin.incompatible_generic',
+                'plugin.provenance_title', 'plugin.provenance_source', 'plugin.provenance_sha',
+                'plugin.provenance_date', 'plugin.cli_hint']
+        for key in keys:
+            en, zh = i18n.STRINGS['en'][key], i18n.STRINGS['zh'][key]
+            self.assertEqual(set(re.findall(r'{(\w+)}', en)), set(re.findall(r'{(\w+)}', zh)), key)
+            self.assertIn(key, i18n.js_strings('en'))
+        self.assertEqual(set(re.findall(r'{(\w+)}', i18n.STRINGS['en']['plugin.incompatible'])), {'requires', 'core'})
+        for lang in ('zh', 'en'):
+            self.assertIn('python -m jobs.cli plugin install', i18n.STRINGS[lang]['plugin.cli_hint'])
+            self.assertIn('docs/plugins.md', i18n.STRINGS[lang]['plugin.cli_hint'])
+
 if __name__ == '__main__':
     unittest.main()

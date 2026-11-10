@@ -481,8 +481,37 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
     try{localStorage.setItem('jobs.plugins.changed',String(Date.now()));}catch(_){}
     return data;
   }
+  /* Provenance and compatibility fields are optional: an older server or a damaged record omits them. */
+  const clip=(value,limit)=>{if(typeof value!=='string')return '';const v=value.split(/\s+/).filter(Boolean).join(' ');return v.length<=limit?v:v.slice(0,limit-1)+'…';};
+  const originOf=item=>item&&(item.origin==='builtin'||item.origin==='installed')?T('plugin.origin_'+item.origin):'';
+  function incompatibleText(item){
+    const r=item&&item.incompatible,core=r&&typeof r==='object'?clip(r.core,64):'',requires=r&&typeof r==='object'?clip(r.requires,64):'';
+    return core&&requires?T('plugin.incompatible',{requires:rangeText(requires),core}):T('plugin.incompatible_generic');
+  }
+  /* `>=1.5.0,<2.0.0` in words; anything unexpected is shown as written. */
+  function rangeText(requires){
+    let low='',high='';
+    for(const part of requires.split(',')){
+      if(part.startsWith('>=')&&!low)low=part.slice(2);
+      else if(part.startsWith('<')&&!part.startsWith('<=')&&!high)high=part.slice(1);
+      else return requires;
+    }
+    if(low&&high)return T('plugin.range_both',{a:low,b:high});
+    if(low)return T('plugin.range_min',{a:low});
+    return high?T('plugin.range_max',{b:high}):requires;
+  }
+  function installFacts(item){
+    const record=item&&item.install;if(!record||typeof record!=='object')return null;
+    const when=typeof record.installed_at==='string'&&/^\d{4}-\d{2}-\d{2}/.test(record.installed_at)?record.installed_at.slice(0,10):clip(record.installed_at,32);
+    const rows=[['plugin.provenance_source',clip(record.source,200),''],['plugin.provenance_sha',typeof record.sha256==='string'?record.sha256.slice(0,12):'','plugin-sha'],['plugin.provenance_date',when,'']].filter(r=>r[1]);
+    if(!rows.length)return null;
+    const dl=node('dl','plugin-source-facts');
+    rows.forEach(([key,value,cls])=>{const d=node('div');d.append(node('dt',null,T(key)),node('dd',cls,value));dl.append(d);});
+    return dl;
+  }
   /* The switch is the saved on/off setting; this line says whether it can actually run. */
   function stateOf(item){
+    if(item.status==='incompatible')return [incompatibleText(item),'is-note',T('plugin.incompatible_hint')];
     if(item.status==='error')return [T('plugin.unavailable_hint'),'is-bad',''];
     const c=consentOf(item);if(!c)return ['','',''];
     if(c.status==='granted')return [T('plugin.consent_granted_short'),'is-ok',T('plugin.consent_granted_hint')];
@@ -508,14 +537,19 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
     if(typeof c.fingerprint==='string'&&c.fingerprint)box.append(node('p','plugin-fp',T('plugin.consent_fingerprint',{fp:c.fingerprint.slice(0,12)})));
   }
   function applyItem(item){
-    const [text,tone,hint]=stateOf(item),c=consentOf(item),needs=!!c&&c.status!=='granted'&&item.status!=='error';
+    const incompatible=item.status==='incompatible';
+    const [text,tone,hint]=stateOf(item),c=consentOf(item),needs=!!c&&c.status!=='granted'&&item.status!=='error'&&!incompatible;
+    const status=incompatible?'':c&&c.status;
     const row=rowOf(item.id);
     if(row){
       const button=row.querySelector('[data-plugin-toggle]');
-      button.dataset.enabled=String(!!item.enabled);button.dataset.unavailable=String(item.status==='error');
-      button.setAttribute('aria-checked',String(!!item.enabled));
-      if(!pending.has(item.id))button.setAttribute('aria-disabled',String(item.status==='error'&&!item.enabled));
-      setState(row.querySelector('.plugin-state'),text,tone,c&&c.status);
+      if(button){   // an incompatible plugin has no switch (the server omits it; a stale page hides it)
+        button.hidden=incompatible;
+        button.dataset.enabled=String(!!item.enabled);button.dataset.unavailable=String(item.status==='error');
+        button.setAttribute('aria-checked',String(!!item.enabled));
+        if(!pending.has(item.id))button.setAttribute('aria-disabled',String(item.status==='error'&&!item.enabled));
+      }
+      setState(row.querySelector('.plugin-state'),text,tone,status);
       const errors=row.querySelector('.plugin-error-count');
       if(errors){errors.hidden=!item.error_count;errors.textContent=item.error_count?T('plugin.error_count',{n:item.error_count}):'';}
       const review=row.querySelector('[data-plugin-review]');if(review)review.hidden=!needs;
@@ -523,13 +557,13 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
     const detail=detailOf(item.id);
     if(detail){
       detail.dataset.enabled=String(!!item.enabled);detail.dataset.unavailable=String(item.status==='error');
-      detail.querySelector('[data-grant-switch]').textContent=T(item.enabled?'plugin.enabled':'plugin.disabled');
+      const sw=detail.querySelector('[data-grant-switch]');if(sw)sw.textContent=T(item.enabled?'plugin.enabled':'plugin.disabled');
       const state=detail.querySelector('[data-grant-state]');
-      setState(state,text||T('plugin.consent_unknown_hint'),text?tone:'is-bad',c&&c.status);
-      detail.querySelector('[data-grant-hint]').textContent=hint;
-      detail.querySelector('[data-plugin-review]').hidden=!needs;
-      detail.querySelector('[data-plugin-revoke]').hidden=!(c&&c.status!=='required');
-      renderScope(detail.querySelector('[data-plugin-scope]'),item);
+      setState(state,text||T('plugin.consent_unknown_hint'),text?tone:'is-bad',status);
+      const hintEl=detail.querySelector('[data-grant-hint]');if(hintEl)hintEl.textContent=hint;
+      const reviewBtn=detail.querySelector('[data-plugin-review]');if(reviewBtn)reviewBtn.hidden=!needs;
+      const revokeBtn=detail.querySelector('[data-plugin-revoke]');if(revokeBtn)revokeBtn.hidden=!(c&&c.status!=='required');   // a kept grant can be revoked while incompatible
+      if(!incompatible)renderScope(detail.querySelector('[data-plugin-scope]'),item);
     }
   }
   function say(id,text,error){
@@ -582,13 +616,15 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
   }
   function renderConsent(item,notice){
     const c=consentOf(item),name=nameOf(item);
-    const meta=[item.version?T('plugin.version',{version:item.version}):'',item.id].filter(Boolean).join(' · ');
+    const meta=[item.version?T('plugin.version',{version:item.version}):'',originOf(item),item.id].filter(Boolean).join(' · ');
     const f=frame(T('plugin.consent_title',{name}),meta);
     let noticeEl=null;
     if(notice){noticeEl=node('p','plugin-consent-notice',notice);noticeEl.tabIndex=-1;f.body.append(noticeEl);}
     const intro=node('p','plugin-consent-intro',T(c&&c.status==='changed'?'plugin.consent_intro_changed':'plugin.consent_intro_required'));
     intro.id='plugin-consent-intro';f.body.append(intro);
     const desc=loc(item.description);if(desc)f.body.append(node('p','plugin-consent-purpose',desc));
+    const facts=installFacts(item);
+    if(facts){const src=node('section','plugin-consent-source');src.append(node('h4',null,T('plugin.provenance_title')),facts);f.body.append(src);}
     const scope=node('section','plugin-consent-scope');scope.append(node('h4',null,T('plugin.consent_permissions')));
     const scopeBox=node('div');renderScope(scopeBox,item);scope.append(scopeBox);f.body.append(scope);
     const after=node('section','plugin-consent-after');after.append(node('h4',null,T('plugin.consent_after')));
@@ -696,6 +732,7 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
       try{
         const current=await readPlugins(),item=byId(current.plugins,id),c=consentOf(item);
         if(!item)throw new Error('not_found');
+        if(item.status==='incompatible'){applyItem(item);say(id,'',false);return;}   // stale page: nothing can be switched on
         if(turningOn&&c&&c.status!=='granted'){review=current;say(id,'',false);return;}   // enabling needs the review first
         const result=await post({digest:current.digest,id,enabled:turningOn});
         const saved=byId(result.plugins,id);if(!saved)throw new Error('failed');

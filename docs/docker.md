@@ -198,6 +198,10 @@ That direct maintenance write bypasses the browser's validated save endpoint;
 validate your YAML and preserve private unknown fields. The settings form itself
 checks versions, validates allowed fields and writes atomically.
 
+## Installed plugins
+
+Plugin packages you install are stored in the `data` volume, beside the database (`.jobs.db.plugin-packages/`). Run the install command in a container with the same volumes, such as `docker compose run --rm panel plugin install SOURCE`, where `SOURCE` is a package file the container can read (for example one under `/app/data`) or an `https://` URL with `--sha256`. See [plugins.md](plugins.md#installing-upgrading-and-removing-plugins). Installed plugins survive image upgrades and `docker compose down`; `docker compose down -v` deletes them with the volume. An image upgrade can make an installed or bundled plugin incompatible with the new Job Board version: it then stays off, and Settings > Plugins states the reason, until you upgrade the plugin or the image.
+
 ## Upgrade and backup
 
 For a published-image installation, after updates have finished, select the

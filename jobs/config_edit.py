@@ -431,7 +431,8 @@ class ConfigEditor:
                 raise ConfigEditError("conflict")
             items = plugin_host.list_plugins({**self.config, "plugins": plain.get("plugins", {})})
             item = next((p for p in items if p["id"] == payload["id"]), None)
-            if item is None or (payload["enabled"] and item["status"] == "error"):
+            # An incompatible plugin cannot be switched on; disabling and revoking still work.
+            if item is None or (payload["enabled"] and item["status"] in ("error", "incompatible")):
                 raise ConfigEditError("validation_failed")
             config = {**self.config, "plugins": plain.get("plugins", {})}
             pending_grant = None
@@ -449,7 +450,7 @@ class ConfigEditor:
                     if supplied != consent['fingerprint']:
                         raise ConfigEditError('plugin_consent_required')
                     try:
-                        manifest = plugin_host._manifest(plugin_host.PLUGIN_ROOT / item['id'], item['id'])
+                        manifest = plugin_host.load_manifest(config, item['id'])
                         if plugin_host.fingerprint(manifest) != supplied:
                             raise ValueError('fingerprint changed')
                         pending_grant = manifest, supplied
@@ -457,17 +458,7 @@ class ConfigEditor:
                         raise ConfigEditError('plugin_consent_required') from exc
                     except OSError as exc:
                         raise ConfigEditError('write_failed') from exc
-            path = "plugins." + item["id"] + ".enabled"
-            expected = copy.deepcopy(plain)
-            _set(expected, path, payload["enabled"])
-            _set(document, path, payload["enabled"])
-            stream = io.StringIO()
-            parser.dump(document, stream)
-            encoded = stream.getvalue().encode("utf-8")
-            if len(encoded) > MAX_BYTES or not _same_values(expected, _document(encoded)[2]):
-                raise ConfigEditError("config_invalid")
-            if encoded != raw:
-                self._replace(encoded, payload["digest"])
+            self._write_enabled(raw, parser, document, plain, item["id"], payload["enabled"], payload["digest"])
             # Complete configuration persistence before publishing a new grant.
             # If granting then fails, an enabled-but-ungranted plugin stays inert.
             if pending_grant is not None:
@@ -480,6 +471,44 @@ class ConfigEditor:
             return self.read_plugins()
         finally:
             lock.close()
+
+    def _write_enabled(self, raw, parser, document, plain, plugin_id, enabled, digest):
+        path = "plugins." + plugin_id + ".enabled"
+        expected = copy.deepcopy(plain)
+        _set(expected, path, enabled)
+        _set(document, path, enabled)
+        stream = io.StringIO()
+        parser.dump(document, stream)
+        encoded = stream.getvalue().encode("utf-8")
+        if len(encoded) > MAX_BYTES or not _same_values(expected, _document(encoded)[2]):
+            raise ConfigEditError("config_invalid")
+        if encoded != raw:
+            self._replace(encoded, digest)
+
+    def disable_plugin_locked(self, plugin_id):
+        """Revoke the grant and switch the plugin off, without reading its manifest.
+
+        Used when a package is uninstalled; the caller already holds the run
+        lock. A plugin with no configuration section keeps the file unchanged.
+        """
+        from . import plugin_host
+        if not isinstance(plugin_id, str) or not plugin_host._ID.fullmatch(plugin_id):
+            raise ConfigEditError("invalid_request")
+        raw, parser, document, plain = self._read()
+        plugins = plain.get("plugins", {})
+        config = {**self.config, "plugins": plugins}
+        try:
+            plugin_host.revoke(config, plugin_id)
+        except OSError as exc:
+            raise ConfigEditError('write_failed') from exc
+        section = plugins.get(plugin_id) if isinstance(plugins, dict) else None
+        if section is None:
+            return
+        if not isinstance(section, dict):
+            raise ConfigEditError("config_invalid")
+        if section.get("enabled", False) is not False:
+            self._write_enabled(raw, parser, document, plain, plugin_id, False,
+                                hashlib.sha256(raw).hexdigest())
 
     def _replace(self, encoded, digest):
         temporary = None

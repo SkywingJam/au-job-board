@@ -27,6 +27,13 @@ incremental:
 `tools/test_sidebar_host.py` pins the consent fingerprints of the bundled
 plugins and the map frame's CSP. A change that moves them is a breaking change.
 
+Installable packages, the `compatibility.core` range, the `incompatible` status
+and the `origin`, `compatibility`, `incompatible` and `install` list fields were
+added later under these rules. A manifest without `compatibility.core` behaves
+as before, and a consumer that does not know the new fields can ignore them.
+A plugin still cannot install, upgrade or remove anything, itself or another
+plugin.
+
 ## Files and identity
 
 ```
@@ -43,6 +50,13 @@ plugins/<id>/
 host reads at most 32 plugin directories and never follows a symlinked plugin
 directory. The manifest is read without importing plugin code.
 
+A plugin directory is in one of two places. Bundled plugins are in `plugins/<id>/`
+of the Job Board folder (`origin: "builtin"`). Installed packages are in
+`.<database-name>.plugin-packages/<id>/` beside the database
+(`origin: "installed"`); see [Packages and installation](#packages-and-installation).
+The layout is the same in both. The 32 plugins are counted across both places.
+An installed package never takes the ID of a bundled plugin.
+
 Common manifest keys:
 
 | Key | Rule |
@@ -51,7 +65,7 @@ Common manifest keys:
 | `name` | String, or `{zh, en}`; at most 100 characters each |
 | `description` | Optional string or `{zh, en}`; at most 200 characters each |
 | `version` | Non-empty string, at most 64 characters |
-| `compatibility` | Exactly `{"host_api": 1}` or `{"host_api": 2}` |
+| `compatibility` | `{"host_api": 1}` or `{"host_api": 2}`, with an optional `core` range (see [Core version range](#core-version-range)); no other keys |
 | `entry`, `hooks`, `network`, `display`, `i18n`, `permissions` | Fixed by the profile, see below |
 
 Settings live under `plugins.<id>` in the configuration. Only `enabled`
@@ -114,8 +128,108 @@ vocabulary overlay or job data.
 
 SHA-256 over `id`, `hooks`, `network`, `display` and `permissions`; host API 2
 adds `compatibility`, `entry`, `page`, and `sidebar` when declared, each
-without `icon`. The grant is stored beside the database and checked before
+without `icon`. `compatibility` is hashed without `core`: changing the core
+range needs no new consent. The grant is stored beside the database and checked before
 every hook dispatch, route and bridge operation.
+
+## Core version range
+
+`compatibility` may add an optional `core` string next to `host_api`:
+
+```json
+"compatibility": {"host_api": 2, "core": ">=1.4.0,<2.0.0"}
+```
+
+- The value is one or two comparators separated by a comma, written without
+  spaces: `>=X`, `<X`, or both. `>=X` is the lowest version that works and `<X`
+  the first version that does not.
+- `X` is one to four whole numbers separated by dots, for example `1.4`,
+  `1.4.0` or `1.4.0.1`. A missing part counts as 0. Numbers have no leading zeros,
+  each comparator appears at most once, and the whole value is at most 64
+  characters.
+- The host compares the range numerically with the running Job Board version.
+- Anything else in `core` makes the manifest invalid, and the plugin shows as
+  `error`.
+- `core` is not a permission. It is not part of the consent fingerprint.
+
+A plugin without `core` is treated as working with every version, as before. A
+plugin whose range does not include the running version gets the status
+`incompatible`: it is never run, served, dispatched or shown as a page or
+sidebar. Its grant, data and results are kept, and core processing continues.
+This holds for bundled and installed plugins. Install and upgrade refuse a
+package that is incompatible with the running version.
+
+## Packages and installation
+
+A package is one `.zip` file. `manifest.json` is at its root, or everything is
+inside a single top-level folder, which is removed on install. The manifest and
+all other rules on this page apply to the files in the package unchanged.
+
+Limits, checked before anything is written:
+
+| Limit | Value |
+|---|---|
+| Archive size | 128 MiB |
+| Entries | 4,000 |
+| Total uncompressed size | 256 MiB |
+| Each file | 64 MiB |
+
+Every entry must be a regular file or a directory. These are rejected:
+symbolic links and other special entries, absolute paths, drive letters, `..`
+segments, backslashes, empty names, names that differ only by letter case, and
+encrypted entries. Each part of a path uses only letters, digits, `.`, `_` and
+`-`, does not start with a dot or end with one, and is not a Windows device
+name; a path is at most 512 characters and 16 levels deep. Files are stored or
+deflate-compressed. Every entry file the manifest names must be in the
+package. Modes stored in the archive are not kept. The manifest must
+pass the host's validation, so only the three permission profiles above can be
+installed, its `id` must match the ID rules, and the ID must not be one of the
+bundled plugins.
+
+Build a package from a plugin directory:
+
+```sh
+python tools/build_plugin_package.py PLUGIN_DIR -o OUT.zip
+```
+
+The tool checks the manifest with the host's validator and writes a `.zip` with
+sorted entries and fixed timestamps, so the same files always give the same
+bytes. It leaves out `__pycache__`, dotfiles and symbolic links, and prints the
+path, the size and the SHA-256. Publish the SHA-256 beside the file; the person
+installing passes it with `--sha256`.
+
+The commands are `plugin list`, `plugin install`, `plugin upgrade` and `plugin
+uninstall` of `python -m jobs.cli`, described with their options in
+[plugins.md](plugins.md#installing-upgrading-and-removing-plugins). Install
+never enables a plugin or grants permission. Upgrade keeps a grant only when the
+consent fingerprint is unchanged. Uninstall keeps the plugin's data and results.
+They run only from the local command line.
+
+Next to each installed package the host keeps an install record,
+`.<database-name>.plugin-packages/<id>.install.json`, with `id`, `version`,
+`sha256`, `source` and `installed_at`. `source` is the file name, or the URL
+without its query string and fragment (they can carry tokens). The record is informational: if it is missing or
+damaged the plugin still works and shows no source details.
+
+## Plugin status and list fields
+
+`GET /api/plugins` (panel, same origin), `GET /api/v1/plugins` (agent API), the
+MCP `review_plugin_permissions` tool and `plugin list --json` report each
+plugin with the same fields. New fields are optional for a consumer.
+
+| Field | Meaning |
+|---|---|
+| `id`, `name`, `version`, `description`, `enabled`, `error_count`, `consent` | As before |
+| `status` | `enabled`, `disabled`, `consent_required`, `error` or `incompatible` |
+| `origin` | `builtin` or `installed` |
+| `compatibility` | `{"host_api": 1\|2, "core": "<range>"\|null}`; may be null when the manifest could not be read |
+| `incompatible` | Only with status `incompatible`: `{"core": "<running version>", "requires": "<range>"}` |
+| `install` | Installed plugins only: `{"version", "sha256", "source", "installed_at"}`, or `null` when the record is missing or damaged |
+
+`incompatible` is not an error and does not mean the permission is missing: the
+stored grant is kept. Settings > Plugins shows the two versions in one sentence
+and offers no switch and no review for such a plugin. A plugin with this status
+is treated like a disabled one for everything it would run or show.
 
 ## Host API 1: Python hooks
 
@@ -316,3 +430,7 @@ running external programs; writing labels, notes or configuration; reading
 note text, the result list (handed profile) or jobs outside the declared
 scope; adding HTML, CSS or script to the board's own page; top-bar entries or
 routes of a plugin's own; filtering, ordering or scoring by plugin results.
+
+Installing, upgrading and removing plugins is not available to a plugin, to the
+panel, to the agent API or to MCP. It is a local command-line action, because the
+panel has no authentication.
