@@ -203,7 +203,7 @@ does not grant permission to expose the panel or upload data.
 
 ## Optional MCP connection for this agent
 
-The installation can expose four read-only tools through [MCP](mcp.md), so an
+The installation can expose five read-only tools through [MCP](mcp.md), so an
 agent can later read jobs, full JDs and batch facts without SSH or database
 access. Offer it only after offline verification and personal configuration
 are complete, and keep it off unless the user explicitly chooses it.

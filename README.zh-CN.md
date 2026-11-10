@@ -166,7 +166,7 @@ AU Job Board 未在 PyPI 发布 Python 包。macOS 推荐从 `https://github.com
 | [抓取设置与更新](docs/manual-updates.md) | 下次运行配置编辑、面板后台更新、失败与并发限制（英文） |
 | [地点与人工记录](docs/location-workflow.md) | 展示代表、离线地点搜索与组级人工记录（英文） |
 | [agent API](docs/agent-api.md) | 默认只读：回环认证读取、稳定分页、精确批次与外部日报取数；可选批量标注（英文） |
-| [可选 MCP](docs/mcp.md) | 随面板启动的四个只读 MCP 工具；另有需显式开启的批量标注工具（英文） |
+| [可选 MCP](docs/mcp.md) | 随面板启动的五个只读 MCP 工具；另有需显式开启的批量标注工具（英文） |
 | [配置说明](docs/public-configuration.md) | 配置文件、路径、来源、面板设置 |
 | [规则 profile](docs/legacy-rule-profiles.md) | 六个 profile、逐条规则开关、如何让改动生效 |
 | [资格快照](docs/eligibility-profiles.md) | 独立的只读 `eligibility` 配置段 |
