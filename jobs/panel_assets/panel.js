@@ -1288,6 +1288,9 @@ function sidebarRoom(natural){
   return natural-(page ? 0 : SIDEBAR_GAP)-(page ? SIDEBAR_PAGE_MIN : MIN_LEFT+MIN_RIGHT);
 }
 function sidebarFit(natural,portrait){
+  // Portrait: keep the toggle clear of the Filters button, whatever its label width.
+  const sheetBtn=portrait&&document.querySelector('.sheet-btn');
+  if(sheetBtn&&sheetBtn.offsetWidth)document.body.style.setProperty('--sheet-btn-w',(sheetBtn.offsetWidth+2)+'px');
   const pane=sidebarPane();
   if(!pane) return 0;
   const body=document.body, root=document.documentElement;

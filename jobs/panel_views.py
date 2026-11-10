@@ -1347,11 +1347,11 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<span class="mobile-view"><b>{_e(T("view." + view))}</b> <span>{total}</span></span>',
         f'<nav class="tabs" aria-label="{_e(T("nav.views"))}">{nav}</nav>',
         '<span class="spacer"></span>',
-        sidebar_toggle,
         '<div class="top-actions">',
         # 上次抓取 + 「更新岗位」放在一起；竖屏时 panel.js 把更新按钮挪进抽屉
         f'<span class="run-controls">{run_note}<span id="update-home" hidden></span>'
         f'{_update_widget(lang, compact=True)}</span>',
+        sidebar_toggle,      # with the other page actions; on portrait it sits beside Filters
         _display_menu(lang, lang_pref),
         f'<a class="iconbtn setlink" href="/settings" title="{_e(T("nav.settings"))}">'
         f'{ICON_GEAR}<span>{_e(T("nav.settings"))}</span></a>',
