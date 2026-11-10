@@ -2288,6 +2288,34 @@ async function testActionBrightness() {
   }
 }
 
+/* 插件宿主钩子（侧栏 current 事件）：只在详情真的打开 / 关闭后通知；被门拦下、载入失败不通知；
+   宿主出错不影响详情；关闭时待应用的新结果照常整页载入一次（信号不被吞）。 */
+async function testPluginHostHooks() {
+  console.log("\n-- 插件宿主钩子：detailOpened / detailClosed --");
+  const t = loadPanel();
+  const events = [];
+  t.sandbox.__JOBS_PLUGIN_HOST__ = { detailOpened: (uid) => events.push("open:" + uid), detailClosed: () => events.push("close") };
+  eq("打开成功后通知", [await t.api.openJob("A"), events], [true, ["open:A"]]);
+  const input = new El("input"); input.dataset.noteLoaded = "saved"; input.value = "draft";
+  t.reg[".note input"] = [input];
+  t.sandbox.confirm = () => false;
+  eq("未保存草稿拦下换条：不通知、留在 A", [await t.api.openJob("B"), t.api.state().uid, events], [false, "A", ["open:A"]]);
+  await t.api.closeDetail();
+  eq("拦下关闭：不通知", events, ["open:A"]);
+  t.reg[".note input"] = [];
+  t.routes.job = () => ({ ok: false, text: async () => "boom" });
+  await t.api.openJob("C");
+  eq("载入失败：不通知", events, ["open:A"]);
+  t.routes.job = (uid) => ({ ok: true, json: async () => ({ html: "<detail " + uid + ">" }) });
+  t.sandbox.__JOBS_PLUGIN_HOST__ = { detailOpened() { throw new Error("plugin host bug"); } };
+  eq("宿主出错不影响打开", await t.api.openJob("B"), true);
+  t.sandbox.__JOBS_PLUGIN_HOST__ = { detailClosed: () => events.push("close") };
+  t.api.setUpdate({ uid: "B", baseline: "generation-1", pending: "generation-2" });
+  const before = t.reloads();
+  await t.api.closeDetail();
+  eq("关闭后通知，且延后的新结果照常载入一次", [events.at(-1), t.reloads() - before], ["close", 1]);
+}
+
 async function main() {
   console.log("== v1.2.2 PR-B 面板导航与异步（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
@@ -2311,6 +2339,7 @@ async function main() {
   await testIneligibleLast();
   await testSwipeBack();
   await testMultiSelect();
+  await testPluginHostHooks();
   console.log();
   if (failures.length) {
     console.log(`失败 ${failures.length} 项：\n  - ${failures.join("\n  - ")}`);

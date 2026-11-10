@@ -142,6 +142,13 @@ function refreshCorrectionTag(uid,q,id=''){
 function detailHash(uid){
   return '#'+encodeURIComponent(uid);
 }
+/* 侧栏 / 页面插件的宿主（plugin_pages.js，只在授权后载入）在这里接收详情的开合。
+   没有宿主时什么也不做；宿主出错也不影响详情本身。 */
+function pluginHost(name,...args){
+  const host=window.__JOBS_PLUGIN_HOST__;
+  if(host && typeof host[name]==='function'){ try{ host[name](...args); }catch(_){} }
+}
+function openUid(){ return OPEN_UID; }
 function readDetailHash(){
   const raw=location.hash.slice(1), cut=raw.indexOf('&location_id=');
   try{return {uid:decodeURIComponent(cut<0?raw:raw.slice(0,cut))};}catch(_){return {uid:''};}
@@ -210,6 +217,7 @@ async function openJob(uid){
     pane.scrollTop=0;
     syncDetailNav();
     swapIn(pane);
+    pluginHost('detailOpened',uid);
     return true;
   }catch(e){
     clearTimeout(slow);
@@ -248,6 +256,7 @@ async function closeDetail(expect){
     document.getElementById('plugin-display-frame')?.focus({preventScroll:true});   // 回到地图
   }
   history.replaceState(null,"",location.pathname+location.search);
+  pluginHost('detailClosed');
   if(UPDATE_PENDING && !SEL_MODE){applyLatestResults("");return;}
   OPEN_SEQ+=1; // Ignore pending responses and skeleton timers after closing.
   const pane=document.getElementById('detail');
@@ -426,7 +435,8 @@ function detailOverlayOpen(){
     || !!(detail && detail.classList.contains('label-open'))
     || shown(document.getElementById('update-confirm'))
     || shown(document.getElementById('copy-modal'))
-    || shown(document.getElementById('display-pop'));
+    || shown(document.getElementById('display-pop'))
+    || document.body.classList.contains('sidebar-sheet');   // 竖屏的插件侧栏抽屉（只在有侧栏时出现）
 }
 document.addEventListener('keydown',ev=>{
   const step=navKeyStep(ev);
@@ -1223,8 +1233,12 @@ function fitLayout(){
   // 插件展示（地图）时列表布局是隐藏的，宽度为 0；按 main 的宽度判断，
   // 否则宽屏也会误切竖屏工具栏，列表/地图来回切换时工具栏会跳动。
   const box=document.body.classList.contains('plugin-display') ? (document.querySelector('main')||l) : l;
-  const avail=box.clientWidth-gutterWidth();
-  if(avail < MIN_LEFT+MIN_RIGHT){
+  // 停靠的插件侧栏占的宽度不算进竖屏判断（否则开侧栏 -> 竖屏 -> 底部抽屉 -> 又够宽，来回跳）。
+  const natural=box.clientWidth-gutterWidth()+(box===l ? SIDEBAR_RESERVE : 0);
+  const portrait=natural < MIN_LEFT+MIN_RIGHT;
+  const reserve=sidebarFit(natural,portrait);
+  const avail=natural-(box===l ? reserve : 0);
+  if(portrait){
     document.body.classList.add('portrait');
     placeFilters(true);
     if(shown(document.getElementById('more-panel'))) filterDraftBegin();
@@ -1250,6 +1264,95 @@ function fitLayout(){
   selLayoutChanged();
 }
 function resetSplit(){ storeLeft(DEFAULT_LEFT); fitLayout(); }
+/* ---- 插件侧栏的版面（只在页面有 #plugin-sidebar 时起作用）--------------------
+   宽屏：详情右侧的一栏（停靠），宽度可拖、记在 localStorage；放不下「左栏最小 +
+   右栏最小 + 侧栏最小」时改为浮在详情右侧（不挤列表），竖屏是底部抽屉。
+   停靠时用 --sb-reserve 给 main 让出右边距，列表 / 详情 / 地图的宽度都照常算。 */
+const SIDEBAR_KEY='jobs.plugin.sidebar', SIDEBAR_MIN=280, SIDEBAR_MAX=560, SIDEBAR_DEFAULT=340, SIDEBAR_GAP=12, SIDEBAR_PAGE_MIN=420;
+let SIDEBAR_RESERVE=0;
+function sidebarPane(){ return document.getElementById('plugin-sidebar'); }
+function sidebarPrefs(){
+  try{ const v=JSON.parse(localStorage.getItem(SIDEBAR_KEY)||'null'); return v && typeof v==='object' && !Array.isArray(v) ? v : {}; }
+  catch(e){ return {}; }
+}
+function storeSidebarPrefs(next){
+  try{ localStorage.setItem(SIDEBAR_KEY,JSON.stringify(Object.assign(sidebarPrefs(),next))); }catch(e){}
+}
+function sidebarWidth(){
+  const w=Number(sidebarPrefs().width);
+  return Number.isFinite(w) ? Math.min(Math.max(w,SIDEBAR_MIN),SIDEBAR_MAX) : SIDEBAR_DEFAULT;
+}
+// 停靠时侧栏最多能有多宽：留够列表 + 详情（或地图 / 页面）的最小宽度
+function sidebarRoom(natural){
+  const page=document.body.classList.contains('plugin-display');
+  return natural-(page ? 0 : SIDEBAR_GAP)-(page ? SIDEBAR_PAGE_MIN : MIN_LEFT+MIN_RIGHT);
+}
+function sidebarFit(natural,portrait){
+  const pane=sidebarPane();
+  if(!pane) return 0;
+  const body=document.body, root=document.documentElement;
+  let mode='', reserve=0;
+  if(body.classList.contains('sidebar-open')){
+    if(portrait) mode='sheet';
+    else{
+      const w=Math.min(sidebarWidth(),sidebarRoom(natural));
+      if(w>=SIDEBAR_MIN){
+        mode='docked';
+        reserve=w+(body.classList.contains('plugin-display') ? 0 : SIDEBAR_GAP);
+        root.style.setProperty('--sb-w',Math.round(w)+'px');
+      }else{
+        mode='float';
+        root.style.setProperty('--sb-w',Math.round(Math.max(Math.min(sidebarWidth(),natural-48),SIDEBAR_MIN))+'px');
+      }
+    }
+  }
+  body.classList.toggle('sidebar-docked',mode==='docked');
+  body.classList.toggle('sidebar-float',mode==='float');
+  body.classList.toggle('sidebar-sheet',mode==='sheet');
+  SIDEBAR_RESERVE=reserve;
+  root.style.setProperty('--sb-reserve',reserve+'px');
+  const handle=document.getElementById('sidebar-resize');
+  if(handle && mode && mode!=='sheet'){
+    handle.setAttribute('aria-valuemin',String(SIDEBAR_MIN));
+    handle.setAttribute('aria-valuemax',String(SIDEBAR_MAX));
+    handle.setAttribute('aria-valuenow',String(Math.round(parseFloat(root.style.getPropertyValue('--sb-w'))||sidebarWidth())));
+  }
+  return reserve;
+}
+function setSidebarWidth(px){
+  storeSidebarPrefs({width:Math.round(Math.min(Math.max(px,SIDEBAR_MIN),SIDEBAR_MAX))});
+  fitLayout();
+}
+function sidebarDrag(ev){
+  const pane=sidebarPane();
+  if(!pane || !document.body.classList.contains('sidebar-open') || document.body.classList.contains('portrait')) return;
+  ev.preventDefault();
+  const right=pane.getBoundingClientRect().right;
+  document.body.classList.add('resizing');
+  const move=e=>{ setSidebarWidth(right-e.clientX); };
+  const up=()=>{
+    document.body.classList.remove('resizing');
+    document.removeEventListener('pointermove',move);
+    document.removeEventListener('pointerup',up);
+    document.removeEventListener('pointercancel',up);
+    fitLayout();
+  };
+  document.addEventListener('pointermove',move);
+  document.addEventListener('pointerup',up);
+  document.addEventListener('pointercancel',up);
+}
+// 键盘：左右各 24px（Shift 96px），Home / End 到两端。左移 = 变宽（拖条在侧栏左边）。
+function sidebarResizeKeys(ev){
+  const step=ev.shiftKey?96:24, w=sidebarWidth();
+  let px=null;
+  if(ev.key==='ArrowLeft') px=w+step;
+  else if(ev.key==='ArrowRight') px=w-step;
+  else if(ev.key==='Home') px=SIDEBAR_MIN;
+  else if(ev.key==='End') px=SIDEBAR_MAX;
+  if(px===null) return;
+  ev.preventDefault();
+  setSidebarWidth(px);
+}
 function startDrag(ev){
   const l=layoutEl();
   if(!l || document.body.classList.contains('portrait')) return;
@@ -2130,18 +2233,23 @@ function legacyCopy(text){
   if(active && active!==document.body && active.focus) active.focus({preventScroll:true});
   return ok;
 }
+/* 写剪贴板：先 Clipboard API，再 execCommand。只返回是否真的写入（插件的 copy_text 也用它）。 */
+async function copyPlain(text){
+  let ok=false;
+  const clip=typeof navigator!=='undefined' && navigator.clipboard;
+  if(clip && clip.writeText && window.isSecureContext){
+    try{ await clip.writeText(text); ok=true; }catch(e){ ok=false; }
+  }
+  if(!ok) ok=legacyCopy(text);
+  return ok;
+}
 async function copyJob(btn){
   if(COPYING) return;
   const text=copySource(btn);
   if(text===null){ toast(T('js.copy_missing')); return; }
   COPYING=true;
   try{
-    let ok=false;
-    const clip=typeof navigator!=='undefined' && navigator.clipboard;
-    if(clip && clip.writeText && window.isSecureContext){
-      try{ await clip.writeText(text); ok=true; }catch(e){ ok=false; }
-    }
-    if(!ok) ok=legacyCopy(text);
+    const ok=await copyPlain(text);
     if(ok){ toast(T('js.copy_done')); copiedMark(btn); }
     else openCopyDialog(text,btn);
   }finally{ COPYING=false; }
@@ -2472,7 +2580,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 
 async function navigatePanel(target){
-  if(!await allowDetailNavigation())return;
+  if(!await allowDetailNavigation())return false;
   if(window.__PAGE_CONTEXT__ && window.__PAGE_CONTEXT__.display!=='list'){
     const next=new URL(target,location.origin);
     if(next.origin===location.origin && next.pathname==='/' && !next.searchParams.has('display')){
@@ -2480,4 +2588,5 @@ async function navigatePanel(target){
     }
   }
   DETAIL_LEAVING=true;location.href=target;
+  return true;
 }

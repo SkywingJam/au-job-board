@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workspace</title><link rel="stylesheet" href="/plugins/workspace/assets/workspace.css"><script defer src="/plugins/workspace/assets/bridge.js"></script><script defer src="/plugins/workspace/assets/sidebar.js"></script></head>
+<body class="sidebar">
+<p id="waiting" class="waiting" role="status" hidden></p>
+<main id="app" hidden>
+  <header class="side-head">
+    <h1 id="title"></h1>
+    <span id="count" class="count"></span>
+    <span class="grow"></span>
+    <button id="clear" class="link-btn" type="button" hidden></button>
+  </header>
+  <div id="confirm" class="confirm" role="group" aria-labelledby="confirm-text" hidden>
+    <p id="confirm-text"></p>
+    <div class="row"><button id="confirm-yes" class="btn danger" type="button"></button><button id="confirm-no" class="btn" type="button"></button></div>
+  </div>
+  <div id="current" class="current" hidden><span id="current-label" class="muted"></span> <span id="current-title" class="current-title"></span> <span id="current-state" class="chip"></span></div>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+  <section id="list-view" class="view">
+    <ol id="list" class="items"></ol>
+    <div id="empty" class="empty" hidden>
+      <h2 id="empty-title"></h2>
+      <p id="empty-body"></p>
+      <ul><li id="way1"></li><li id="way2"></li><li id="way3"></li></ul>
+    </div>
+  </section>
+  <section id="choose-view" class="view panel" aria-labelledby="choose-title" hidden>
+    <h2 id="choose-title" tabindex="-1"></h2>
+    <p id="choose-note" class="muted"></p>
+    <fieldset class="picks"><legend id="choose-legend" class="sr-only"></legend><div id="choose-list"></div></fieldset>
+  </section>
+  <section id="agent-view" class="view panel" aria-labelledby="agent-title" hidden>
+    <h2 id="agent-title" tabindex="-1"></h2>
+    <fieldset class="picks"><legend id="template-legend"></legend><div id="templates"></div></fieldset>
+    <fieldset class="picks"><legend id="agent-jobs-legend"></legend><div id="agent-jobs"></div></fieldset>
+    <label id="instruction-label" for="instruction"></label>
+    <textarea id="instruction" class="instruction" rows="3" readonly spellcheck="false"></textarea>
+    <p id="agent-hint" class="hint" aria-live="polite"></p>
+  </section>
+  <footer class="side-foot">
+    <div id="foot-list" class="actions">
+      <button id="compare" class="btn primary" type="button" aria-describedby="compare-hint"></button>
+      <button id="agent" class="btn" type="button" aria-describedby="access-note"></button>
+    </div>
+    <div id="foot-choose" class="actions" hidden>
+      <button id="open-compare" class="btn primary" type="button"></button>
+      <button id="choose-back" class="btn" type="button"></button>
+    </div>
+    <div id="foot-agent" class="actions" hidden>
+      <button id="copy" class="btn primary" type="button"></button>
+      <button id="agent-back" class="btn" type="button"></button>
+    </div>
+    <p id="compare-hint" class="hint" hidden></p>
+    <div id="access" class="access" hidden>
+      <p id="access-note" class="hint"></p>
+      <label class="check"><input id="override" type="checkbox"> <span id="override-label"></span></label>
+    </div>
+    <details class="help"><summary id="help-summary"></summary><p id="help-body"></p></details>
+  </footer>
+</main>
+</body></html>

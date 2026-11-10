@@ -100,3 +100,64 @@ history. Frozen membership does not freeze core detail: opening a row reads the
 current core job. Reference packages use an index of bounded gzip files with
 SHA-256 hashes. See [map provenance](../plugins/map/reference/README.md) and
 [plugin use and dependency provenance](../plugins/map/README.md).
+
+
+## Sidebar plugins and handed jobs
+
+The optional Workspace plugin uses a second host API 2 permission profile,
+"handed jobs". It registers a `sidebar` and a `page`, declares
+`network: "none"` and reads only the jobs the user hands to it, at most ten.
+It never receives the result list. The exact profile, with or without
+`job_detail`, is whitelisted in `jobs/plugin_host.py`; any other combination is
+rejected, and the map profile still rejects `sidebar`, `switch`, `job_scope`
+and `job_detail`.
+
+Both registrations are structural. `sidebar` has `id` (the plugin ID), bilingual
+`label` and `handoff_label` (at most 32 characters each), `entry: web/index.html`
+and an optional core icon. `page` has `entry: web/compare.html` and an optional
+`switch` boolean (default `false`). Core icons are `map`, `workspace` and
+`compare`. Icons stay out of the consent fingerprint; `sidebar` and `page`
+otherwise join it. A manifest without `sidebar` hashes exactly as before, so the
+existing Map and Sponsorship grants stay valid (the regression test pins both).
+
+`plugin_host.page_plugins()` items carry `switch`: `true` for map pages, the
+manifest value for handed pages. Only switch pages belong in the toolbar
+List/Map switch. `?display=<id>` resolves for every authorized page, so the
+compare page opens without appearing in the switch.
+`plugin_host.sidebar_plugins()` lists `{id, label, handoff_label, icon}` for
+enabled and granted sidebar plugins. Both are empty when no plugin is
+configured, in demo mode, or when the plugin is disabled, ungranted or invalid.
+The page context reports `agent_access: "on"` only when this panel process runs
+its HTTP MCP listener.
+
+`GET /plugins/<id>/frame?slot=sidebar|page` serves that slot's registered entry;
+without `slot` the frame keeps the top-level entry. The frame CSP is built from
+the manifest profile: only declared network targets become external origins. A
+`network: "none"` plugin gets none, and the map CSP is unchanged.
+
+`GET /api/plugin-view/<id>/handed?uid=…&uid=…[&detail=1]` is the only data route
+for this profile. It takes 1 to 10 distinct UIDs of at most 512 characters each,
+and no other parameters. It reads all of them in one read-only transaction,
+using the agent API's row loading and decoration, and answers in request order:
+
+```json
+{"plugin_id": "workspace", "as_of": "…", "generation": "…",
+ "items": [{"uid": "…", "missing": true}, {…summary…}]}
+```
+
+A summary has the `PAGE_JOB_FIELDS` fields (`core_order` is the position in the
+request), `revision` and `human_labels`. `revision` is the first 16 hex digits of
+SHA-256 over the JSON array `[title, company, location, salary, description]`.
+`human_labels` is `{eligibility, action, priority}`: the effective group values,
+never the note text. With `detail=1`, which requires `job_detail` in the
+manifest, items add `description`, `skills`, `tags`, `qualification` (the same
+object the agent API returns) and `eligibility_evidence`
+`{rule_id, rule_kind, matched_text, snippet, cue}`. Excluded jobs are found like
+in the agent API; a UID absent from the database is `missing`.
+
+Errors are explicit: `invalid_query`, `invalid_uid_count`, `invalid_uid` and
+`duplicate_uid` return 400. `detail_not_granted` returns 403. A response over
+4 MiB returns 413 `response_too_large`. Map pages get 403
+`permission_not_granted` on `handed`, and handed plugins get the same on
+`jobs`, `member` and `reference`. The route adds no write path. Labels, notes,
+history and vocabulary are only read.

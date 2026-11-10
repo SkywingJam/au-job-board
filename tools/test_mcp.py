@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 from mcp import Client, StdioServerParameters
 from jobs import agent_api, agent_client, batches, db, history, labels
 from jobs.file_security import set_private
+from jobs.mcp_server import compact_job
 from test_file_security import grant_public_read
 
 TOKEN = 'synthetic-mcp-token-not-a-real-secret-000000'
@@ -182,7 +183,8 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
         async with self.client() as client:
             tools = (await client.list_tools()).tools
             self.assertEqual({t.name for t in tools},
-                             {'list_jobs', 'get_job', 'list_batches', 'get_batch', 'review_plugin_permissions'})
+                             {'list_jobs', 'get_job', 'get_jobs', 'list_batches', 'get_batch',
+                              'review_plugin_permissions'})
             for tool in tools:
                 self.assertTrue(tool.annotations.read_only_hint)
                 self.assertFalse(tool.annotations.destructive_hint)
@@ -229,6 +231,7 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
             results = {'list_jobs': page}
             results['get_job'] = await client.call_tool(
                 'get_job', {'uid': 'synthetic:a', 'snapshot_id': sid})
+            results['get_jobs'] = await client.call_tool('get_jobs', {'uids': ['synthetic:a', 'synthetic:none']})
             results['list_batches'] = await client.call_tool('list_batches', {'limit': 1})
             results['get_batch'] = await client.call_tool('get_batch', {'batch_id': self.batch_id})
             results['review_plugin_permissions'] = await client.call_tool('review_plugin_permissions', {})
@@ -248,6 +251,7 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload(results['get_batch']),
                              direct.get('/api/v1/batches/' + self.batch_id, {}))
             self.assertEqual(payload(results['get_job'])['item']['description'], body)
+            self.assertEqual(payload(results['get_jobs'])['items'][0]['description'], body)
             self.assertIn('Caf\u00e9 \u65e5\u672c', results['get_job'].content[0].text)
 
     async def test_snapshot_keeps_body_and_human_state_after_live_edit(self):
@@ -268,11 +272,79 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
     async def test_legacy_initialization_and_tool_call(self):
         async with self.client(mode='legacy') as client:
             self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
-            self.assertEqual(len((await client.list_tools()).tools), 5)
+            self.assertEqual(len((await client.list_tools()).tools), 6)
             page = await self.call(client, 'list_jobs', {'query': {'limit': 1}})
             detail = await self.call(client, 'get_job', {
                 'uid': page['items'][0]['uid'], 'snapshot_id': page['snapshot_id']})
             self.assertTrue(detail['item']['description'])
+
+    async def test_get_jobs_reads_fresh_compact_records_by_exact_uid(self):
+        before = hashlib.sha256(self.path.read_bytes()).hexdigest()
+        direct = agent_client.APIClient(self.base, TOKEN)
+        uids = ['synthetic:d', 'synthetic:none', 'synthetic:a', 'synthetic:b']
+        async with self.client() as client:
+            tool = next(t for t in (await client.list_tools()).tools if t.name == 'get_jobs')
+            self.assertTrue(tool.annotations.read_only_hint)
+            self.assertFalse(tool.annotations.destructive_hint)
+            self.assertTrue(tool.annotations.idempotent_hint)
+            self.assertFalse(tool.annotations.open_world_hint)
+            self.assertIsNone(tool.output_schema)
+            schema = tool.input_schema
+            self.assertEqual(schema['required'], ['uids'])
+            self.assertEqual((schema['properties']['uids']['minItems'], schema['properties']['uids']['maxItems']), (1, 10))
+            self.assertEqual((schema['properties']['uids']['items']['minLength'],
+                              schema['properties']['uids']['items']['maxLength']), (1, 512))
+            result = await client.call_tool('get_jobs', {'uids': uids})
+            self.assertFalse(result.is_error, result.content)
+            value = payload(result)
+            self.assertEqual(result.content[0].text, json.dumps(value, ensure_ascii=False, separators=(',', ':')))
+            self.assertEqual(set(value), {'api_version', 'as_of', 'items'})
+            self.assertEqual([i['uid'] for i in value['items']], uids)
+            api_value = direct.get('/api/v1/job-details', {'uid': uids})
+            self.assertEqual(value['api_version'], 1)
+            # Known records are the compacted API records; the error item is untouched.
+            for mcp_item, api_item in zip(value['items'], api_value['items']):
+                if 'error' in api_item:
+                    self.assertEqual(mcp_item, {'uid': 'synthetic:none', 'error': 'job_not_found'})
+                    self.assertEqual(mcp_item, api_item)
+                else:
+                    self.assertEqual(rehydrate(mcp_item, api_item), api_item)
+                    self.assertEqual(mcp_item, compact_job(api_item))
+            known = value['items'][2]
+            self.assertNotIn('source_id', known)
+            self.assertNotIn('human_scope', known)
+            self.assertTrue(known['description'].startswith('Handwritten synthetic complete JD'))
+            self.assertEqual(known['human']['action'], 'saved')
+            self.assertNotIn('scope_note', known.get('history', {}))
+            # Same record as get_job's snapshot-free API path, no snapshot involved.
+            self.assertEqual(self.server.api.store.items, {})
+            # Schema bounds are enforced before any request is made.
+            calls = []
+            original = agent_client.APIClient.get
+            def counting(self_, path, params):
+                calls.append(path)
+                return original(self_, path, params)
+            with patch.object(agent_client.APIClient, 'get', counting):
+                for bad in ({'uids': []}, {'uids': ['']},
+                            {'uids': ['x' * 513]},
+                            {'uids': ['synthetic:u%d' % n for n in range(11)]},
+                            {'uids': 'synthetic:a'}, {'uids': [1]}, {}):
+                    with self.subTest(bad=str(bad)[:40]):
+                        self.assertTrue((await client.call_tool('get_jobs', bad)).is_error)
+            self.assertEqual(self.server.api.store.items, {})
+            # A duplicate passes the schema and is refused by the API as a tool error.
+            dup = await client.call_tool('get_jobs', {'uids': ['synthetic:a', 'synthetic:a']})
+            self.assertTrue(dup.is_error)
+            self.assertIn('invalid_query', text_of(dup))
+            self.assertNotIn(TOKEN, text_of(dup))
+            ten = ['synthetic:t%d' % n for n in range(10)]
+            full = await self.call(client, 'get_jobs', {'uids': ten})
+            self.assertEqual([i['uid'] for i in full['items']], ten)
+            self.assertEqual({i['error'] for i in full['items']}, {'job_not_found'})
+        self.assertEqual(self.server.api.store.items, {})
+        self.assertEqual(hashlib.sha256(self.path.read_bytes()).hexdigest(), before)
+        self.errlog.flush()
+        self.assertNotIn(TOKEN, (self.root / 'mcp-stderr.log').read_text())
 
     async def test_filters_match_http_and_repeated_skills_are_encoded(self):
         async with self.client() as client:
@@ -519,14 +591,18 @@ class MCPCompactRecords(MCPFixture, unittest.IsolatedAsyncioTestCase):
             tools = {t.name: t for t in (await client.list_tools()).tools}
             self.assertIn('limit=20', tools['list_jobs'].description)
             self.assertIn('client output', tools['list_jobs'].description)
-            for name in ('list_jobs', 'get_job'):
+            for name in ('list_jobs', 'get_job', 'get_jobs'):
                 self.assertIn('absent means null or empty', tools[name].description)
                 self.assertIn('source_id', tools[name].description)
             self.assertIn(history.SCOPE_NOTE, tools['get_job'].description)
+            doc = tools['get_jobs'].description
+            for phrase in ('exact uid', 'without a list snapshot', 'panel', 'job_not_found',
+                           'temporary file', 'delete those files'):
+                self.assertIn(phrase, doc)
             self.assertIn('absent means null or empty', client.instructions)
 
 
-READ_TOOLS = {'list_jobs', 'get_job', 'list_batches', 'get_batch', 'review_plugin_permissions'}
+READ_TOOLS = {'list_jobs', 'get_job', 'get_jobs', 'list_batches', 'get_batch', 'review_plugin_permissions'}
 WRITE_TOOL = 'batch_label_jobs'
 
 

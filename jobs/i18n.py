@@ -569,6 +569,29 @@ STRINGS: dict[str, dict[str, str]] = {
         "js.colon": "：",
         "js.note_sep": "；",
         "js.note_gap": "",
+        # 侧栏插件（核心绘制的宿主界面）。前缀 sidebar. 不进 js_strings：没有授权侧栏或
+        # 对比页时页面字节不变；需要时由 host_strings 随页面上下文注入。
+        "sidebar.toggle": "{label}，{n} 个岗位",
+        "sidebar.close": "收起{label}",
+        "sidebar.resize": "调整{label}宽度",
+        "sidebar.drop": "松开即加入{label}",
+        "sidebar.added": "已加入{label}",
+        "sidebar.added_n": "已把 {n} 个岗位加入{label}",
+        "sidebar.already": "已在{label}中",
+        "sidebar.all_already": "所选岗位都已在{label}中",
+        "sidebar.full": "{label}已满（最多 {max} 个），先移除一些",
+        "sidebar.some": "已加入 {n} 个，跳过 {m} 个（已在其中、已满或已不在结果中）",
+        "sidebar.missing": "这个岗位已不在结果中，没有加入",
+        "sidebar.failed": "没能加入{label}，请稍后再试",
+        "sidebar.saved_failed": "没能保存{label}的列表（浏览器存储不可用）",
+        "sidebar.in": "✓ 已在{label}",
+        "sidebar.card_add": "{action}：{title}",
+        "sidebar.copied": "已复制",
+        "sidebar.back_list": "← 返回列表",
+        "sidebar.back_page": "← 返回{label}",
+        "sidebar.page_closed": "此页面已关闭或需要重新授权，请返回列表继续使用。",
+        "sidebar.closed": "{label}已关闭或需要重新授权，已收起。",
+        "sidebar.keys_hint": "启用侧栏插件后：默认与 Vim 方案按 W、游戏方案按 E，把正在看的岗位（或键盘选中的卡片）加入侧栏。",
     },
     "en": {
         'plugin.unavailable_hint': 'Plugin files, version or configuration are unavailable. Open details.',
@@ -1088,6 +1111,27 @@ STRINGS: dict[str, dict[str, str]] = {
         "js.colon": ": ",
         "js.note_sep": ";",
         "js.note_gap": " ",
+        "sidebar.toggle": "{label}, {n} jobs",
+        "sidebar.close": "Close {label}",
+        "sidebar.resize": "Resize {label}",
+        "sidebar.drop": "Drop to add to {label}",
+        "sidebar.added": "Added to {label}",
+        "sidebar.added_n": "Added {n} jobs to {label}",
+        "sidebar.already": "Already in {label}",
+        "sidebar.all_already": "All selected jobs are already in {label}",
+        "sidebar.full": "{label} is full ({max} max). Remove some first",
+        "sidebar.some": "Added {n}, skipped {m} (already there, full or no longer in results)",
+        "sidebar.missing": "This job is no longer in the results. Not added",
+        "sidebar.failed": "Could not add to {label}. Try again later",
+        "sidebar.saved_failed": "Could not save the {label} list (browser storage unavailable)",
+        "sidebar.in": "✓ In {label}",
+        "sidebar.card_add": "{action}: {title}",
+        "sidebar.copied": "Copied",
+        "sidebar.back_list": "← Back to list",
+        "sidebar.back_page": "← Back to {label}",
+        "sidebar.page_closed": "This page is turned off or needs permission again. Go back to the list to continue.",
+        "sidebar.closed": "{label} is turned off or needs permission again, so it was closed.",
+        "sidebar.keys_hint": "With a sidebar plugin on: press W (Default, Vim) or E (Gamer) to add the open job, or the focused card, to the sidebar.",
     },
 }
 
@@ -1254,6 +1298,12 @@ def display_note(lang: str, value: str | None) -> str:
         nxt = parts[i + 1] if i + 1 < len(parts) else ""
         parts[i] = sep + (gap if gap and nxt and not nxt[0].isspace() else "")
     return "".join(parts)
+
+
+def host_strings(lang: str) -> dict[str, str]:
+    """侧栏 / 对比页宿主界面的文案（保留 sidebar. 前缀）。只在授权了侧栏或对比页时注入
+    window.__HOST_I18N__，所以未启用插件的页面字节不变。"""
+    return {k: t(lang, k) for k in STRINGS[DEFAULT_LANG] if k.startswith("sidebar.")}
 
 
 def js_strings(lang: str) -> dict[str, str]:

@@ -1,7 +1,7 @@
 """Optional stdio MCP adapter over the existing authenticated HTTP API.
 
 No database or application configuration is accessed here. By default only the
-five read tools exist; `batch_label_jobs` is registered only when label writes
+six read tools exist; `batch_label_jobs` is registered only when label writes
 are explicitly allowed, and the HTTP API must separately enable them.
 Install requirements-mcp.txt separately; the normal panel needs no MCP SDK.
 """
@@ -92,6 +92,21 @@ The record omits null/empty fields (absent means null or empty), source_id
 history scope_note, which reads: {SCOPE_NOTE}"""
 
 
+GET_JOBS_DOC = """Read complete jobs by exact uid, without a list snapshot.
+
+Pass 1 to 10 distinct uids, for example uids the user copied from the panel
+workspace. Each item is the same complete record get_job returns (JD, rule
+evidence, history, group human state, live panel link), read fresh from one
+consistent database view; nothing is stored and no snapshot_id is involved,
+so the record may differ from an earlier list. Items keep request order. An
+unknown uid is never dropped: it comes back as {"uid", "error":
+"job_not_found"}. Records omit null/empty fields (absent means null or empty),
+source_id (the uid after its first colon), human_scope (always group) and the
+fixed history scope_note, as get_job does. When several steps or sub-agents
+will reuse these records, you may save each one to a private temporary file
+and delete those files when the task ends."""
+
+
 def make_server(client, *, allow_label_writes=False):
     from typing import Annotated, Literal
 
@@ -128,8 +143,10 @@ def make_server(client, *, allow_label_writes=False):
 
     def compact_items(page):
         # Only job records are compacted; envelope keys (next_cursor: null included) stay.
+        # A get_jobs {"uid", "error"} item is not a record and passes through untouched.
         if isinstance(page.get('items'), list):
-            page = {**page, 'items': [compact_job(i) if isinstance(i, dict) else i for i in page['items']]}
+            page = {**page, 'items': [compact_job(i) if isinstance(i, dict) and 'error' not in i else i
+                                      for i in page['items']]}
         return page
 
     def compact_item(detail):
@@ -167,6 +184,11 @@ def make_server(client, *, allow_label_writes=False):
     def get_job(uid: Annotated[str, Field(min_length=1)],
                 snapshot_id: Annotated[str, Field(min_length=1)]) -> CallToolResult:
         return get('/api/v1/jobs/' + quote(uid, safe=''), {'snapshot_id': snapshot_id}, compact_item)
+
+    @tool(readonly, description=GET_JOBS_DOC)
+    def get_jobs(uids: Annotated[list[Annotated[str, Field(min_length=1, max_length=512)]],
+                                 Field(min_length=1, max_length=10)]) -> CallToolResult:
+        return get('/api/v1/job-details', {'uid': uids}, compact_items)
 
     @tool(readonly)
     def list_batches(limit: Annotated[int, Field(ge=1, le=200)] = 50,

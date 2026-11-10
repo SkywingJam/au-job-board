@@ -83,8 +83,14 @@ ICON_LIST = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke
 ICON_MAP = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
             'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
             '<path d="M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5L9 4Z"/><path d="M9 4v13.5M15 6.5V20"/></svg>')
-# Plugin pages choose a display icon from this fixed set; plugins never supply markup.
-PAGE_ICONS = {'map': ICON_MAP}
+ICON_WORKSPACE = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                  '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>')
+ICON_COMPARE = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                '<rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>')
+# Plugin pages and sidebars choose an icon from this fixed set; plugins never supply markup.
+PAGE_ICONS = {'map': ICON_MAP, 'workspace': ICON_WORKSPACE, 'compare': ICON_COMPARE}
 ICON_GEAR = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
              'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
              '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 '
@@ -1153,11 +1159,26 @@ def _filters_for_view(view: str, filters: dict) -> dict:
             if (key in allowed and key not in INTERFACE_HIDDEN_KEYS) or key == SINCE_KEY}
 
 
+def _sidebar_authorized(config: dict) -> bool:
+    """设置页的快捷键说明用：读不到插件状态时当作没有（只影响一行提示）。"""
+    try:
+        from . import plugin_host
+        return bool(plugin_host.sidebar_plugins(config))
+    except Exception:   # noqa: BLE001 - a hint must never break the settings page
+        return False
+
+
 def render_page(conn, config: dict, view: str, offset: int, limit: int,
                 started: float | None = None, filters: dict | None = None,
                 lang: str = "zh", theme: str | None = None, lang_pref: str = "auto", *,
-                display='list', display_pages=()) -> str:
+                display='list', display_pages=(), sidebars=(), agent_access='off') -> str:
     """渲染整页。
+
+    插件展示（主机 API 2）：`display_pages` 是已授权的页面登记，只有 `switch` 为真
+    （缺省为真）的进入工具栏「列表 / 地图」切换；`switch` 为假的页面（对比页）只能由
+    侧栏桥接操作 open_page 打开，整页显示、隐藏工具栏，只有一个「返回列表」。
+    `sidebars` 是已授权的侧栏登记（核心绘制右侧栏、顶栏开关和各处「加入」入口）。
+    两者都为空时页面与没有插件时逐字节相同。
 
     `started` 现在**不在这里用**（页脚已删），但保留参数：它和
     `Handler._send(started=…)` 是同一个起点，Server-Timing 响应头与
@@ -1169,10 +1190,64 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     filters = filters or {}
     since = _resolve_since(conn, view, filters)
     display_url = _link(view, offset, filters, since)
-    page_context = ({'display': display, 'plugin_id': display if display != 'list' else None,
-                     'lang': lang, 'theme': theme, 'view': view,
-                     'query_url': display_url, 'return_url': display_url,
-                     'pages': display_pages} if display_pages else None)
+    sidebars = list(sidebars or ())
+    sidebar_ids = {s['id'] for s in sidebars}
+    display_page = next((p for p in display_pages if p['id'] == display), None) if display != 'list' else None
+    # 对比页这类不在切换里的页面：整页、隐藏工具栏和侧栏，只有一个返回列表。
+    solo = bool(display_page) and not display_page.get('switch', True)
+    switch_pages = [p for p in display_pages if p.get('switch', True)]
+    page_context = None
+    if display_pages or sidebars:
+        page_context = {'display': display, 'plugin_id': display if display != 'list' else None,
+                        'lang': lang, 'theme': theme, 'view': view,
+                        'query_url': display_url, 'return_url': display_url,
+                        'pages': list(display_pages),
+                        'sidebars': [{'id': s['id'], 'label': s['label'], 'handoff_label': s['handoff_label'],
+                                      'icon': s.get('icon')} for s in sidebars],
+                        'agent_access': 'on' if agent_access == 'on' else 'off'}
+    sidebar = sidebars[0] if sidebars and not solo else None
+    if display_page:
+        page_label = display_page['label'].get(lang, display)
+        # 带侧栏登记的插件（工作区）有多个入口：页面槽位显式写 slot=page；地图保持原地址。
+        frame_src = f'/plugins/{display}/frame' + ('?slot=page' if (solo or display in sidebar_ids) else '')
+        back = (('← 返回地图' if lang == 'zh' else '← Back to map') if not solo
+                else i18n.t(lang, 'sidebar.back_page', label=page_label))
+        page_html = (
+            (f'<button type="button" id="plugin-page-back" data-plugin-back>{_e(i18n.t(lang, "sidebar.back_list"))}</button>'
+             if solo else '')
+            + f'<iframe id="plugin-display-frame" title="{_e(page_label)}" '
+            f'data-plugin-src="{_e(frame_src)}" sandbox="allow-scripts" referrerpolicy="origin"></iframe>'
+            f'<button type="button" id="plugin-detail-back" onclick="closeDetail()">{_e(back)}</button>')
+    else:
+        page_html = ''
+    if sidebar:
+        sb_label = sidebar['label'].get(lang) or sidebar['label'].get('en') or sidebar['id']
+        sb_icon = PAGE_ICONS.get(sidebar.get('icon')) or ICON_WORKSPACE
+        sidebar_toggle = (
+            f'<button type="button" class="iconbtn sidebar-toggle" id="sidebar-toggle" aria-expanded="false" '
+            f'aria-controls="plugin-sidebar" title="{_e(sb_label)}" '
+            f'aria-label="{_e(i18n.t(lang, "sidebar.toggle", label=sb_label, n=0))}">{sb_icon}'
+            f'<span class="sidebar-toggle-label">{_e(sb_label)}</span>'
+            '<span class="sidebar-count" id="sidebar-count" aria-hidden="true" hidden>0</span></button>')
+        sidebar_html = (
+            f'<aside class="plugin-sidebar" id="plugin-sidebar" aria-label="{_e(sb_label)}" data-sidebar-id="{_e(sidebar["id"])}">'
+            f'<div class="sidebar-resize" id="sidebar-resize" role="separator" aria-orientation="vertical" tabindex="0" '
+            f'aria-label="{_e(i18n.t(lang, "sidebar.resize", label=sb_label))}"></div>'
+            '<div class="sheet-grab" aria-hidden="true"></div>'
+            f'<div class="sidebar-head"><b>{_e(sb_label)}</b>'
+            f'<button type="button" class="iconbtn sidebar-close" id="sidebar-close" '
+            f'aria-label="{_e(i18n.t(lang, "sidebar.close", label=sb_label))}">{ICON_CLOSE}</button></div>'
+            f'<iframe id="plugin-sidebar-frame" title="{_e(sb_label)}" sandbox="allow-scripts" referrerpolicy="origin" '
+            f'data-plugin-src="/plugins/{_e(sidebar["id"])}/frame?slot=sidebar"></iframe>'
+            f'<div class="sidebar-drop" id="sidebar-drop" aria-hidden="true">'
+            f'<span>{_e(i18n.t(lang, "sidebar.drop", label=sb_label))}</span></div>'
+            '</aside>'
+            '<div class="sidebar-scrim" id="sidebar-scrim"></div>')
+    else:
+        sidebar_toggle = sidebar_html = ''
+    body_class = ' '.join(c for c in ('plugin-display' if display_page else '',
+                                      'plugin-solo' if solo else '',
+                                      'has-sidebar' if sidebar else '') if c)
     # 每次请求重读词表：词表文件很小，开销可忽略。换来的是「改了词表刷新即生效」，
     # 不用重启常驻面板（这也是把词表放数据里而不是代码里的意义）。
     skills_cfg = skills_mod.load_skills(config.get("skills_path"))
@@ -1262,8 +1337,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
                            for key in PROCESS_STATS)
 
     return "".join([
-        _head(lang, theme, T("app.title") + _demo_suffix(config, lang),
-              'plugin-display' if display != 'list' else ''),
+        _head(lang, theme, T("app.title") + _demo_suffix(config, lang), body_class),
         _demo_banner(config, lang),
         '<header class="main-header">',
         '<div class="topbar">',
@@ -1273,6 +1347,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<span class="mobile-view"><b>{_e(T("view." + view))}</b> <span>{total}</span></span>',
         f'<nav class="tabs" aria-label="{_e(T("nav.views"))}">{nav}</nav>',
         '<span class="spacer"></span>',
+        sidebar_toggle,
         '<div class="top-actions">',
         # 上次抓取 + 「更新岗位」放在一起；竖屏时 panel.js 把更新按钮挪进抽屉
         f'<span class="run-controls">{run_note}<span id="update-home" hidden></span>'
@@ -1282,7 +1357,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'{ICON_GEAR}<span>{_e(T("nav.settings"))}</span></a>',
         "</div></div>",
         _filter_bar(view, filters, skill_counts, lang, skills_mod.display_names(skills_cfg),
-                    display_pages=display_pages, display=display, display_url=display_url),
+                    display_pages=switch_pages, display=display, display_url=display_url),
         "</header>",
         '<div class="ctxbar">',
         f'<div class="ctx-desc">{ICON_INFO}<div><span class="ctx-text">'
@@ -1292,10 +1367,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span></div>',
         "</div>",
         '<main>',
-        (f'<iframe id="plugin-display-frame" title="{_e(next(p["label"].get(lang, display) for p in display_pages if p["id"] == display))}" '
-         f'data-plugin-src="/plugins/{_e(display)}/frame" sandbox="allow-scripts" referrerpolicy="origin"></iframe>'
-         f'<button type="button" id="plugin-detail-back" onclick="closeDetail()">'
-         f'{_e("← 返回地图" if lang == "zh" else "← Back to map")}</button>' if display != 'list' else ''),
+        page_html,
         f'<div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
         cards,
         (f'<div class="pager">{"".join(pager)}</div>' if pager else ""),
@@ -1309,6 +1381,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<div class="detail" id="detail" aria-label="{_e(T("detail.label"))}">',
         f'<div class="placeholder">{_e(T("detail.placeholder"))}</div>',
         "</div></div>",
+        sidebar_html,
         "</main>",
         # 竖屏的汉堡菜单
         '<div class="drawer" id="drawer" hidden>',
@@ -1336,7 +1409,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
                         "__SKILL_OWNERS__": sorted(skills_mod.canonical_tokens(skills_cfg).items()),
                         "__RESULT_GENERATION__": result_generation}),
         f"<script>{asset('panel.js')}</script>",
-        (_scripts(lang, {'__PAGE_CONTEXT__': page_context})
+        (_scripts(lang, {'__PAGE_CONTEXT__': page_context,
+                         **({'__HOST_I18N__': i18n.host_strings(lang)} if sidebars or solo else {})})
          + f"<script>{asset('plugin_pages.js')}</script>" if page_context else ''),
         "</body></html>",
     ])
@@ -1569,6 +1643,8 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             f'<p class="set-hint">{_e(T("set.keys_desc"))}</p>',
             radios("keys", keys, [(code, T("set.keys_" + code), T(f"set.keys_{code}_desc"))
                                   for code in i18n.KEY_PROFILES], "setKeys"),
+            # 只有授权了侧栏插件才说明「加入侧栏」快捷键；没有时设置页逐字节不变。
+            (f'<p class="set-hint">{_e(T("sidebar.keys_hint"))}</p>' if _sidebar_authorized(config) else ''),
             f'<div class="keep"><b>{_e(T("set.keep_title"))}</b><ul>'
             f'<li>{_e(T("set.keep1"))}</li><li>{_e(T("set.keep2"))}</li><li>{_e(T("set.keep3"))}</li></ul></div>',
         ])

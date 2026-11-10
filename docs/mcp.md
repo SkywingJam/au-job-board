@@ -11,7 +11,7 @@ enable it in the persistent config with an owner-only token. The instructions
 below describe source installations. By default both transports identify as
 `AU Job Board (read-only)`.
 
-Two transports provide the same five read-only tools by default:
+Two transports provide the same six read-only tools by default:
 
 - **Streamable HTTP owned by the application** (recommended): starts and stops
   with `panel`, on the panel address and the panel port plus one.
@@ -86,7 +86,7 @@ the configured address and derived port; browser Origin headers are rejected.
 No CORS permissions are provided. The SDK uses stateless Streamable HTTP with
 JSON responses; application snapshots still persist in the internal reader for
 the configured TTL. A 64 KiB request-body limit protects the protocol endpoint.
-It exposes the same five read-only tools and error semantics as stdio (plus
+It exposes the same six read-only tools and error semantics as stdio (plus
 `batch_label_jobs` only when `agent_api.allow_label_writes` is true).
 
 For private data on a remote network, enable TLS with both `mcp.tls_certfile` and
@@ -171,7 +171,7 @@ owned by the application, use the Streamable HTTP mode above.
 
 ## Tools and a first read
 
-All five of these tools declare themselves read-only. A successful call returns
+All six of these tools declare themselves read-only. A successful call returns
 one text content block holding compact JSON (no indentation or extra whitespace;
 Unicode and escaped newlines inside job text are preserved). There is no
 structured content and no published `outputSchema`, so clients that show both
@@ -183,7 +183,7 @@ The JSON is the HTTP API response, with two MCP-only differences:
   API default stays 100). An explicit `limit` (1 to 200) is passed through;
   large pages may exceed a client's tool-output limit, so prefer following
   `next_cursor`.
-- Job records (`list_jobs` items and the `get_job` item) are compacted
+- Job records (`list_jobs` items, the `get_job` item and the `get_jobs` records) are compacted
   losslessly: keys whose value is null, `""`, `[]` or `{}` are omitted
   recursively (`false` and `0` stay), so an absent field means null or empty;
   `source_id` (always the `uid` after its first colon) and `human_scope`
@@ -202,6 +202,7 @@ Tests rebuild the HTTP JSON from the MCP records using only these rules.
 |---|---|---|
 | `list_jobs` | Optional `query` object of HTTP API fields (default `limit` 20) | One frozen page, `total`, `snapshot_id`, `next_cursor` |
 | `get_job` | Required `uid`, `snapshot_id` | Complete JD, machine evidence, local posting `history`, group human state, live panel link |
+| `get_jobs` | Required `uids`: 1 to 10 distinct non-empty strings (each at most 512 characters) | The same complete records as `get_job`, read fresh by exact uid with no `snapshot_id`, in request order; an unknown uid is an explicit `{"uid","error":"job_not_found"}` item |
 | `list_batches` | `limit` (default 50, maximum 200), `offset` (default 0) | Fresh batch metadata, `next_offset` |
 | `get_batch` | Required `batch_id` | Collection facts and separate pipeline evidence |
 | `review_plugin_permissions` | None | Full permission review, current status and user-operated confirmation paths |
@@ -212,6 +213,7 @@ Example tool calls:
 {"name":"list_jobs","arguments":{"query":{"view":"all","geo":"VIC","limit":20}}}
 {"name":"get_job","arguments":{"uid":"<returned uid>","snapshot_id":"<returned snapshot_id>"}}
 {"name":"list_jobs","arguments":{"query":{"cursor":"<returned next_cursor>"}}}
+{"name":"get_jobs","arguments":{"uids":["<exact uid>","<another exact uid>"]}}
 {"name":"list_batches","arguments":{"limit":10}}
 {"name":"get_batch","arguments":{"batch_id":"<returned batch_id>"}}
 ```
@@ -226,6 +228,16 @@ For subsequent job pages pass only `cursor`; follow it until `next_cursor=null`.
 Use the same snapshot ID for every full JD in that query. There is no implicit
 fallback to a fresh detail if a snapshot expires. Batch pagination uses offsets
 and fresh reads, independently of jobs snapshots.
+
+`get_jobs` is for reading jobs by exact uid when there is no list snapshot, for
+example uids the user copied from the panel workspace. It maps to
+`GET /api/v1/job-details` ([HTTP API](agent-api.md#endpoints-and-scopes)): the
+records are fresh, so they may differ from an earlier list, nothing is stored
+and no snapshot is created. Records use the same omission rule as `get_job`
+(`job_not_found` items are not records and pass through unchanged). A
+duplicate uid is a tool error. Its description also suggests that, when several
+steps or sub-agents will reuse the records, the agent may save each one to a
+private temporary file and delete those files when the task ends.
 
 Authentication/connection failures, invalid queries, expired snapshots and
 unknown tools are MCP errors, never empty successful results. Existing HTTP
@@ -242,7 +254,7 @@ data, so it can differ from the frozen snapshot.
 
 ## Optional batch label tool
 
-Off by default. When enabled, a sixth tool, `batch_label_jobs`, lets an MCP
+Off by default. When enabled, a seventh tool, `batch_label_jobs`, lets an MCP
 client set application progress and the priority star for exact UIDs; it is the
 only write tool and cannot edit notes, eligibility, jobs or JDs. It uses the
 [batch label route](agent-api.md#optional-batch-label-write), so read its
@@ -276,7 +288,7 @@ compact JSON text (`updated`, `unchanged` and one `uid`/`action`/`priority`/`cha
 `human_scope` entry per item, never JD text or notes), not compacted further
 and without structured content or `outputSchema`. It is annotated
 `readOnlyHint=false`, `destructiveHint=true`, `idempotentHint=true`,
-`openWorldHint=false`; the five read tools keep their read-only annotations.
+`openWorldHint=false`; the six read tools keep their read-only annotations.
 Invalid arguments, unknown or duplicate UIDs, two UIDs of one group, an
 authentication or HTTP failure, a refused redirect or a lost connection are tool
 errors, never empty successes. Nothing is retried automatically: after a

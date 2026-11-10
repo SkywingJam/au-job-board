@@ -258,7 +258,7 @@ def main():
             assert initialized['serverInfo']['name'] == 'AU Job Board (read-only)'
             available_tools = rpc('tools/list', {})['tools']
             assert {t['name'] for t in available_tools} == {
-                'list_jobs','get_job','list_batches','get_batch','review_plugin_permissions'}
+                'list_jobs','get_job','get_jobs','list_batches','get_batch','review_plugin_permissions'}
             review_tool = next(t for t in available_tools if t['name'] == 'review_plugin_permissions')
             assert review_tool['annotations']['readOnlyHint'] is True
             review = rpc('tools/call', {'name': 'review_plugin_permissions', 'arguments': {}})

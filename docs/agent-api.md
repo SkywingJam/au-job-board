@@ -77,6 +77,17 @@ code and an HTTP status; clients must not interpret them as an empty result.
 - `GET /api/v1/jobs/{encoded_uid}?snapshot_id=...`: full source record from
   the same snapshot, even when its UID is folded out of the display list.
   Omit `snapshot_id` only for an explicitly fresh, independent read.
+- `GET /api/v1/job-details?uid=...&uid=...`: fresh full records for 1 to 10
+  exact UIDs, without a list snapshot. Each `uid` must be distinct, non-empty and
+  at most 512 characters, and `uid` is the only accepted query key; zero UIDs,
+  more than 10, a duplicate, an over-long UID or any other key fail with
+  `400 invalid_query`. The response is `{"api_version": 1, "as_of": ..., "items": [...]}`
+  with one item per requested UID, in request order, read in one read-only
+  transaction. A known UID returns the same record as
+  `GET /api/v1/jobs/{uid}` without `snapshot_id`; an unknown UID returns
+  `{"uid": ..., "error": "job_not_found"}` instead of failing the request or
+  being dropped. Nothing is stored in the snapshot store and nothing is written.
+  MCP exposes it as `get_jobs`.
 - `GET /api/v1/batches?limit=100&offset=0` and
   `GET /api/v1/batches/{batch_id}`: committed collection facts plus independently
   reported pipeline evidence. Batch browsing is a fresh metadata read on each

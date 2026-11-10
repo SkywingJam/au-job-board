@@ -122,7 +122,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
                 self.assertEqual(client.server_info.version, __version__)
                 self.assertEqual({t.name for t in (await client.list_tools()).tools},
-                    {'list_jobs','get_job','list_batches','get_batch','review_plugin_permissions'})
+                    {'list_jobs','get_job','get_jobs','list_batches','get_batch','review_plugin_permissions'})
                 first = await client.call_tool('list_jobs', {'query': {'limit': 1}})
                 self.assertFalse(first.is_error)
                 page = payload(first)
@@ -140,6 +140,21 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(payload(batch)['item']['batch_id'], bid)
                 bad = await client.call_tool('list_jobs', {'query': {'view': 'recommend', 'geo': 'VIC'}})
                 self.assertTrue(bad.is_error)
+                tools = {t.name: t for t in (await client.list_tools()).tools}
+                self.assertTrue(tools['get_jobs'].annotations.read_only_hint)
+                before = self.fixture.human_state()
+                jobs = await client.call_tool('get_jobs', {'uids': ['synthetic:a', 'synthetic:none']})
+                self.assertFalse(jobs.is_error, jobs.content)
+                items = payload(jobs)['items']
+                self.assertEqual([i['uid'] for i in items], ['synthetic:a', 'synthetic:none'])
+                self.assertEqual(items[0]['human']['action'], 'saved')
+                self.assertTrue(items[0]['description'].startswith('Handwritten synthetic complete JD'))
+                self.assertEqual(items[1], {'uid': 'synthetic:none', 'error': 'job_not_found'})
+                self.assertTrue((await client.call_tool('get_jobs', {'uids': []})).is_error)
+                self.assertTrue((await client.call_tool('get_jobs', {'uids': ['x' * 513]})).is_error)
+                self.assertTrue((await client.call_tool('get_jobs', {'uids': ['u%d' % n for n in range(11)]})).is_error)
+                self.assertEqual(service.api.api.store.items.keys(), {sid})
+                self.assertEqual(self.fixture.human_state(), before)
 
     async def test_auth_host_origin_and_request_size(self):
         self.start_reselecting()
@@ -195,7 +210,8 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         async with await self.connect(service) as client:
             self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
             self.assertEqual({t.name for t in (await client.list_tools()).tools},
-                             {'list_jobs', 'get_job', 'list_batches', 'get_batch', 'review_plugin_permissions'})
+                             {'list_jobs', 'get_job', 'get_jobs', 'list_batches', 'get_batch',
+                              'review_plugin_permissions'})
             result = await client.call_tool('batch_label_jobs', {'items': [
                 {'uid': 'synthetic:c', 'action': 'saved'}]})
             self.assertTrue(result.is_error)
@@ -209,7 +225,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         async with await self.connect(service) as client:
             self.assertEqual(client.server_info.name, 'AU Job Board')
             tools = {t.name: t for t in (await client.list_tools()).tools}
-            self.assertEqual(set(tools), {'list_jobs', 'get_job', 'list_batches', 'get_batch',
+            self.assertEqual(set(tools), {'list_jobs', 'get_job', 'get_jobs', 'list_batches', 'get_batch',
                                           'review_plugin_permissions', 'batch_label_jobs'})
             for name, tool in tools.items():
                 note = tool.annotations
@@ -313,7 +329,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         async with httpx2.AsyncClient(verify=ssl.create_default_context(cafile=cert),
                 headers={'Authorization': 'Bearer '+TOKEN}) as http:
             async with Client(streamable_http_client(service.url, http_client=http)) as client:
-                self.assertEqual(len((await client.list_tools()).tools), 5)
+                self.assertEqual(len((await client.list_tools()).tools), 6)
 
     async def test_conflict_and_invalid_settings_cleanup(self):
         with socket.socket() as occupied:

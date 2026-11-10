@@ -1,0 +1,24 @@
+{
+  "id": "workspace",
+  "name": {"zh": "工作区", "en": "Workspace"},
+  "description": {"zh": "把岗位放进侧栏，并排对比或交给 agent。", "en": "Collect jobs in a sidebar, compare them side by side or hand them to an agent."},
+  "version": "1.0.0",
+  "compatibility": {"host_api": 2},
+  "entry": "web/index.html",
+  "hooks": [],
+  "network": "none",
+  "display": true,
+  "i18n": ["zh", "en"],
+  "sidebar": {"id": "workspace", "label": {"zh": "工作区", "en": "Workspace"}, "entry": "web/index.html",
+              "handoff_label": {"zh": "加入工作区", "en": "Add to workspace"}, "icon": "workspace"},
+  "page": {"id": "workspace", "label": {"zh": "对比", "en": "Compare"}, "entry": "web/compare.html", "icon": "compare", "switch": false},
+  "permissions": {
+    "job_fields": ["uid", "group_id", "title", "company", "location_raw", "location_fact", "salary", "work_type", "listing_date", "total_score", "priority", "core_order", "panel_url"],
+    "job_detail": ["description", "skills", "tags", "qualification", "eligibility_evidence", "human_labels"],
+    "job_scope": "handed",
+    "files": [],
+    "network": [],
+    "execution": ["browser_frame"],
+    "display": ["sidebar", "page", "handoff"]
+  }
+}

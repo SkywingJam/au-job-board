@@ -40,6 +40,10 @@ UTC = dt.timezone.utc
 DAY_ZONE = 'Australia/Melbourne'
 PREFIX = '/api/v1'
 LABEL_BATCH_PATH = PREFIX + '/labels/batch'
+DETAILS_PATH = PREFIX + '/job-details'
+MAX_DETAIL_UIDS = 10
+MAX_UID_CHARS = 512
+MAX_DETAILS_TARGET = 60000  # 10 percent-encoded 512-character uids; still under the server's request-line cap
 MAX_LABEL_BODY = 32 * 1024  # fits the 64 KiB MCP request envelope
 BODY_DEADLINE = 15  # seconds for a whole request body
 DRAIN_LIMIT = 256 * 1024  # unread bytes consumed before an early rejection
@@ -520,14 +524,37 @@ class AgentAPI:
         else:
             with closing(read_connection(self.db_path)) as conn:
                 try:
-                    row = location_query.find(conn, self.config, uid)
-                    if row is None:
+                    result = self._live_record(conn, uid)
+                    if result is None:
                         raise APIError('job_not_found', 404)
-                    result = serialize(conn, row, self.panel_base, {})
                     as_of = utcnow()
                 finally:
                     conn.close()
         return {'api_version': 1, 'as_of': as_of, 'snapshot_id': sid, 'item': result}
+
+    def _live_record(self, conn, uid):
+        """The full no-snapshot record of one uid, or None when it does not exist."""
+        row = location_query.find(conn, self.config, uid)
+        return None if row is None else serialize(conn, row, self.panel_base, {})
+
+    def job_details(self, qs):
+        """Fresh full records for 1..10 exact uids from one read transaction.
+
+        No snapshot is created or stored; an unknown uid is an explicit item.
+        """
+        uids = qs.get('uid', [])
+        if (set(qs) != {'uid'} or not 1 <= len(uids) <= MAX_DETAIL_UIDS or len(set(uids)) != len(uids)
+                or any(not uid or len(uid) > MAX_UID_CHARS for uid in uids)):
+            raise APIError('invalid_query')
+        with closing(read_connection(self.db_path)) as conn:
+            try:
+                items = []
+                for uid in uids:
+                    record = self._live_record(conn, uid)
+                    items.append({'uid': uid, 'error': 'job_not_found'} if record is None else record)
+                return {'api_version': 1, 'as_of': utcnow(), 'items': items}
+            finally:
+                conn.close()
 
     def label_batch(self, raw_items):
         """Absolute action/priority assignment for exact UIDs, all or nothing."""
@@ -622,7 +649,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         created_sid = None
         try:
-            if len(self.path) > 4096:
+            limit = MAX_DETAILS_TARGET if self.path.startswith(DETAILS_PATH + '?') else 4096
+            if len(self.path) > limit:
                 raise APIError('query_too_large', 414)
             parsed = urlsplit(self.path)
             if parsed.scheme or parsed.netloc or parsed.fragment:
@@ -637,6 +665,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.api.jobs(qs, check=lambda: self._snapshot_check(deadline))
                 if 'cursor' not in qs:
                     created_sid = result['snapshot_id']
+            elif parsed.path == DETAILS_PATH:
+                result = self.server.api.job_details(qs)
             elif parsed.path.startswith(PREFIX+'/jobs/'):
                 uid = unquote(parsed.path[len(PREFIX+'/jobs/'):], errors='strict')
                 if not uid or len(uid) > 512:
