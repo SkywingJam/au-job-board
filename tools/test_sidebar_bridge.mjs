@@ -159,6 +159,10 @@ eq(e.prefs.open, true, 'desktop open state remembered');
 eq(e.frames.side.src, '/plugins/workspace/frame?slot=sidebar', 'sidebar frame loaded with slot=sidebar');
 eq(e.doc.activeElement, e.frames.side, 'focus moves into the opened sidebar');
 const mapCtxMsg = await e.ready('map'), sideCtxMsg = await e.ready('side');
+// The sidebar gets a fixed context: nothing about the current view or search.
+eq(Object.keys(sideCtxMsg.context).sort(), ['agent_access', 'compare_columns', 'current', 'handed', 'lang', 'plugin_id', 'slot', 'state', 'theme'], 'sidebar context fields');
+ok(!JSON.stringify(sideCtxMsg.context).includes('Python'), 'the search text is not sent to the sidebar');
+ok('query_url' in mapCtxMsg.context, 'the map still gets the list query');
 e.channels = {map: mapCtxMsg.channel, side: sideCtxMsg.channel};
 ok(e.channels.map && e.channels.side && e.channels.map !== e.channels.side, 'each frame has its own channel');
 eq([mapCtxMsg.context.slot, mapCtxMsg.context.plugin_id, 'handed' in mapCtxMsg.context], ['page', 'map', false], 'map context: page slot, no handed list');
@@ -385,6 +389,7 @@ eq((await e.request('map', 'load')).ok, true, 'map keeps working after the sideb
   eq(c.frames.side.src, undefined, 'no sidebar on the compare page');
   eq(c.window.__JOBS_PLUGIN_HOST__, undefined, 'no handoff entry points on the compare page');
   const ctx = await c.ready('map'); c.channels.map = ctx.channel;
+  eq(Object.keys(ctx.context).sort(), ['agent_access', 'compare_columns', 'handed', 'lang', 'plugin_id', 'slot', 'state', 'theme'], 'page context fields');
   eq([ctx.context.slot, ctx.context.plugin_id, ctx.context.handed.length, 'current' in ctx.context], ['page', 'workspace', 1, false], 'page context');
   eq((await c.request('map', 'handed_jobs', {uids: ['seek:1'], detail: true})).ok, true, 'page reads handed details');
   eq((await c.request('map', 'clear_handed')).error.code, 'unsupported_operation', 'clear_handed is sidebar-only');

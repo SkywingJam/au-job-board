@@ -1,5 +1,7 @@
 # Plugins
 
+Plugin authors and host contributors: the complete list of what a plugin may declare, read and do is in [plugin-interface.md](plugin-interface.md).
+
 Plugins are optional and disabled by default. Settings > Plugins shows each installed plugin's purpose and permission review. To enable one, read the full review and explicitly accept it. Setting `plugins.sponsorship.enabled: true` alone does not grant permission. Existing enabled configurations need the same review. Changes take effect on the next relevant run. Disabling hides results but keeps both the grant and existing files; revoke removes the grant and disables the plugin.
 
 The local CLI provides the same review and grant store:
@@ -183,6 +185,7 @@ written only by core, in this browser's local storage. Core tells the frames
 about it with `jobs-plugin-handed` (also after a change in another tab) and tells
 the sidebar which job is open with `jobs-plugin-current` `{uid, title, company}`.
 That current-job notice is the only data about a job the user has not handed
-over, and the permission review says so. The only writes these operations make
+over, and the permission review says so. A handed-profile frame's context is a
+fixed set of fields without the current view, filters or search text. The only writes these operations make
 are the clipboard copy and the two browser-storage keys; none reaches the
 database, labels or notes, and no operation takes a URL.

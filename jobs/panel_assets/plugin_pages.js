@@ -294,9 +294,13 @@ async function operation(b,name,payload,signal){
 function frameContext(b){
   const base={...context,plugin_id:b.pluginId,theme:themeNow(),slot:b.slot};
   if(b.profile==='map')return mapState?{...base,state:mapState}:base;
-  const extra={handed:readHanded(b.pluginId),agent_access:context.agent_access==='on'?'on':'off',state:readState(b.pluginId),compare_columns:window.innerWidth>=900?3:2};
-  if(b.slot==='sidebar')extra.current=currentJob();
-  return {...base,...extra};
+  // A handed-profile frame gets a fixed set of fields. The page context also holds the
+  // current view and search (query_url), which this profile has no permission to see.
+  const own={plugin_id:b.pluginId,slot:b.slot,lang:context.lang,theme:base.theme,
+    handed:readHanded(b.pluginId),agent_access:context.agent_access==='on'?'on':'off',
+    state:readState(b.pluginId),compare_columns:window.innerWidth>=900?3:2};
+  if(b.slot==='sidebar')own.current=currentJob();
+  return own;
 }
 window.addEventListener('message',async event=>{
   const b=bridges.find(x=>!x.closed&&event.source===x.frame.contentWindow);
