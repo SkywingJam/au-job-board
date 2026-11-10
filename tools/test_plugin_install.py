@@ -709,6 +709,100 @@ class UpgradeAndUninstall(Base):
         self.assertEqual(code, 1)
         self.assertIn('bundled', err)
 
+    # ---- re-check round ---------------------------------------------------------------
+
+    def test_recovery_inside_a_run_keeps_timeouts_and_survives_cleanup_errors(self):
+        from jobs import RunTimeout
+        self.install(hook_manifest())
+        self.write_config({'demo-hook': {'enabled': True}})
+        host.grant(self.config, hook_manifest(), host.fingerprint(hook_manifest()), 'test')
+        config = ConfigEditor(self.config, self.config_path).plugin_config()
+        with patch.object(install, 'recover', side_effect=RunTimeout()):
+            with self.assertRaises(RunTimeout):
+                host.dispatch(config, 'after_fetch')
+        calls = []
+        with patch.object(install, 'recover', side_effect=install.InstallError('cleanup failed')), \
+                patch.object(host, '_run_worker', side_effect=lambda *a, **k: calls.append(a[1]) or {'errors': []}):
+            host.dispatch(config, 'after_fetch')         # a failed cleanup does not stop usable plugins
+        self.assertEqual(host.read_debug(config, 'demo-hook')['entries'], [])
+
+    def test_analyze_recovers_before_it_decides_whether_to_prepare_jobs(self):
+        self.install(hook_manifest())
+        self.write_config({'demo-hook': {'enabled': True}})
+        host.grant(self.config, hook_manifest(), host.fingerprint(hook_manifest()), 'test')
+        root = self.installed_root()
+        (root / 'demo-hook').rename(root / ('.old-demo-hook-' + 'e' * 32))      # killed mid-upgrade
+        config = ConfigEditor(self.config, self.config_path).plugin_config()
+        seen = []
+
+        def record(config, hook, jobs=None, analysis_id=None):
+            seen.append((hook, jobs, analysis_id))
+
+        class Conn:
+            def execute(self, sql):
+                class Row:
+                    def fetchone(self_inner):
+                        return (7,)
+                return Row()
+        with patch.object(host, 'dispatch', side_effect=record), patch.object(host, '_analysis_jobs', return_value=[{'uid': 'synthetic:one', 'company': 'Co'}]):
+            host.after_analyze(config, Conn())
+        self.assertEqual(seen, [('after_analyze_success', [{'uid': 'synthetic:one', 'company': 'Co'}], 7)])
+
+    def test_record_backup_without_a_package_backup_is_given_back(self):
+        first = self.install(sidebar_manifest())
+        root = self.installed_root()
+        # Killed after the record moved aside, before the package did.
+        (root / 'demo-sidebar.install.json').rename(root / ('.old-demo-sidebar-' + 'f' * 32 + '.json'))
+        install.recover(self.config)
+        self.assertEqual(self.item('demo-sidebar')['install']['sha256'], first)
+        self.assertEqual(self.landed(), ['demo-sidebar', 'demo-sidebar.install.json'])
+        # A leftover beside a package that already has its record is only removed.
+        (root / ('.old-demo-sidebar-' + 'f' * 32 + '.json')).write_text('{"stale": true}')
+        install.recover(self.config)
+        self.assertEqual(self.item('demo-sidebar')['install']['sha256'], first)
+        self.assertEqual(self.landed(), ['demo-sidebar', 'demo-sidebar.install.json'])
+
+    def test_list_fails_when_an_interrupted_upgrade_cannot_be_repaired(self):
+        self.install(sidebar_manifest())
+        with patch.object(install, 'recover', side_effect=install.InstallError('An interrupted plugin change could not be cleaned up (PermissionError).')):
+            code, out, err = self.cli('list')
+        self.assertEqual(code, 1)
+        self.assertIn('may be missing a plugin', err)
+        self.assertIn('demo-bundled', out)
+
+    def test_failed_first_install_says_the_earlier_setting_and_grant_were_cleared(self):
+        manifest = hook_manifest()
+        self.write_config({'demo-hook': {'enabled': True}})
+        host.grant(self.config, manifest, host.fingerprint(manifest), 'test')
+        path, _ = self.build(manifest)
+        with patch.object(install, '_write_file', side_effect=OSError('simulated')):
+            code, _, err = self.cli('install', str(path), '--yes')
+        self.assertEqual(code, 1)
+        self.assertIn('was not installed', err)
+        self.assertIn('were cleared', err)
+        self.assertNotIn('previous state was kept', err)
+        self.assertEqual(self.landed(), [])
+
+    def test_direction_marks_are_escaped_in_every_command_output(self):
+        for mark in ('\u061c', '\u202e', '\u2067'):
+            self.assertNotIn(mark, install.visible('a' + mark + 'b'))
+            manifest = sidebar_manifest('demo-mark')
+            manifest['name'] = {'en': 'Tidy' + mark, 'zh': '好'}
+            path, _ = self.build_unchecked(manifest)
+            self.assertEqual(self.cli('install', str(path), '--yes')[0], 1, repr(mark))
+        self.install(sidebar_manifest())
+        target = self.installed_root() / 'demo-sidebar' / 'manifest.json'
+        target.write_text(json.dumps({**sidebar_manifest(), 'name': {'en': 'Shown\u202e', 'zh': '好\u061c'}}), encoding='utf-8')
+        for argv in (('list', '--json'), ('review', 'demo-sidebar')):
+            code, out, _ = self.cli(*argv)
+            self.assertEqual(code, 0, argv)
+            self.assertNotIn('\u202e', out)
+            self.assertNotIn('\u061c', out)
+            self.assertIn('\\u202e', out)                       # still the same value once decoded
+            data = json.loads(out)
+            item = data if isinstance(data, dict) else next(i for i in data if i['id'] == 'demo-sidebar')
+            self.assertEqual(item['name']['en'], 'Shown\u202e')
+
     def test_missing_or_damaged_record_only_hides_provenance(self):
         self.install(sidebar_manifest())
         record = self.installed_root() / 'demo-sidebar.install.json'
@@ -799,6 +893,38 @@ class ArchiveRejections(Base):
         code, _, err = self.cli('install', str(path), '--yes')
         self.assertEqual(code, 0, err)
         self.assertTrue((self.installed_root() / 'demo-plain' / 'web' / 'index.html').is_file())
+
+    def test_entry_count_uses_the_same_directory_as_the_zip_reader(self):
+        # A zip64 archive whose locator points at a decoy "empty" end record placed earlier:
+        # the reader uses the record right before the locator, and so must the count.
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            for n in range(6):
+                with archive.open(zipfile.ZipInfo(f'f{n}.txt'), 'w', force_zip64=True) as handle:
+                    handle.write(b'x')
+        plain = buffer.getvalue()
+        end = plain.rfind(b'PK\x05\x06')
+        size, offset = struct.unpack_from('<LL', plain, end + 12)
+        directory = plain[offset:offset + size]
+        decoy = b'PK\x06\x06' + struct.pack('<QHHLLQQQQ', 44, 45, 45, 0, 0, 0, 0, 0, 0)
+        real = b'PK\x06\x06' + struct.pack('<QHHLLQQQQ', 44, 45, 45, 0, 0, 6, 6, size, len(decoy) + offset)
+        locator = b'PK\x06\x07' + struct.pack('<LQL', 0, 0, 1)          # points at the decoy (offset 0)
+        tail = struct.pack('<4sHHHHLLH', b'PK\x05\x06', 0, 0, 0xffff, 0xffff, 0xffffffff, 0xffffffff, 0)
+        crafted = decoy + plain[:offset] + directory + real + locator + tail
+        self.assertEqual(len(zipfile.ZipFile(io.BytesIO(crafted)).infolist()), 6)      # what the reader sees
+        with patch.object(install, 'MAX_ENTRIES', 4), \
+                patch.object(zipfile, 'ZipFile', side_effect=AssertionError('central directory was parsed')):
+            with self.assertRaises(install.InstallError) as error:
+                install._open_archive(crafted)
+        self.assertIn('more than 4 entries', error.exception.message)
+        # Ordinary archives are still accepted, zip64 and with a comment included.
+        for comment in (b'', b'a plain archive comment'):
+            ordinary = io.BytesIO()
+            with zipfile.ZipFile(ordinary, 'w') as archive:
+                archive.comment = comment
+                with archive.open(zipfile.ZipInfo('a.txt'), 'w', force_zip64=True) as handle:
+                    handle.write(b'x')
+            install._check_directory_size(ordinary.getvalue())
 
     def test_size_entry_and_bomb_limits(self):
         good = self.good_entries()
@@ -899,6 +1025,15 @@ class Download(Base):
         with self.assertRaises(install.InstallError) as error:
             install.download(self.URL, handlers=[FakeHTTPS({self.URL: (200, {}, b'')})], clock=lambda: next(late))
         self.assertIn('60 seconds', error.exception.message)
+        # Redirects share the budget: a slow chain is refused, and each hop only gets what is left.
+        hop = 'https://example.org/hop'
+        chain = FakeHTTPS({self.URL: (302, {'Location': hop + '1'}, b'x' * 10),
+                           hop + '1': (302, {'Location': hop + '2'}, b''), hop + '2': (200, {}, data)})
+        slow = iter(range(0, 10000, 25))
+        with self.assertRaises(install.InstallError) as error:
+            install.download(self.URL, handlers=[chain], clock=lambda: next(slow))
+        self.assertIn('60 seconds', error.exception.message)
+        self.assertLess(len(chain.seen), 3)                      # the last hop was never requested
         with self.assertRaises(install.InstallError) as error:
             install.obtain(self.URL, digest, handlers=[FakeHTTPS({self.URL: (404, {}, b'')})])
         self.assertIn('404', error.exception.message)

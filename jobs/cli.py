@@ -1013,7 +1013,8 @@ def cmd_plugin(args):
         if not item or ('consent' not in item and args.plugin_action != 'revoke'):
             print('Plugin unavailable or manifest invalid.', file=sys.stderr)
             return 1
-        print(json.dumps(item, ensure_ascii=False, indent=2))
+        from .plugin_install import visible_json
+        print(visible_json(item))
         if args.plugin_action == 'review':
             return 0
         payload = {'digest': result['digest'], 'id': args.plugin_id,
@@ -1081,20 +1082,22 @@ def _cmd_plugin_package(args):
             lock = run_state.acquire_lock(current)
         except OSError:
             lock = None
+        complete = True
         if lock is not None:
             try:
                 plugin_install.recover(current)
             except plugin_install.InstallError as exc:
-                print(exc.message, file=sys.stderr)
+                complete = False
+                print(exc.message + ' The list below may be missing a plugin.', file=sys.stderr)
             finally:
                 lock.close()
         items = plugin_host.list_plugins(current)
         if args.json:
-            print(json.dumps(items, ensure_ascii=False, indent=2))
+            print(plugin_install.visible_json(items))
         else:
             for item in items:
                 print(_plugin_line(item))
-        return 0
+        return 0 if complete else 1
     try:
         if action == 'uninstall':
             return _plugin_uninstall(args, current)
@@ -1204,11 +1207,23 @@ def _plugin_install(args, config, upgrade):
         plugin_install.checked_root(config)
         plugin_install.recover(config)
         plugin_install.check_installable(config, package, upgrade=upgrade)
+        cleared = False
         if not upgrade:
             # A first install is always off and ungranted, whatever an earlier
             # install of the same ID left in the configuration or grant store.
+            earlier = next((p for p in plugin_host.list_plugins(config) if p['id'] == plugin_id), None)
+            cleared = bool((plugin_host._root(config) / plugin_id / 'consent.json').exists()
+                           or (config.get('plugins') or {}).get(plugin_id, {}).get('enabled')
+                           or (earlier and earlier.get('enabled')))
             editor.disable_plugin_locked(plugin_id)
-        plugin_install.install(config, archive, package, upgrade=upgrade)
+        try:
+            plugin_install.install(config, archive, package, upgrade=upgrade)
+        except InstallError as exc:
+            if cleared:     # the package was not placed, but the earlier state is not what it was
+                raise InstallError(exc.message.replace('; the previous state was kept.', '.') +
+                                   ' The plugin was not installed; the earlier setting and permission grant '
+                                   'for this ID were cleared.') from None
+            raise
     finally:
         lock.close()
     review = _plugin_command(args, 'review', plugin_id)

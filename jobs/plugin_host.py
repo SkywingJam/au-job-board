@@ -755,15 +755,7 @@ def _dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: in
         return
     if all(isinstance(value, dict) and value.get('enabled', False) is False for value in configured.values()):
         return
-    try:
-        # The caller holds the run lock: finish a plugin upgrade a crash interrupted,
-        # so an enabled plugin does not silently drop out of this run.
-        from . import plugin_install
-        plugin_install.recover(config)
-    except RunTimeout:
-        raise
-    except Exception:
-        pass
+    _recover_packages(config)
     for item in list_plugins(config):
         if item['status'] != 'enabled':
             if item['status'] == 'error' and item['id'] in configured:
@@ -815,10 +807,22 @@ def _dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: in
         except WorkerError as exc:
             _log(config, plugin_id, hook, exc.code, exc.message)
         except (Exception,) as exc:
-            from . import RunTimeout
             if isinstance(exc, RunTimeout):
                 raise
             _log(config, plugin_id, hook, type(exc).__name__)
+
+
+def _recover_packages(config):
+    """Finish a plugin upgrade a crash interrupted, so an enabled plugin does not
+    silently drop out of this run. The caller holds the run lock. A cleanup
+    failure leaves the inventory as it is; a pipeline timeout still propagates."""
+    try:
+        from . import plugin_install
+        plugin_install.recover(config)
+    except RunTimeout:
+        raise
+    except Exception:
+        pass
 
 
 def _configured(config):
@@ -851,6 +855,7 @@ def after_analyze(config, conn):
         return
     items = []
     try:
+        _recover_packages(config)       # before the inventory decides whether jobs are prepared
         items = list_plugins(config)
         if not any(item['status'] == 'enabled' for item in items):
             # Still record invalid configured plugins through the ordinary path.

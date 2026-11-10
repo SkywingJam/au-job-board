@@ -77,7 +77,7 @@ class Package:
 
 # ---------------------------------------------------------------- obtaining bytes
 
-_HIDDEN = re.compile('[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]')
+_HIDDEN = re.compile('[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]')
 
 
 def visible(text):
@@ -86,6 +86,13 @@ def visible(text):
     or forge lines of the review."""
     return _HIDDEN.sub(lambda m: '\\x%02x' % ord(m.group()) if ord(m.group()) < 256 else '\\u%04x' % ord(m.group()),
                        str(text))
+
+
+def visible_json(value):
+    """JSON for the terminal: same decoded values, with direction and control
+    characters written as \\uXXXX escapes instead of literally."""
+    text = json.dumps(value, ensure_ascii=False, indent=2)
+    return _HIDDEN.sub(lambda m: '\\u%04x' % ord(m.group()) if m.group() != '\n' else '\n', text)
 
 
 def normalize_sha256(value):
@@ -122,22 +129,29 @@ def recorded_url(url):
 
 
 class _HttpsRedirects(urllib.request.HTTPRedirectHandler):
-    max_redirections = MAX_REDIRECTS
+    """Follows at most MAX_REDIRECTS https redirects inside the download's one
+    deadline. The redirect response is closed unread, and the next request only
+    gets the time that is left."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        try:
-            _check_url(newurl)
-        except InstallError:
-            raise InstallError('The download redirected to an address that is not a plain https:// URL.') from None
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+    def __init__(self, remaining):
+        self.remaining = remaining          # seconds left; raises when the budget is spent
 
     def http_error_302(self, req, fp, code, msg, headers):
-        # The standard handler counts only loops of the same URL against its
-        # own limit; keep the documented maximum explicit.
-        visited = getattr(req, 'redirect_dict', {})
-        if sum(visited.values()) >= MAX_REDIRECTS:
+        target = headers.get('location') or headers.get('uri')
+        fp.close()
+        if not target:
+            raise InstallError(f'The download failed with HTTP status {code}.')
+        hops = getattr(req, 'redirect_hops', 0) + 1
+        if hops > MAX_REDIRECTS:
             raise InstallError(f'The download redirected more than {MAX_REDIRECTS} times.')
-        return super().http_error_302(req, fp, code, msg, headers)
+        target = urllib.parse.urldefrag(urllib.parse.urljoin(req.full_url, target))[0]
+        try:
+            _check_url(target)
+        except InstallError:
+            raise InstallError('The download redirected to an address that is not a plain https:// URL.') from None
+        follow = urllib.request.Request(target, headers={'User-Agent': USER_AGENT})
+        follow.redirect_hops = hops
+        return self.parent.open(follow, timeout=self.remaining())
 
     http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
 
@@ -146,19 +160,24 @@ def download(url, *, handlers=(), clock=time.monotonic):
     """Bytes of an https URL, bounded in size and time. `handlers` lets tests
     replace the network (an `HTTPSHandler` subclass) without touching sockets."""
     _check_url(url)
-    opener = urllib.request.build_opener(_HttpsRedirects(), *handlers)
-    # The fragment is never sent; only the application and version identify us.
-    request = urllib.request.Request(urllib.parse.urldefrag(url)[0], headers={'User-Agent': USER_AGENT})
     deadline = clock() + DOWNLOAD_TIMEOUT
     chunks, size = [], 0
 
-    def on_time():
-        # One budget for connecting, redirects and the whole body. Each socket
-        # operation also has its own timeout, so a stalled peer cannot hold on.
-        if clock() > deadline:
+    def remaining():
+        # One budget for connecting, every redirect and the whole body. Each
+        # socket operation is given only what is left of it.
+        left = deadline - clock()
+        if left <= 0:
             raise InstallError(f'The download took longer than {DOWNLOAD_TIMEOUT} seconds.')
+        return left
+
+    def on_time():
+        remaining()
+    opener = urllib.request.build_opener(_HttpsRedirects(remaining), *handlers)
+    # The fragment is never sent; only the application and version identify us.
+    request = urllib.request.Request(urllib.parse.urldefrag(url)[0], headers={'User-Agent': USER_AGENT})
     try:
-        with opener.open(request, timeout=DOWNLOAD_TIMEOUT) as response:
+        with opener.open(request, timeout=remaining()) as response:
             on_time()
             final = response.geturl() if hasattr(response, 'geturl') else url
             _check_url(final)
@@ -283,21 +302,25 @@ def _check_directory_size(data):
     limit, before zipfile allocates an object per record."""
     import struct
     bad = InstallError('The package is not a valid .zip file.')
-    end = -1
+    # Same end-record rules as zipfile._EndRecData: a comment-free record at the very
+    # end, else the last signature within the maximum comment distance.
     if len(data) >= 22 and data[-22:-18] == b'PK\x05\x06' and data[-2:] == b'\x00\x00':
         end = len(data) - 22
     else:
-        end = data.rfind(b'PK\x05\x06', max(0, len(data) - 65557))
+        end = data.rfind(b'PK\x05\x06', max(0, len(data) - 65558))
     if end < 0 or end + 22 > len(data):
         raise bad
     size, offset = struct.unpack_from('<LL', data, end + 12)
     stop = end
-    if end >= 20 and data[end - 20:end - 16] == b'PK\x06\x07':          # zip64 locator
-        where = struct.unpack_from('<Q', data, end - 12)[0]
-        if where + 56 > len(data) or data[where:where + 4] != b'PK\x06\x06':
+    # zipfile reads the zip64 record that sits immediately before the locator; the
+    # locator's own offset field is not used, so it is not used here either.
+    if end >= 76 and data[end - 20:end - 16] == b'PK\x06\x07':
+        disk, _where, disks = struct.unpack_from('<LQL', data, end - 16)
+        if disk != 0 or disks > 1:
             raise bad
-        size, offset = struct.unpack_from('<QQ', data, where + 40)
-        stop = where
+        if data[end - 76:end - 72] == b'PK\x06\x06':
+            size, offset = struct.unpack_from('<QQ', data, end - 76 + 40)
+            stop = end - 76
     start = stop - size
     if size < 0 or start < 0:
         raise bad
@@ -543,8 +566,15 @@ def recover(config):
             elif re.fullmatch(r'\.(staging|removed-[a-z][a-z0-9_-]{0,63})-[0-9a-f]{32}', name) and path.is_dir():
                 _remove_tree(path)
         for path in sorted(root.iterdir()):          # a record backup whose package backup is gone
-            if (re.fullmatch(r'\.old-[a-z][a-z0-9_-]{0,63}-[0-9a-f]{32}\.json', path.name)
-                    and not (root / path.name[:-5]).exists()):
+            alone = re.fullmatch(r'\.old-([a-z][a-z0-9_-]{0,63})-[0-9a-f]{32}\.json', path.name)
+            if not alone or (root / path.name[:-5]).exists() or path.is_symlink() or not path.is_file():
+                continue
+            record = record_path(config, alone.group(1))
+            package = root / alone.group(1)
+            if package.is_dir() and not package.is_symlink() and not record.exists():
+                # The package it describes never moved (or was already put back): give it its record.
+                _rename(path, record)
+            else:
                 path.unlink()
     except OSError as exc:
         raise InstallError('An interrupted plugin change could not be cleaned up (' + type(exc).__name__ + ').') from None

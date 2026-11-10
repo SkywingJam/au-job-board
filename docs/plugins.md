@@ -50,7 +50,7 @@ python -m jobs.cli --config config.yaml plugin uninstall example-plugin
 
 | Command | What it does |
 |---|---|
-| `plugin list [--json]` | One line per plugin: ID, version, origin (`builtin` or `installed`), status, and the reason when a plugin is incompatible. `--json` prints the same items as JSON. |
+| `plugin list [--json]` | One line per plugin: ID, version, origin (`builtin` or `installed`), status, and the reason when a plugin is incompatible. `--json` prints the same items as JSON. If an interrupted upgrade could not be repaired, it says so and exits 1, because the list may be missing that plugin. |
 | `plugin install SOURCE [--sha256 HEX] [--version V] [--yes]` | Installs a package that is not installed yet. |
 | `plugin upgrade SOURCE [--sha256 HEX] [--version V] [--yes]` | Replaces an installed package. The plugin ID in the package must already be installed. |
 | `plugin uninstall ID [--yes]` | Removes an installed package. A bundled plugin is refused with a message. If a later Job Board release bundles an ID you had installed, the bundled plugin is used and this command removes only the ignored installed copy. |
