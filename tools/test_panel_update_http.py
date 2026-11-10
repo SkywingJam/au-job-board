@@ -32,6 +32,12 @@ class FakeUpdates:
         return self.next
 
 
+class JoinedServer(panel.ThreadingHTTPServer):
+    # server_close() then waits for handler threads, so none still holds the
+    # SQLite file when the temporary directory is removed (Windows locks it).
+    daemon_threads = False
+
+
 class UpdateHTTPTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -43,7 +49,7 @@ class UpdateHTTPTests(unittest.TestCase):
                        "panel": {"host": "panel.internal"}}
         self.manager = FakeUpdates()
         handler = type("SyntheticHandler", (panel.Handler,), {"config": self.config})
-        self.server = panel.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.server = JoinedServer(("127.0.0.1", 0), handler)
         self.server.update_manager = self.manager
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()

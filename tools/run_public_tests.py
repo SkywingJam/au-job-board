@@ -202,7 +202,9 @@ def _kill_tree(proc: subprocess.Popen, force: bool) -> None:
             subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                            capture_output=True)
         else:
-            os.killpg(proc.pid, signal.SIGKILL if force else signal.SIGTERM)
+            # The soft pass sends SIGINT, as a terminal Ctrl-C did before the
+            # runner used sessions, so tests unwind and stop their own workers.
+            os.killpg(proc.pid, signal.SIGKILL if force else signal.SIGINT)
     except (OSError, ProcessLookupError):
         pass
 
