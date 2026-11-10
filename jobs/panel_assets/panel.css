@@ -21,6 +21,76 @@ body.plugin-display main,body.plugin-display.portrait main{padding:0}   /* map f
 body.portrait .toolbar:has(.display-switch) .search{flex:1 1 0;min-width:0}
 body.portrait .toolbar:has(.display-switch) .spacer{display:none}
 body.portrait .display-switch .fbtn{min-height:44px}
+/* 不在切换里的插件页面（对比）：整页，隐藏工具栏、筛选和侧栏，只有一个返回列表。 */
+body.plugin-solo .toolzone,body.plugin-solo #more-panel,body.plugin-solo #active-chips,body.plugin-solo .ctxbar,
+body.plugin-solo .sidebar-toggle,body.plugin-solo #plugin-sidebar{display:none!important}
+body.plugin-solo main{display:flex;flex-direction:column}
+body.plugin-solo #plugin-display-frame{flex:1 1 auto;height:auto;min-height:0}
+#plugin-page-back{display:none}
+body.plugin-solo #plugin-page-back{display:flex;align-items:center;flex:0 0 auto;width:100%;min-height:40px;text-align:left;padding:0 18px;border:0;border-bottom:1px solid var(--line);background:var(--surface);color:var(--accent);font:inherit;font-weight:600;cursor:pointer}
+body.plugin-solo.portrait #plugin-page-back{min-height:44px}
+#plugin-page-back:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* ---- 插件侧栏（核心绘制）--------------------------------------------------
+   宽屏：详情右侧的一栏，main 用 --sb-reserve 让出右边距（列表 / 详情 / 地图照常算宽）；
+   放不下时浮在详情右侧；竖屏是同一个开关打开的底部抽屉。iframe 是插件页面，只占内容区。 */
+.sidebar-toggle{display:none}
+body.has-sidebar .sidebar-toggle{display:inline-flex;position:relative}
+.sidebar-toggle[aria-expanded="true"]{background:var(--accent-tint);color:var(--accent-ink);border-color:var(--accent-line)}
+.sidebar-count{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);color:var(--on-fill);
+ font-size:11px;font-weight:700;line-height:18px;text-align:center;font-family:var(--mono)}
+.sidebar-toggle.pulse .sidebar-count{animation:sb-pulse .5s var(--ease,ease-out)}
+@keyframes sb-pulse{50%{transform:scale(1.25)}}
+body.handoff-dragging .sidebar-toggle{outline:2px dashed var(--accent);outline-offset:2px}
+.sidebar-toggle.over{background:var(--accent);color:var(--on-fill);border-color:var(--accent)}
+body.has-sidebar main{position:relative}
+.plugin-sidebar{display:none}
+body.sidebar-open .plugin-sidebar{display:flex;flex-direction:column;position:absolute;top:14px;right:20px;bottom:0;width:var(--sb-w,340px);z-index:8;
+ background:var(--surface);border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden}
+body.sidebar-docked main{padding-right:calc(20px + var(--sb-reserve,0px))}
+body.plugin-display.sidebar-docked main{padding-right:var(--sb-reserve,0px)}
+body.plugin-display.sidebar-open .plugin-sidebar{top:0;right:0;border-radius:0;border-width:0 0 0 1px}
+body.plugin-display.sidebar-docked.plugin-detail-open main>.layout,
+body.plugin-display.sidebar-docked.plugin-detail-open #plugin-detail-back{right:var(--sb-reserve,0px);width:auto}
+body.sidebar-float .plugin-sidebar{box-shadow:-8px 0 28px var(--shadow)}
+.sidebar-head{display:flex;align-items:center;gap:8px;flex:0 0 auto;min-height:40px;padding:0 6px 0 14px;border-bottom:1px solid var(--line-soft)}
+.sidebar-head b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-md)}
+.sidebar-close{border:0;width:36px;padding:0}
+.plugin-sidebar iframe{flex:1 1 auto;min-height:0;width:100%;border:0;display:block;background:var(--surface)}
+.sidebar-resize{position:absolute;left:0;top:0;bottom:0;width:8px;cursor:col-resize;touch-action:none;z-index:3}
+.sidebar-resize:hover,.sidebar-resize:focus-visible{background:var(--accent-line)}
+.sidebar-resize:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+body.resizing iframe{pointer-events:none}
+.plugin-sidebar>.sheet-grab{display:none}
+.sidebar-drop{display:none}
+body.handoff-dragging.sidebar-open .sidebar-drop{display:flex;align-items:center;justify-content:center;position:absolute;inset:0;z-index:4;padding:20px;text-align:center;
+ background:var(--accent-wash);color:var(--accent-ink);border:2px dashed var(--accent);border-radius:inherit;font-weight:600;opacity:.94}
+.sidebar-drop.over{background:var(--accent-tint);border-style:solid}
+.sidebar-scrim{display:none}
+/* 竖屏：底部抽屉；开关只留图标和数字 */
+/* The other top actions stay hidden; the toggle sits just left of the absolutely placed Filters button. */
+body.portrait.has-sidebar .top-actions{display:flex}
+body.portrait.has-sidebar .top-actions>:not(.sidebar-toggle){display:none}
+body.portrait.has-sidebar .sidebar-toggle{min-width:44px;height:44px;border:0;padding:0 8px;flex:0 0 auto;margin-right:var(--sb-toggle-gap,28px)}
+body.portrait .sidebar-toggle-label{display:none}
+body.portrait.sidebar-open .plugin-sidebar{position:fixed;top:auto;left:0;right:0;bottom:0;width:auto;height:min(82vh,680px);height:min(82dvh,680px);
+ z-index:245;border:0;border-radius:18px 18px 0 0;box-shadow:0 -8px 32px var(--shadow);padding-bottom:env(safe-area-inset-bottom)}
+body.portrait .plugin-sidebar>.sheet-grab{display:block}
+body.portrait .sidebar-resize{display:none}
+body.portrait .sidebar-close{width:44px;height:44px}
+body.portrait.sidebar-open .sidebar-scrim{display:block;position:fixed;inset:0;z-index:244;background:var(--scrim)}
+/* 详情操作栏、多选栏、卡片上的「加入」入口（核心绘制，文字来自插件登记） */
+.handoff-btn{min-height:40px;font-size:var(--fs-sm);font-weight:600;color:var(--accent-ink);white-space:nowrap}
+.handoff-btn.in{color:var(--good-ink);border-color:var(--line2)}
+body.portrait .handoff-btn{flex:1 1 0;min-width:0;min-height:44px;overflow:hidden;text-overflow:ellipsis}
+.selhandoff{order:3}
+body.portrait .selhandoff{order:5;margin-top:6px}
+.card-handoff{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;margin:-1px 0 0;padding:0;
+ border:1px solid var(--accent-line);border-radius:var(--r-ctl);background:var(--surface);color:var(--accent);cursor:pointer;visibility:hidden}
+.card-handoff.in{color:var(--good);border-color:var(--line2)}
+@media (hover:hover){.card:hover .card-handoff{visibility:visible}.card-handoff:hover{background:var(--accent-tint)}}
+.card:focus-visible .card-handoff,.card-handoff:focus-visible{visibility:visible}
+body.selecting .card-handoff{visibility:hidden}
+.list .card[draggable="true"]{-webkit-user-drag:element}
 /* ==========================================================================
    澳洲岗位面板 · 样式
    颜色全部走 CSS 变量：:root 是浅色，[data-theme=dark] 与「跟随系统且系统为深色」
@@ -501,7 +571,7 @@ body.portrait .selbar-msg{margin-top:6px}
 body.portrait .search{flex:1 1 100%;max-width:none;min-height:44px}
 body.portrait .search input{font-size:16px}
 body.portrait #primary-filters,body.portrait #tail-filters,body.portrait .more-btn,body.portrait a.clear{display:none}
-body.portrait .sheet-btn{display:inline-flex;position:absolute;top:8px;right:8px;min-height:44px;border:0;background:transparent;color:var(--ink)}
+body.portrait .sheet-btn{display:inline-flex;position:absolute;top:6px;right:8px;min-height:44px;border:0;background:transparent;color:var(--ink)}
 body.portrait .sheet-btn[aria-expanded="true"]{background:transparent;color:var(--ink)}
 body.portrait .chips{flex-wrap:nowrap;overflow-x:auto;padding:0 14px 10px;scrollbar-width:none}
 body.portrait .chips::-webkit-scrollbar{display:none}

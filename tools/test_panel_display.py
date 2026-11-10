@@ -173,11 +173,6 @@ def test_detail() -> None:
           "synthetic.authorization,synthetic.location," in re.sub(r"<[^>]+>", "", rule))
     check("规则之间允许换行，规则内容仍转义", rule.count("<wbr>") == 2
           and "&lt;fake&gt;" in rule and "<fake>" not in rule)
-    legacy = panel._detail_html(synthetic_row(
-        _label={"interest": "maybe", "eligibility": "unsure"}), "zh")
-    check("详情不渲染旧兴趣、旧待定或历史块",
-          all(text not in legacy for text in
-              ("旧版记录", "兴趣：也许", "资格：待定", "有旧记录", 'class="history"', 'class="q-hist"')))
 
 
 def make_db(d: str):

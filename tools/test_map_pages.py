@@ -15,6 +15,7 @@ from urllib.parse import urlencode, parse_qs
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+import temp_cleanup  # noqa: E402
 from jobs import db, labels, panel, panel_data, plugin_host, plugin_pages, skills
 
 
@@ -38,7 +39,7 @@ class MapPages(unittest.TestCase):
         self.patcher = patch.object(plugin_host, 'PLUGIN_ROOT', self.plugin_root)
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
-        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(temp_cleanup.cleanup, self.tmp)
         self.config = {'db_path': str(self.root / 'jobs.db'), 'skills_path': str(self.root / 'skills.yaml'),
                        'queries': ['Synthetic'], 'plugins': {'map': {'enabled': False}}}
         (self.root / 'skills.yaml').write_text('version: 1\nskills: []\n')
@@ -137,7 +138,9 @@ class MapPages(unittest.TestCase):
         self.assertEqual(member(first['snapshot_id'], second['items'][0]['uid'])[0], 404)
         self.assertEqual(member('unknown', first['items'][0]['uid'])[0], 410)
         store = self.server.page_snapshots.store
-        store.clock = lambda: max(item.created for item in store.items.values()) + store.ttl
+        # One second past the limit: (created + ttl) - created can round just below ttl
+        # when Windows' coarse monotonic clock gives both snapshots the same timestamp.
+        store.clock = lambda: max(item.created for item in store.items.values()) + store.ttl + 1
         self.assertEqual(member(first['snapshot_id'], first['items'][0]['uid'])[0], 410)
         store.max_snapshots = len(store.items)
         self.assertEqual(self.request('/api/plugin-view/map/jobs?view=all')[0], 429)

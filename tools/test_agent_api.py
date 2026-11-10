@@ -87,6 +87,108 @@ class AgentAPI(unittest.TestCase):
         self.assertNotIn('Access-Control-Allow-Origin', headers)
         self.assertEqual(headers['Cache-Control'], 'no-store')
 
+    def details(self, *uids, extra='', **kwargs):
+        query = '&'.join('uid=' + quote(u, safe='') for u in uids) + extra
+        return self.request('/api/v1/job-details?' + query, **kwargs)
+
+    def test_job_details_returns_full_records_in_request_order(self):
+        order = ['synthetic:c', 'synthetic:a', 'synthetic:b']
+        status, data, headers = self.details(*order)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(headers['Cache-Control'], 'no-store')
+        self.assertEqual(set(data), {'api_version', 'as_of', 'items'})
+        self.assertEqual(data['api_version'], 1)
+        self.assertEqual([i['uid'] for i in data['items']], order)
+        for item in data['items']:
+            single = self.request('/api/v1/jobs/' + quote(item['uid'], safe=''))[1]['item']
+            self.assertEqual(item, single)
+        a = data['items'][1]
+        self.assertTrue(a['description'].startswith('Handwritten synthetic full job description'))
+        self.assertEqual(a['human']['action'], 'applied')
+        self.assertIn('Synthetic group context', a['human']['note'])
+        self.assertIn('history', a)
+        self.assertNotIn('snapshot_id', data)
+        self.assertEqual(self.details('synthetic:a')[1]['items'], [a])
+
+    def test_job_details_unknown_uid_is_an_explicit_item(self):
+        status, data, _ = self.details('synthetic:missing')
+        self.assertEqual((status, data['items']), (200, [{'uid': 'synthetic:missing', 'error': 'job_not_found'}]))
+        status, data, _ = self.details('synthetic:missing', 'synthetic:b', 'other:gone', 'synthetic:a')
+        self.assertEqual(status, 200)
+        self.assertEqual([i['uid'] for i in data['items']],
+                         ['synthetic:missing', 'synthetic:b', 'other:gone', 'synthetic:a'])
+        self.assertEqual(data['items'][0], {'uid': 'synthetic:missing', 'error': 'job_not_found'})
+        self.assertEqual(data['items'][2], {'uid': 'other:gone', 'error': 'job_not_found'})
+        self.assertNotIn('error', data['items'][1])
+        self.assertEqual(data['items'][3]['uid'], 'synthetic:a')
+
+    def test_job_details_rejects_invalid_queries(self):
+        many = ['synthetic:u%d' % n for n in range(11)]
+        cases = {
+            'no query': '', 'zero uids': '?', 'empty uid': '?uid=', 'empty among valid': '?uid=synthetic%3Aa&uid=',
+            'eleven': '?' + '&'.join('uid=' + u for u in many),
+            'duplicate': '?uid=synthetic%3Aa&uid=synthetic%3Ab&uid=synthetic%3Aa',
+            'too long': '?uid=' + 'x' * 513, 'extra key': '?uid=synthetic%3Aa&snapshot_id=x',
+            'other key only': '?snapshot_id=x', 'misspelled key': '?uids=synthetic%3Aa',
+            'bad escape': '?uid=%ff',
+        }
+        for name, query in cases.items():
+            with self.subTest(name):
+                status, data, _ = self.request('/api/v1/job-details' + query)
+                self.assertEqual((status, data), (400, {'error': 'invalid_query'}))
+        self.assertEqual(self.request('/api/v1/job-details?uid=' + 'x' * 512)[0], 200)
+        ten = ['synthetic:u%d' % n for n in range(10)]
+        status, data, _ = self.details(*ten)
+        self.assertEqual((status, [i['uid'] for i in data['items']]), (200, ten))
+        # The documented bound holds even when every uid is the longest allowed.
+        longest = [str(n) * 512 for n in range(10)]
+        status, data, _ = self.details(*longest)
+        self.assertEqual((status, [i['uid'] for i in data['items']]), (200, longest))
+        # ... and when every character needs the longest percent-encoding (12 bytes).
+        widest = [chr(0x1F600 + n) * 512 for n in range(10)]
+        status, data, _ = self.details(*widest)
+        self.assertEqual((status, [i['uid'] for i in data['items']]), (200, widest))
+        self.assertEqual(self.request('/api/v1/job-details/?uid=synthetic%3Aa')[0], 404)
+        # The sibling route is neither shadowed nor does it shadow this one.
+        self.assertEqual(self.request('/api/v1/jobs/synthetic%3Aa')[1]['item']['uid'], 'synthetic:a')
+        self.assertEqual(self.request('/api/v1/jobs/job-details')[0], 404)
+
+    def test_job_details_auth_host_origin_and_methods(self):
+        path = '/api/v1/job-details?uid=synthetic%3Aa'
+        self.assertEqual(self.request(path, token=None)[0], 401)
+        self.assertEqual(self.request(path, token='wrong')[0], 401)
+        for headers in [{'Origin': 'http://evil.invalid'}, {'Origin': 'null'}, {'Host': 'evil.invalid'}]:
+            self.assertEqual(self.request(path, headers=headers)[0], 403)
+        for method in ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'TRACE']:
+            self.assertEqual(self.request(path, method=method)[0], 405)
+        self.assertEqual(self.request(path)[0], 200)
+
+    def test_job_details_store_nothing_write_nothing_and_stay_readonly(self):
+        first = self.first('?limit=1')
+        before_bytes = self.path.read_bytes()
+        count = len(self.store.items)
+        with patch('jobs.db.connect', side_effect=AssertionError('writer forbidden')), \
+                patch('jobs.run_state.latest', side_effect=AssertionError('repair forbidden')), \
+                patch.object(self.store, 'create', side_effect=AssertionError('snapshot forbidden')):
+            self.details('synthetic:a', 'synthetic:missing')
+            self.details('synthetic:a', 'synthetic:a')
+            self.details('synthetic:a', 'synthetic:b', 'synthetic:c')
+        self.assertEqual(len(self.store.items), count)
+        self.assertEqual(list(self.store.items), [first['snapshot_id']])
+        self.assertEqual(self.path.read_bytes(), before_bytes)
+        # One read-only connection and transaction serves every uid.
+        opened = []
+        original = api.read_connection
+        def tracking(path):
+            opened.append(original(path))
+            return opened[-1]
+        with patch.object(api, 'read_connection', tracking):
+            self.assertEqual(self.details('synthetic:a', 'synthetic:b', 'synthetic:c')[0], 200)
+        self.assertEqual(len(opened), 1)
+        with closing(sqlite3.connect(self.path)) as conn:
+            conn.execute('PRAGMA user_version=0'); conn.commit()
+        self.assertEqual(self.details('synthetic:a')[0], 503)
+
     def test_bind_host_rejects_source_wildcard_and_nonloopback_addresses(self):
         for container in (None, '', '0', 'true', '1'):
             with patch.dict(os.environ):
@@ -291,7 +393,7 @@ class AgentAPI(unittest.TestCase):
         self.assertIsNone(api._timestamp('0001-01-01T00:00:00+10:00'))
 
     def test_melbourne_day_boundaries_and_dst(self):
-        for day, hours in [('2026-10-04', 23), ('2026-04-05', 25), ('2026-10-22', 24)]:
+        for day, hours in [('2026-10-04', 23), ('2026-04-05', 25), ('2026-10-22', 24), ('2026-10-28', 24)]:
             with self.subTest(day=day):
                 start, end = api.day_window(day)
                 self.assertEqual((end-start).total_seconds(), hours*3600)

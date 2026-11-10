@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import temp_cleanup  # noqa: E402
 from jobs import db, labels, panel  # noqa: E402
 
 
@@ -49,7 +50,7 @@ class LocationHTTP(unittest.TestCase):
         self.server.server_close()
         self.thread.join()
         self.patch.stop()
-        self.temp.cleanup()
+        temp_cleanup.cleanup(self.temp)
 
     def request(self, method, url, data=None, origin=None):
         client = http.client.HTTPConnection("127.0.0.1", self.port)

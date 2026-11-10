@@ -16,7 +16,7 @@ import re
 import time
 from urllib.parse import quote
 
-from . import RunTimeout, labels, locations, panel_data, plugin_host, run_state, skills
+from . import RunTimeout, labels, location_query, locations, panel_data, plugin_host, report, run_state, skills
 from .agent_api import APIError, SnapshotStore, read_connection, utcnow
 from .config import db_path
 
@@ -24,13 +24,47 @@ MAX_ROWS = 20000
 MAX_ASSET = 8 * 1024 * 1024
 MAX_REFERENCE = 12 * 1024 * 1024
 MIN_REUSE_TTL = 120     # seconds a reused snapshot must still have left
+MAX_HANDED = 10
+MAX_UID = 512
+MAX_HANDED_BYTES = 4 * 1024 * 1024
 
 
 def require_page(config, plugin_id):
-    page = next((p for p in plugin_host.page_plugins(config) if p['id'] == plugin_id), None)
-    if page is None:
+    """The validated manifest of an authorized page or sidebar plugin."""
+    manifest = plugin_host.display_manifest(config, plugin_id)
+    if manifest is None:
         raise APIError('plugin_disabled_or_permission_required', 403)
-    return page
+    return manifest
+
+
+def _require_list(config, plugin_id):
+    """Query snapshots and reference files belong to the map profile only."""
+    manifest = require_page(config, plugin_id)
+    if plugin_host.handed(manifest):
+        raise APIError('permission_not_granted', 403)
+    return manifest
+
+
+def frame_entry(manifest, slot=None):
+    """Path under web/ for a frame slot; no slot keeps the top-level entry."""
+    if slot is None:
+        entry = manifest['entry']
+    elif slot in ('sidebar', 'page') and isinstance(manifest.get(slot), dict):
+        entry = manifest[slot]['entry']
+    else:
+        raise APIError('not_found', 404)
+    return entry.removeprefix('web/')
+
+
+def frame_csp(manifest, base):
+    """Frame CSP from the manifest profile: only declared network targets are
+    external origins, so a `network: none` plugin gets none."""
+    external = ''.join(f' https://{target}' for entry in manifest['permissions']['network']
+                       for target in entry['targets'])
+    return ("default-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts; "
+            f"script-src {base} blob:; style-src {base} 'unsafe-inline'; "
+            f"worker-src {base} blob: data:; connect-src {base}{external}; "
+            f"img-src {base}{external} data: blob:; font-src {base}{external}; frame-ancestors 'self'")
 
 
 def resource(config, plugin_id, relative):
@@ -58,7 +92,7 @@ def resource(config, plugin_id, relative):
 
 def reference(config, plugin_id, filename):
     """Verify public package bytes before decompression; never read private data."""
-    require_page(config, plugin_id)
+    _require_list(config, plugin_id)
     base = plugin_host.PLUGIN_ROOT / plugin_id / 'reference'
     if base.is_symlink():
         raise APIError('reference_unavailable', 503)
@@ -83,6 +117,84 @@ def reference(config, plugin_id, filename):
         return json.loads(decoded)
     except (ValueError, OSError, EOFError):
         raise APIError('reference_integrity', 503) from None
+
+
+def _summary(row, order, link):
+    """The declared `job_fields` DTO, shared by map snapshots and handed jobs."""
+    uid = row['uid']
+    return {
+        'uid': uid, 'group_id': row.get('dedupe_group') or uid,
+        'title': row.get('title') or '', 'company': row.get('company') or '',
+        'location_raw': row.get('location') or '',
+        'location_fact': locations.parse_listing(row.get('location')),
+        'salary': row.get('salary') or '', 'work_type': row.get('work_type') or '',
+        'listing_date': row.get('listing_date'), 'total_score': row.get('total_score'),
+        'priority': bool((row.get('_label') or {}).get('priority')),
+        'core_order': order,
+        'panel_url': link + '#' + quote(uid, safe=''),
+    }
+
+
+def revision(row):
+    """First 16 hex of sha256 over title, company, location, salary and description."""
+    text = json.dumps([row.get(k) or '' for k in ('title', 'company', 'location', 'salary', 'description')],
+                      ensure_ascii=False, separators=(',', ':'))
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
+
+
+def _handed_query(qs):
+    if set(qs) - {'uid', 'detail'} or qs.get('detail', ['1']) != ['1']:
+        raise APIError('invalid_query', 400)
+    uids = qs.get('uid') or []
+    if not 0 < len(uids) <= MAX_HANDED:
+        raise APIError('invalid_uid_count', 400)
+    if any(not uid or len(uid) > MAX_UID for uid in uids):
+        raise APIError('invalid_uid', 400)
+    if len(set(uids)) != len(uids):
+        raise APIError('duplicate_uid', 400)
+    return uids, 'detail' in qs
+
+
+def handed_jobs(config, plugin_id, qs):
+    """Jobs the user handed to a sidebar plugin, read in one read-only transaction.
+    Only the handed-jobs profile may call it; detail needs a declared `job_detail`."""
+    manifest = require_page(config, plugin_id)
+    if not plugin_host.handed(manifest):
+        raise APIError('permission_not_granted', 403)
+    uids, detail = _handed_query(qs)
+    if detail and 'job_detail' not in manifest['permissions']:
+        raise APIError('detail_not_granted', 403)
+    deadline = time.monotonic() + 12
+    link = panel_data._link('all')
+    with closing(read_connection(db_path(config))) as conn:
+        conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 10000)
+        # The same rows and decoration the agent API's job detail uses.
+        kept, excluded, legacy, index = report.load(conn, config, deduplicate=False)
+        wanted = set(uids)
+        found = {row['uid']: row for row in kept + excluded if row['uid'] in wanted}
+        items = []
+        for order, uid in enumerate(uids):
+            if uid not in found:
+                items.append({'uid': uid, 'missing': True})
+                continue
+            row = location_query.decorate(conn, found[uid], legacy, index, snippets=detail)
+            merged = row.get('_label') or {}
+            item = {**_summary(row, order, link), 'revision': revision(row),
+                    'human_labels': {'eligibility': merged.get('eligibility'),
+                                     'action': merged.get('action'),
+                                     'priority': bool(merged.get('priority'))}}
+            if detail:
+                item.update(description=row.get('description') or '', skills=list(row.get('skills') or []),
+                            tags=row.get('tags'), qualification=row.get('qualification'),
+                            eligibility_evidence={'rule_id': row.get('rule_id'), 'rule_kind': row.get('rule_kind'),
+                                                  'matched_text': row.get('matched_text'),
+                                                  'snippet': row.get('eligibility_snippet') or '',
+                                                  'cue': row.get('eligibility_cue') or ''})
+            items.append(item)
+    result = {'plugin_id': plugin_id, 'as_of': utcnow(), 'generation': run_state.generation(config), 'items': items}
+    if len(json.dumps(result, ensure_ascii=False).encode('utf-8')) > MAX_HANDED_BYTES:
+        raise APIError('response_too_large', 413)
+    return result
 
 
 def normalize(qs):
@@ -129,7 +241,7 @@ class PageSnapshots:
         """Returns (created_id_or_None, result). Re-entering the map, toggling
         List/Map or a frame reload reuses the live snapshot for the same query and
         result generation instead of exhausting the bounded store."""
-        require_page(config, plugin_id)
+        _require_list(config, plugin_id)
         view, filters = normalize(qs)
         with closing(read_connection(db_path(config))) as conn:
             label_version = labels.freeze_marker(conn).partition('|')[2]   # event id only
@@ -162,18 +274,7 @@ class PageSnapshots:
                 for order, row in enumerate(rows):
                     if order % 64 == 0:
                         check()
-                    uid = row['uid']
-                    records[uid] = {
-                        'uid': uid, 'group_id': row.get('dedupe_group') or uid,
-                        'title': row.get('title') or '', 'company': row.get('company') or '',
-                        'location_raw': row.get('location') or '',
-                        'location_fact': locations.parse_listing(row.get('location')),
-                        'salary': row.get('salary') or '', 'work_type': row.get('work_type') or '',
-                        'listing_date': row.get('listing_date'), 'total_score': row.get('total_score'),
-                        'priority': bool((row.get('_label') or {}).get('priority')),
-                        'core_order': order,
-                        'panel_url': panel_data._link(view, 0, filters, since) + '#' + quote(uid, safe=''),
-                    }
+                    records[row['uid']] = _summary(row, order, panel_data._link(view, 0, filters, since))
                 version = reference(config, plugin_id, 'index.json').get('reference_version')
                 return ({'plugin_id': plugin_id, 'as_of': utcnow(), 'view': view, 'query': {'view': view, 'filters': filters},
                          'count_unit': 'source_records' if view == 'excluded' else 'jobs',
@@ -197,7 +298,7 @@ class PageSnapshots:
         return item.snapshot_id, {**item.metadata, 'items': list(item.records.values()), 'total': len(item.order)}
 
     def membership(self, config, plugin_id, snapshot_id, uid):
-        require_page(config, plugin_id)
+        _require_list(config, plugin_id)
         item = self.store.get(snapshot_id)
         if item.metadata.get('plugin_id') != plugin_id or uid not in item.records:
             raise APIError('source_not_in_snapshot', 404)

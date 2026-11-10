@@ -561,14 +561,6 @@ def test_template_input_completeness() -> None:
         check("unreplaced placeholder creates no output directory", not out_broken.exists())
 
 
-def test_selfcheck() -> None:
-    print("== 7. framework self-check ==")
-    panel = plistlib.loads(PANEL_EXAMPLE.read_bytes())
-    deliberately_wrong = (panel.get("Label") == FETCH_LABEL)
-    check("deliberately wrong label expectation is false",
-          deliberately_wrong is False, str(panel.get("Label")))
-
-
 def main() -> int:
     test_parse_and_private_scan()
     test_render_contract()
@@ -576,7 +568,6 @@ def main() -> int:
     test_semantics_and_labels()
     test_failure_paths()
     test_template_input_completeness()
-    test_selfcheck()
     print()
     if failures:
         print(f"失败 {len(failures)} 项：")

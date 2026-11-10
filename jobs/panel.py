@@ -191,10 +191,13 @@ class Handler(BaseHTTPRequestHandler):
             requested_display = (qs.get('display') or ['list'])[0]
             from . import plugin_host
             pages = plugin_host.page_plugins(config)
+            # Any authorized page resolves, including pages outside the List/Map switch.
             display = requested_display if any(p['id'] == requested_display for p in pages) else 'list'
             page = render_page(conn, config, view, offset, limit, started, filters,
                                lang, theme, i18n.lang_pref(self.headers.get("Cookie")),
-                               display=display, display_pages=pages)
+                               display=display, display_pages=pages,
+                               sidebars=plugin_host.sidebar_plugins(config),
+                               agent_access='on' if getattr(self.server, 'mcp_running', False) else 'off')
             self._send(page.encode("utf-8"), 200, "text/html; charset=utf-8", started)
         except ValueError as exc:
             self._send(str(exc).encode(), 400, "text/plain; charset=utf-8", started)
@@ -321,10 +324,12 @@ class Handler(BaseHTTPRequestHandler):
                     or not self._same_origin(public_frame_asset=public)):
                 raise APIError('forbidden', 403)
             config = self._plugin_config()
-            plugin_pages.require_page(config, plugin_id)
+            manifest = plugin_pages.require_page(config, plugin_id)
             if public:
                 if parts == ['plugins', plugin_id, 'frame']:
-                    relative = 'index.html'
+                    if len(qs.get('slot', [''])) != 1:
+                        raise APIError('not_found', 404)
+                    relative = plugin_pages.frame_entry(manifest, (qs.get('slot') or [None])[0])
                 elif len(parts) >= 4 and parts[2] == 'assets':
                     relative = '/'.join(parts[3:])
                 else:
@@ -338,11 +343,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise APIError('forbidden', 403)
                 name = f'[{host.hostname}]' if ':' in host.hostname else host.hostname
                 base = f'http://{name}:{host.port or 80}/plugins/{plugin_id}/'
-                tiles = 'https://tiles.openfreemap.org'
-                csp = ("default-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts; "
-                       f"script-src {base} blob:; style-src {base} 'unsafe-inline'; "
-                       f"worker-src {base} blob: data:; connect-src {base} {tiles}; "
-                       f"img-src {base} {tiles} data: blob:; font-src {base} {tiles}; frame-ancestors 'self'")
+                csp = plugin_pages.frame_csp(manifest, base)
                 self._send(body, 200, mime, started, [('Access-Control-Allow-Origin', '*'),
                     ('Referrer-Policy', 'origin'), ('X-Content-Type-Options', 'nosniff'),
                     ('Content-Security-Policy', csp)])
@@ -354,6 +355,8 @@ class Handler(BaseHTTPRequestHandler):
                 if set(qs) != {'file'} or len(qs['file']) != 1:
                     raise APIError('invalid_reference', 400)
                 result = plugin_pages.reference(config, plugin_id, qs['file'][0])
+            elif operation == 'handed':
+                result = plugin_pages.handed_jobs(config, plugin_id, qs)
             else:
                 with _PAGE_STORE_LOCK:
                     if not hasattr(self.server, 'page_snapshots'):
@@ -642,6 +645,8 @@ def serve(config: dict, config_path=None, rules_path=None, skills_path=None) -> 
         httpd.config_editor = ConfigEditor(config, config_path, rules_path)
         from .mcp_http import start
         mcp = start(config, httpd)
+        # Page context reports agent access only when this process runs the HTTP MCP listener.
+        httpd.mcp_running = mcp is not None
         httpd.update_manager = UpdateManager(config, config_path, rules_path=rules_path,
                                             skills_path=skills_path)
     except BaseException:

@@ -1,5 +1,7 @@
 # Plugins
 
+Plugin authors and host contributors: the complete list of what a plugin may declare, read and do is in [plugin-interface.md](plugin-interface.md).
+
 Plugins are optional and disabled by default. Settings > Plugins shows each installed plugin's purpose and permission review. To enable one, read the full review and explicitly accept it. Setting `plugins.sponsorship.enabled: true` alone does not grant permission. Existing enabled configurations need the same review. Changes take effect on the next relevant run. Disabling hides results but keeps both the grant and existing files; revoke removes the grant and disables the plugin.
 
 The local CLI provides the same review and grant store:
@@ -100,3 +102,90 @@ history. Frozen membership does not freeze core detail: opening a row reads the
 current core job. Reference packages use an index of bounded gzip files with
 SHA-256 hashes. See [map provenance](../plugins/map/reference/README.md) and
 [plugin use and dependency provenance](../plugins/map/README.md).
+
+
+## Sidebar plugins and handed jobs
+
+The optional Workspace plugin uses a second host API 2 permission profile,
+"handed jobs". It registers a `sidebar` and a `page`, declares
+`network: "none"` and reads only the jobs the user hands to it, at most ten.
+It never receives the result list. The exact profile, with or without
+`job_detail`, is whitelisted in `jobs/plugin_host.py`; any other combination is
+rejected, and the map profile still rejects `sidebar`, `switch`, `job_scope`
+and `job_detail`.
+
+Both registrations are structural. `sidebar` has `id` (the plugin ID), bilingual
+`label` and `handoff_label` (at most 32 characters each), `entry: web/index.html`
+and an optional core icon. `page` has `entry: web/compare.html` and an optional
+`switch` boolean (default `false`). Core icons are `map`, `workspace` and
+`compare`. Icons stay out of the consent fingerprint; `sidebar` and `page`
+otherwise join it. A manifest without `sidebar` hashes exactly as before, so the
+existing Map and Sponsorship grants stay valid (the regression test pins both).
+
+`plugin_host.page_plugins()` items carry `switch`: `true` for map pages, the
+manifest value for handed pages. Only switch pages belong in the toolbar
+List/Map switch. `?display=<id>` resolves for every authorized page, so the
+compare page opens without appearing in the switch.
+`plugin_host.sidebar_plugins()` lists `{id, label, handoff_label, icon}` for
+enabled and granted sidebar plugins. Both are empty when no plugin is
+configured, in demo mode, or when the plugin is disabled, ungranted or invalid.
+The page context reports `agent_access: "on"` only when this panel process runs
+its HTTP MCP listener.
+
+`GET /plugins/<id>/frame?slot=sidebar|page` serves that slot's registered entry;
+without `slot` the frame keeps the top-level entry. The frame CSP is built from
+the manifest profile: only declared network targets become external origins. A
+`network: "none"` plugin gets none, and the map CSP is unchanged.
+
+`GET /api/plugin-view/<id>/handed?uid=…&uid=…[&detail=1]` is the only data route
+for this profile. It takes 1 to 10 distinct UIDs of at most 512 characters each,
+and no other parameters. It reads all of them in one read-only transaction,
+using the agent API's row loading and decoration, and answers in request order:
+
+```json
+{"plugin_id": "workspace", "as_of": "…", "generation": "…",
+ "items": [{"uid": "…", "missing": true}, {…summary…}]}
+```
+
+A summary has the `PAGE_JOB_FIELDS` fields (`core_order` is the position in the
+request), `revision` and `human_labels`. `revision` is the first 16 hex digits of
+SHA-256 over the JSON array `[title, company, location, salary, description]`.
+`human_labels` is `{eligibility, action, priority}`: the effective group values,
+never the note text. With `detail=1`, which requires `job_detail` in the
+manifest, items add `description`, `skills`, `tags`, `qualification` (the same
+object the agent API returns) and `eligibility_evidence`
+`{rule_id, rule_kind, matched_text, snippet, cue}`. Excluded jobs are found like
+in the agent API; a UID absent from the database is `missing`.
+
+Errors are explicit: `invalid_query`, `invalid_uid_count`, `invalid_uid` and
+`duplicate_uid` return 400. `detail_not_granted` returns 403. A response over
+4 MiB returns 413 `response_too_large`. Map pages get 403
+`permission_not_granted` on `handed`, and handed plugins get the same on
+`jobs`, `member` and `reference`. The route adds no write path. Labels, notes,
+history and vocabulary are only read.
+
+The browser bridge keeps one instance per frame (own channel, request IDs and
+limits), so a map page and a sidebar from two plugins run side by side.
+Operations are dispatched by profile and slot; the map operations above are not
+available to a handed-profile frame and the reverse. Handed-profile operations:
+
+| Operation | Slots | Effect |
+|---|---|---|
+| `handed_jobs {uids, detail}` | sidebar, page | Reads the `handed` route; every UID must be in the host-owned list |
+| `remove_handed {uids}`, `clear_handed {}` | sidebar, page / sidebar | Shrinks the host-owned list |
+| `open_job {uid}` | sidebar, page | Opens a listed job in the core reader through the ordinary navigation guards |
+| `copy_text {text}` | sidebar, page | Core copies at most 2,000 characters and reports `{copied, fallback}` honestly; the fallback is the core manual-copy dialog |
+| `open_page {}` | sidebar | Opens the plugin's own page; "back" returns to where it was opened from |
+| `navigate_list {}` | page | Returns from the page |
+| `dismiss {}` | sidebar | Closes the phone sheet (keys pressed inside the frame never reach the board) |
+| `save_state {state}` | sidebar, page | Stores at most 4 KiB of plugin UI state in this browser and reports `{ok}` |
+
+The list of handed jobs (`jobs.plugin.handed:<id>`, at most ten) is owned and
+written only by core, in this browser's local storage. Core tells the frames
+about it with `jobs-plugin-handed` (also after a change in another tab) and tells
+the sidebar which job is open with `jobs-plugin-current` `{uid, title, company}`.
+That current-job notice is the only data about a job the user has not handed
+over, and the permission review says so. A handed-profile frame's context is a
+fixed set of fields without the current view, filters or search text. The only writes these operations make
+are the clipboard copy and the two browser-storage keys; none reaches the
+database, labels or notes, and no operation takes a URL.

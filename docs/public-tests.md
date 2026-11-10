@@ -10,8 +10,8 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 53 checks: 46 Python tests
-plus seven Node behavior tests.
+be collected by accident. The entry currently has 57 checks: 48 Python tests
+plus nine Node behavior tests.
 
 Run it from the project root with the project interpreter:
 
@@ -21,23 +21,38 @@ Run it from the project root with the project interpreter:
 ```
 
 The optional MCP adapter has two opt-in integration entries:
-`python tools/run_public_tests.py --with-mcp` (55 entries on macOS).
+`python tools/run_public_tests.py --with-mcp` (59 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default local command keeps
-53 entries. Release CI installs the optional SDK and runs the platform-applicable inventory.
+57 entries. Release CI installs the optional SDK and runs the platform-applicable inventory.
 See [MCP](mcp.md).
 
-It prints one line per test with the command, the exit status and the elapsed
-time, then a summary. It exits non-zero if any applicable test fails. If a
-required test file or the Node runtime is missing it reports a failure instead
-of silently skipping it. The macOS LaunchAgent test is shown as "not
-applicable" on a non-macOS system.
+Entries run concurrently: `--jobs N` sets the worker count (default
+`min(4, CPU count)`; `--jobs 1` runs them one after another in inventory order
+with live output). Each entry's output is buffered and printed as one block
+when it finishes, followed by a results list in inventory order and a summary.
+A few entries are never run beside another one; they run alone, after the
+parallel group (`--list` marks them):
+
+| Entry | Why it runs alone |
+|---|---|
+| `tools/test_mcp_http.py` | Reserves a panel port and relies on "panel port + 1" staying free between its probe and the real bind. |
+| `tools/test_demo.py` | Compares a snapshot of every file in the checkout before and after the demo run. |
+
+Each entry still has its own pass/fail result; the runner exits non-zero if
+any applicable entry fails. Interrupting the runner (Ctrl-C or SIGTERM) stops
+every running test process and its children. If a required test file or the
+Node runtime is missing it reports a failure instead of silently skipping it.
+The macOS LaunchAgent test is shown as "not applicable" on a non-macOS system.
+Tests must keep to their own temporary directories and ephemeral ports so they
+stay safe to run concurrently; an entry that cannot should be added to the
+serial group in the runner.
 
 ## Requirements
 
 - **Python 3.12** with the runtime dependencies:
   `python -m pip install -r requirements.txt`.
-- **Node.js 24.21.0** for the seven panel behavior tests. Node is only
+- **Node.js 24.21.0** for the nine panel behavior tests. Node is only
   needed to run the full public suite. It is **not** part of the product
   installation, the panel does not depend on it at runtime, and a normal
   install does not need it.
@@ -89,7 +104,7 @@ nothing in the suite fetches listings.
 | `tools/test_eligibility_profile.py` | Eligibility profile parsing, validation and the read-only command | all |
 | `tools/test_labels_notes.py` | Manual labels and notes | all |
 | `tools/test_panel_logic.py` | Panel core logic | all |
-| `tools/test_panel_i18n.py` | Panel English / Chinese text | all |
+| `tools/test_panel_i18n.py` | Panel English / Chinese text: key parity and matching `{placeholders}` across languages | all |
 | `tools/test_panel_stats_http.py` | Read-only header-count endpoint (same counts as the page, same-origin/host checks, no write path) and the rendered hooks for detail navigation, the mobile label sheet, the filter drawer and skill candidates | all |
 | `tools/test_panel_multiselect.py` | Panel multi-select bulk marking: same-origin `POST /api/labels/batch` (independent of the token API write gate), source `panel`, absolute assignment, no-op repeats, group sharing, 1–100 items, strict JSON and size limits, whole-batch rejection with no partial write, Host/Origin rejection, database failure rollback and retry, concurrent single/batch writes, and the rendered checkbox circle with its SVG tick, bulk bar with the "Mark as…" menu (disabled until cards are selected) and untouched search row in both languages | all |
 | `tools/test_panel_display.py` | Panel display layer: card/detail keep every score, salary and label signal (moved, not removed), `render.tags_for` output for report/CSV/search is unchanged, Display menu option order, update confirmation, settings sections | all |
@@ -144,6 +159,7 @@ Windows-exit cases are explicitly skipped on macOS.
 
 | Test | Why it is excluded |
 |---|---|
+| `tools/test_workspace_frontend.mjs` | Opt-in synthetic browser checks of the Workspace sidebar and compare frames against a mock host. Same Playwright/Chromium requirements; run `node tools/test_workspace_frontend.mjs`. |
 | `tools/test_map_frontend.mjs` | Opt-in synthetic browser journeys. Requires a maintainer Playwright installation and Chromium; run `TEST_MODULE_CORS=1 node tools/test_map_frontend.mjs` with `CHROMIUM_PATH` and `PLAYWRIGHT_MODULE` when needed. Basemap networking is blocked. |
 | `tools/build_map_reference.py` | Maintainer-only pinned ABS package rebuild, with GIS tooling and a public source ZIP cached outside the checkout. |
 | `tools/test_public_snapshot.py` | It tests the maintainer public-snapshot planner, not the installed product. It is internal release tooling, so it does not belong in a user-facing public suite. |

@@ -214,7 +214,7 @@ Not verified:
 | [Fetch settings and updates](docs/manual-updates.md) | Editable next-run configuration and background updates from the panel |
 | [Locations and records](docs/location-workflow.md) | Representative choice, offline location search and group-level records |
 | [Agent API](docs/agent-api.md) | Authenticated loopback reads (read-only by default), stable pagination, an external daily-report client and an opt-in batch label write |
-| [Optional MCP](docs/mcp.md) | Four read-only tools for MCP clients, started with the panel; one opt-in batch label tool |
+| [Optional MCP](docs/mcp.md) | Six read-only tools for MCP clients, started with the panel; one opt-in batch label tool |
 | [Optional Docker](docs/docker.md) | Published GHCR or local image, Compose, persistent volumes and backup |
 | [Configuration](docs/public-configuration.md) | Config file, paths, sources, panel settings |
 | [Rule profiles](docs/legacy-rule-profiles.md) | The six profiles, per-rule switches, applying a change |

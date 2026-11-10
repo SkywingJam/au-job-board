@@ -36,10 +36,12 @@ _EMPTY = {'badges': [], 'sections': []}
 SPONSOR_NETWORK = [{'purpose': 'sponsorship_reference', 'timing': 'after_fetch',
                     'targets': ['www.abf.gov.au', 'www.asx.com.au', 'data.gov.au'],
                     'request_data': 'no_job_data'}]
-PAGE_ICONS = ('map',)   # display-switch icons the core draws; plugins supply no markup
+PAGE_ICONS = ('map', 'workspace', 'compare')   # icons the core draws; plugins supply no markup
 PAGE_JOB_FIELDS = ['uid', 'group_id', 'title', 'company', 'location_raw',
                    'location_fact', 'salary', 'work_type', 'listing_date',
                    'total_score', 'priority', 'core_order', 'panel_url']
+HANDED_JOB_DETAIL = ['description', 'skills', 'tags', 'qualification',
+                     'eligibility_evidence', 'human_labels']
 MAP_NETWORK = [{'purpose': 'map_tiles', 'timing': 'view_open',
                 'targets': ['tiles.openfreemap.org'],
                 'request_data': 'tile_coordinates_and_browser_metadata'}]
@@ -102,14 +104,24 @@ def _manifest(path, plugin_id):
     return value
 
 
+def _label(value, limit=32):
+    return (isinstance(value, dict) and set(value) == {'zh', 'en'}
+            and all(isinstance(v, str) and 0 < len(v) <= limit for v in value.values()))
+
+
+def _registration(value, plugin_id, entry, keys, required=('id', 'label', 'entry')):
+    return (isinstance(value, dict) and set(required) <= set(value) <= set(keys)
+            and value.get('icon', 'map') in PAGE_ICONS and value['id'] == plugin_id
+            and value['entry'] == entry and _label(value['label']))
+
+
 def _page_manifest(value):
-    """Structured, front-end-only pages. Never imports installed Python code."""
+    """Structured, front-end-only pages. Never imports installed Python code.
+    Two exact permission profiles exist: the map page and handed jobs."""
+    if value.get('network') == 'none' or 'sidebar' in value:
+        return _handed_manifest(value)
     page = value.get('page')
-    if (not isinstance(page, dict) or not {'id', 'label', 'entry'} <= set(page) <= {'id', 'label', 'entry', 'icon'}
-            or page.get('icon', 'map') not in PAGE_ICONS
-            or page['id'] != value['id'] or page['entry'] != 'web/index.html'
-            or not isinstance(page['label'], dict) or set(page['label']) != {'zh', 'en'}
-            or not all(isinstance(v, str) and 0 < len(v) <= 32 for v in page['label'].values())):
+    if not _registration(page, value['id'], 'web/index.html', ('id', 'label', 'entry', 'icon')):
         raise ValueError('invalid page')
     if (value.get('entry') != page['entry'] or value.get('hooks') != []
             or value.get('network') != 'view_open' or value.get('display') is not True
@@ -123,12 +135,44 @@ def _page_manifest(value):
     return value
 
 
+def _handed_manifest(value):
+    """A sidebar that reads only jobs the user handed to it, plus a page."""
+    sidebar, page = value.get('sidebar'), value.get('page')
+    if (not _registration(sidebar, value['id'], 'web/index.html',
+                          ('id', 'label', 'entry', 'icon', 'handoff_label'),
+                          ('id', 'label', 'entry', 'handoff_label'))
+            or not _label(sidebar['handoff_label'])):
+        raise ValueError('invalid sidebar')
+    if (not _registration(page, value['id'], 'web/compare.html', ('id', 'label', 'entry', 'icon', 'switch'))
+            or not isinstance(page.get('switch', False), bool)):
+        raise ValueError('invalid page')
+    if (value.get('entry') != sidebar['entry'] or value.get('hooks') != []
+            or value.get('network') != 'none' or value.get('display') is not True
+            or value.get('i18n') != ['zh', 'en']):
+        raise ValueError('invalid page capabilities')
+    permissions = value.get('permissions')
+    base = {'job_fields': PAGE_JOB_FIELDS, 'job_scope': 'handed', 'files': [], 'network': [],
+            'execution': ['browser_frame'], 'display': ['sidebar', 'page', 'handoff']}
+    if permissions not in (base, {**base, 'job_detail': HANDED_JOB_DETAIL}):
+        raise ValueError('unknown page permissions')
+    return value
+
+
+def handed(manifest):
+    """True for the handed-jobs profile (sidebar + page, no list access)."""
+    return (manifest.get('compatibility') == {'host_api': 2}
+            and (manifest.get('permissions') or {}).get('job_scope') == 'handed')
+
+
 def fingerprint(manifest):
     scope = {key: manifest.get(key) for key in ('id', 'hooks', 'network', 'display', 'permissions')}
     if manifest.get('compatibility') == {'host_api': 2}:
-        scope.update({key: manifest.get(key) for key in ('compatibility', 'entry', 'page')})
-        if isinstance(scope['page'], dict):   # the display icon is cosmetic, not a permission
-            scope['page'] = {k: v for k, v in scope['page'].items() if k != 'icon'}
+        # `sidebar` only joins the scope when declared, so map fingerprints are unchanged.
+        keys = ('compatibility', 'entry', 'page') + (('sidebar',) if 'sidebar' in manifest else ())
+        scope.update({key: manifest.get(key) for key in keys})
+        for key in ('page', 'sidebar'):   # display icons are cosmetic, not permissions
+            if isinstance(scope.get(key), dict):
+                scope[key] = {k: v for k, v in scope[key].items() if k != 'icon'}
     return hashlib.sha256(json.dumps(scope, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
 
 
@@ -146,6 +190,9 @@ def consent(config, manifest):
     except Exception:
         previous = None
     status = 'granted' if previous == current else ('changed' if previous else 'required')
+    if handed(manifest):
+        return {'status': status, 'fingerprint': current,
+                'permissions': _handed_consent(manifest), 'limits': _handed_limits()}
     if manifest.get('compatibility') == {'host_api': 2}:
         entries = [
             ('identity', '插件来源', 'Plugin source',
@@ -190,6 +237,46 @@ def consent(config, manifest):
             'permissions': [{'id': i, 'title': {'zh': z, 'en': e}, 'description': {'zh': dz, 'en': de}} for i, z, e, dz, de in entries],
             'limits': {'zh': '宿主限制常规 Python 文件访问：可读插件代码、资料、临时目录和 Python 运行库，只可写资料及临时目录。插件不能直接联网或启动外部程序；已授权的公开资料下载由宿主完成。这些限制适用于可信 Python 插件，不能安全运行恶意代码。',
                        'en': 'The host restricts ordinary Python file access: plugins can read their code, data, temporary files and Python libraries, and write only data and temporary files. Direct networking and external programs are blocked; the host performs approved public downloads. These limits are for trusted Python plugins, not hostile code.'}}
+
+
+def _handed_consent(manifest):
+    detail = 'job_detail' in manifest['permissions']
+    entries = [
+        ('identity', '插件来源', 'Plugin source',
+         '请只安装来自可信维护者的插件。', 'Only install plugins from maintainers you trust.'),
+        ('jobs', '只读取你放进侧栏的岗位', 'Reads only jobs you put in the sidebar',
+         ('只有你亲手放进侧栏的岗位才会被读取，最多 10 个。会读取标题、公司、地点、薪资、工作类型、发布日期、匹配分和星标，'
+          '还会读取岗位正文、技能、规则判断结果和你的标注状态（比如资格、处理进度和星标）。不读取备注内容、历史记录、简历或账号信息。其他岗位只有一个例外：侧栏会收到你正在查看的那个岗位的编号、标题和公司，用来提示它是否已在侧栏里。'
+          if detail else
+          '只有你亲手放进侧栏的岗位才会被读取，最多 10 个。只读取标题、公司、地点、薪资、工作类型、发布日期、匹配分、星标和你的标注状态。'
+          '不读取岗位正文、备注内容、历史记录、简历或账号信息。其他岗位只有一个例外：侧栏会收到你正在查看的那个岗位的编号、标题和公司，用来提示它是否已在侧栏里。'),
+         ('It only reads jobs you put in the sidebar yourself, up to 10. It reads their title, company, location, salary, work type, '
+          'listing date, score and star, plus the full job description, skills, rule results and your label states (such as eligibility, '
+          'progress and star). It never reads note text, history, your CV or account details, and nothing else from other jobs, with one exception: the sidebar is told the ID, title and company of the job you are currently viewing, so it can show whether that job is already in the sidebar.'
+          if detail else
+          'It only reads jobs you put in the sidebar yourself, up to 10: their title, company, location, salary, work type, listing date, '
+          'score, star and your label states. It never reads job descriptions, note text, history, your CV or account details, and nothing else from other jobs, with one exception: the sidebar is told the ID, title and company of the job you are currently viewing, so it can show whether that job is already in the sidebar.')),
+        ('files', '不使用文件', 'No files',
+         '插件不带数据文件，也读不到你的文件。侧栏里的岗位和插件设置只记在这个浏览器里。',
+         'The plugin ships no data files and cannot read your files. The jobs in the sidebar and its settings are only kept in this browser.'),
+        ('network', '不联网', 'No network',
+         '插件不能连接任何外部网站。', 'The plugin cannot connect to any outside website.'),
+        ('execution', '独立运行', 'Runs separately',
+         ('侧栏和对比页各在看板中一块独立区域里运行，只能拿到上面的岗位资料，或请看板打开某个岗位。它不能修改岗位、标注或备注。'
+          '它生成的给 agent 的指令只包含岗位编号，不含岗位内容。'),
+         ('The sidebar and the compare page each run in a separate area of the board. They can only get the job data above or ask '
+          'the board to open a job. They cannot change jobs, labels or notes. The instruction it writes for an agent contains only job IDs, no job content.')),
+        ('display', '侧栏、加入按钮和对比页', 'Sidebar, add action and compare page',
+         '在看板旁加入一个侧栏，在岗位上加入“加入”操作，并加入一个对比页。它不会改变看板的筛选、排序、匹配分或你的标注。',
+         'Adds a sidebar beside the board, an “add” action on jobs and a compare page. It never changes the board’s filters, sorting, scores or your labels.'),
+    ]
+    return [{'id': i, 'title': {'zh': z, 'en': e}, 'description': {'zh': dz, 'en': de}}
+            for i, z, e, dz, de in entries]
+
+
+def _handed_limits():
+    return {'zh': '请只使用可信来源的插件。侧栏和对比页在独立区域里运行，不能联网，读不到你的文件，也改不了看板里的数据。但这些限制不能完全防住恶意插件，比如它仍可能让这块区域跳转到别的网页，所以请不要安装来源不明的插件。',
+            'en': 'Only use plugins you trust. The sidebar and compare page are kept in separate areas with no network access; they cannot read your files or change data on the board. These limits are not airtight: a plugin could still send its own area to another web page, so never install a plugin from a source you do not trust.'}
 
 
 def grant(config, manifest, expected, channel):
@@ -291,24 +378,48 @@ def list_plugins(config: dict) -> list[dict]:
     return result
 
 
-def page_plugins(config):
-    """Only authorized, compatible display registrations; disabled path is inert."""
+def _display_manifests(config):
+    """(id, manifest) for authorized, compatible host API 2 plugins; disabled path is inert."""
     if not _configured(config) or 'demo' in config:
         return []
-    pages = []
+    found = []
     for item in list_plugins(config):
         if item['status'] != 'enabled':
             continue
         try:
             manifest = _manifest(PLUGIN_ROOT / item['id'], item['id'])
             if manifest.get('compatibility') == {'host_api': 2}:
-                pages.append({'id': item['id'], 'label': manifest['page']['label'],
-                              'icon': manifest['page'].get('icon')})
+                found.append((item['id'], manifest))
         except RunTimeout:
             raise
         except (OSError, ValueError, TypeError):
             continue
-    return pages
+    return found
+
+
+def display_manifest(config, plugin_id):
+    """The validated manifest of an authorized host API 2 plugin, else None."""
+    return next((m for i, m in _display_manifests(config) if i == plugin_id), None)
+
+
+def _page_item(plugin_id, manifest):
+    page = manifest['page']
+    # Map pages are List/Map switch pages; handed pages only when they say so.
+    switch = page.get('switch', False) if handed(manifest) else True
+    return {'id': plugin_id, 'label': page['label'], 'icon': page.get('icon'), 'switch': switch}
+
+
+def page_plugins(config):
+    """Only authorized, compatible display registrations; disabled path is inert.
+    Only items with `switch` belong in the toolbar List/Map switch."""
+    return [_page_item(i, m) for i, m in _display_manifests(config)]
+
+
+def sidebar_plugins(config):
+    """Authorized sidebar registrations: [{id, label, handoff_label, icon}]."""
+    return [{'id': i, 'label': m['sidebar']['label'], 'handoff_label': m['sidebar']['handoff_label'],
+             'icon': m['sidebar'].get('icon')}
+            for i, m in _display_manifests(config) if handed(m)]
 
 
 def _latest(config):

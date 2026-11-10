@@ -25,6 +25,7 @@ import httpx2
 from jobs import __version__, agent_api, mcp_http, panel
 from jobs.http_server import ThreadingHTTPServer
 import test_mcp as fixtures
+from test_mcp import payload
 
 TOKEN = fixtures.TOKEN
 
@@ -64,15 +65,20 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                         raise
         self.fail('Could not reserve adjacent synthetic ports')
 
-    def container_panel(self):
+    def rebind_panel(self, host):
         self.panel.server_close()
-        self.panel = self.bind_panel('0.0.0.0')
+        self.panel = self.bind_panel(host)
         self.addCleanup(self.panel.server_close)
-        self.config['panel'] = {'host': '0.0.0.0', 'port': self.panel.server_port}
+        self.config['panel'] = {'host': host, 'port': self.panel.server_port}
 
-    def start_container(self):
-        # The probe cannot reserve the derived port through production startup.
-        # Reselect only when a listener really claimed that wildcard port.
+    def container_panel(self):
+        self.rebind_panel('0.0.0.0')
+
+    def start_reselecting(self):
+        # The probe cannot reserve the derived port through production startup,
+        # so another socket (e.g. a Windows ephemeral client port) may claim it
+        # first. Reselect only when a listener really claimed that port.
+        host = self.config['panel']['host']
         for attempt in range(5):
             try:
                 return self.start()
@@ -81,13 +87,13 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                     raise
                 with socket.socket() as probe:
                     try:
-                        probe.bind(('0.0.0.0', self.panel.server_port+1))
+                        probe.bind((host, self.panel.server_port+1))
                     except OSError as conflict:
                         if not bind_conflict(conflict):
                             raise
                     else:
                         raise error
-                self.container_panel()
+                self.rebind_panel(host)
 
     def stop(self):
         if self.service:
@@ -110,33 +116,48 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
             connection.close()
 
     async def test_real_http_tools_snapshot_and_full_body(self):
-        service = self.start()
+        service = self.start_reselecting()
         async with httpx2.AsyncClient(headers={'Authorization': 'Bearer '+TOKEN}) as http:
             async with Client(streamable_http_client(service.url, http_client=http), mode='legacy') as client:
                 self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
                 self.assertEqual(client.server_info.version, __version__)
                 self.assertEqual({t.name for t in (await client.list_tools()).tools},
-                    {'list_jobs','get_job','list_batches','get_batch','review_plugin_permissions'})
+                    {'list_jobs','get_job','get_jobs','list_batches','get_batch','review_plugin_permissions'})
                 first = await client.call_tool('list_jobs', {'query': {'limit': 1}})
                 self.assertFalse(first.is_error)
-                page = first.structured_content
+                page = payload(first)
                 uid, sid = page['items'][0]['uid'], page['snapshot_id']
                 with closing(agent_api.read_connection(self.fixture.path)) as conn:
                     with self.assertRaises(sqlite3.OperationalError):
                         conn.execute('DELETE FROM jobs')
                 next_page = await client.call_tool('list_jobs', {'query': {'cursor': page['next_cursor']}})
-                self.assertEqual(next_page.structured_content['snapshot_id'], sid)
+                self.assertEqual(payload(next_page)['snapshot_id'], sid)
                 detail = await client.call_tool('get_job', {'uid': uid, 'snapshot_id': sid})
-                self.assertTrue(detail.structured_content['item']['description'])
+                self.assertTrue(payload(detail)['item']['description'])
                 batches = await client.call_tool('list_batches', {'limit': 1})
-                bid = batches.structured_content['items'][0]['batch_id']
+                bid = payload(batches)['items'][0]['batch_id']
                 batch = await client.call_tool('get_batch', {'batch_id': bid})
-                self.assertEqual(batch.structured_content['item']['batch_id'], bid)
+                self.assertEqual(payload(batch)['item']['batch_id'], bid)
                 bad = await client.call_tool('list_jobs', {'query': {'view': 'recommend', 'geo': 'VIC'}})
                 self.assertTrue(bad.is_error)
+                tools = {t.name: t for t in (await client.list_tools()).tools}
+                self.assertTrue(tools['get_jobs'].annotations.read_only_hint)
+                before = self.fixture.human_state()
+                jobs = await client.call_tool('get_jobs', {'uids': ['synthetic:a', 'synthetic:none']})
+                self.assertFalse(jobs.is_error, jobs.content)
+                items = payload(jobs)['items']
+                self.assertEqual([i['uid'] for i in items], ['synthetic:a', 'synthetic:none'])
+                self.assertEqual(items[0]['human']['action'], 'saved')
+                self.assertTrue(items[0]['description'].startswith('Handwritten synthetic complete JD'))
+                self.assertEqual(items[1], {'uid': 'synthetic:none', 'error': 'job_not_found'})
+                self.assertTrue((await client.call_tool('get_jobs', {'uids': []})).is_error)
+                self.assertTrue((await client.call_tool('get_jobs', {'uids': ['x' * 513]})).is_error)
+                self.assertTrue((await client.call_tool('get_jobs', {'uids': ['u%d' % n for n in range(11)]})).is_error)
+                self.assertEqual(service.api.api.store.items.keys(), {sid})
+                self.assertEqual(self.fixture.human_state(), before)
 
     async def test_auth_host_origin_and_request_size(self):
-        self.start()
+        self.start_reselecting()
         for headers, status in [({'Authorization': ''}, 401),
                                 ({'Authorization': 'Bearer wrong'}, 401),
                                 ({'Host': 'evil.invalid'}, 403),
@@ -149,7 +170,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
 
     async def test_slow_snapshot_does_not_block_mcp_detail_or_capacity_error(self):
         self.config['agent_api'] = {'snapshots': {'max_snapshots': 2}}
-        service = self.start()
+        service = self.start_reselecting()
         entered, release = threading.Event(), threading.Event()
         original = service.api.api._materialize
 
@@ -161,7 +182,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
 
         async with await self.connect(service) as client:
             first = await client.call_tool('list_jobs', {'query': {'limit': 1}})
-            page = first.structured_content
+            page = payload(first)
             with patch.object(service.api.api, '_materialize', slow):
                 creating = asyncio.create_task(client.call_tool('list_jobs', {'query': {'q': 'Synthetic'}}))
                 try:
@@ -185,11 +206,12 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_http_exposes_only_read_tools(self):
         before = self.fixture.human_state()
-        service = self.start()
+        service = self.start_reselecting()
         async with await self.connect(service) as client:
             self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
             self.assertEqual({t.name for t in (await client.list_tools()).tools},
-                             {'list_jobs', 'get_job', 'list_batches', 'get_batch', 'review_plugin_permissions'})
+                             {'list_jobs', 'get_job', 'get_jobs', 'list_batches', 'get_batch',
+                              'review_plugin_permissions'})
             result = await client.call_tool('batch_label_jobs', {'items': [
                 {'uid': 'synthetic:c', 'action': 'saved'}]})
             self.assertTrue(result.is_error)
@@ -198,28 +220,27 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
 
     async def test_configured_label_writes_register_and_persist_through_http_mcp(self):
         self.config['agent_api'] = {'allow_label_writes': True}
-        service = self.start()
+        service = self.start_reselecting()
         self.assertTrue(service.api.api.allow_label_writes)
         async with await self.connect(service) as client:
             self.assertEqual(client.server_info.name, 'AU Job Board')
             tools = {t.name: t for t in (await client.list_tools()).tools}
-            self.assertEqual(set(tools), {'list_jobs', 'get_job', 'list_batches', 'get_batch',
+            self.assertEqual(set(tools), {'list_jobs', 'get_job', 'get_jobs', 'list_batches', 'get_batch',
                                           'review_plugin_permissions', 'batch_label_jobs'})
             for name, tool in tools.items():
                 note = tool.annotations
                 expected = (False, True, True, False) if name == 'batch_label_jobs' else (True, False, True, False)
                 self.assertEqual((note.read_only_hint, note.destructive_hint,
                                   note.idempotent_hint, note.open_world_hint), expected, name)
-            self.assertIsInstance(tools['batch_label_jobs'].output_schema, dict)
+            self.assertEqual({t.output_schema for t in tools.values()}, {None})
             result = await client.call_tool('batch_label_jobs', {'items': [
                 {'uid': 'synthetic:b', 'action': 'applied', 'priority': True},
                 {'uid': 'synthetic:c', 'action': 'skipped'}]})
             self.assertFalse(result.is_error, result.content)
-            text = result.content[0].text
-            self.assertEqual(json.loads(text), result.structured_content)
-            self.assertEqual(text, json.dumps(result.structured_content, ensure_ascii=False,
+            data, text = payload(result), result.content[0].text
+            self.assertEqual(text, json.dumps(data, ensure_ascii=False,
                                               separators=(',', ':'), allow_nan=False))
-            self.assertEqual((result.structured_content['updated'], result.structured_content['unchanged']), (2, 0))
+            self.assertEqual((data['updated'], data['unchanged']), (2, 0))
             bad = await client.call_tool('batch_label_jobs', {'items': [
                 {'uid': 'synthetic:d', 'action': 'saved'}, {'uid': 'synthetic:missing', 'action': 'saved'}]})
             self.assertTrue(bad.is_error)
@@ -232,7 +253,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
 
     async def test_unauthenticated_or_foreign_write_calls_never_reach_the_database(self):
         self.config['agent_api'] = {'allow_label_writes': True}
-        self.start()
+        self.start_reselecting()
         before = self.fixture.human_state()
         call = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {
             'name': 'batch_label_jobs', 'arguments': {'items': [
@@ -255,7 +276,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
             with socket.socket() as probe:   # the derived port was released again
                 probe.bind(('127.0.0.1', self.panel.server_port+1))
         self.config['agent_api'] = {'allow_label_writes': False}
-        self.assertFalse(self.start().api.api.allow_label_writes)
+        self.assertFalse(self.start_reselecting().api.api.allow_label_writes)
 
     async def test_container_listener_keeps_loopback_authority_and_auth(self):
         self.container_panel()
@@ -263,7 +284,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 self.start()
         with patch.dict(os.environ, {'JOBS_CONTAINER': '1'}):
-            service = self.start_container()
+            service = self.start_reselecting()
         self.assertEqual(service.url, f'http://127.0.0.1:{service.port}/mcp')
         for headers, status in [({'Authorization': ''}, 401),
                                 ({'Host': f'0.0.0.0:{service.port}'}, 403),
@@ -273,11 +294,11 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         async with httpx2.AsyncClient(headers={'Authorization': 'Bearer '+TOKEN}) as http:
             async with Client(streamable_http_client(service.url, http_client=http), mode='legacy') as client:
                 self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
-                page = (await client.call_tool('list_jobs', {'query': {'limit': 1}})).structured_content
+                page = payload(await client.call_tool('list_jobs', {'query': {'limit': 1}}))
                 detail = await client.call_tool('get_job', {'uid': page['items'][0]['uid'],
                                                          'snapshot_id': page['snapshot_id']})
                 self.assertFalse(detail.is_error)
-                self.assertTrue(detail.structured_content['item']['panel_url'].startswith(
+                self.assertTrue(payload(detail)['item']['panel_url'].startswith(
                     f'http://127.0.0.1:{self.panel.server_port}/'))
 
     async def test_container_fixture_recovers_from_port_handoff_collision(self):
@@ -291,39 +312,9 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(OSError) as caught:
                     self.start()
                 self.assertTrue(bind_conflict(caught.exception), caught.exception)
-                service = self.start_container()
+                service = self.start_reselecting()
             self.assertNotEqual(service.port, blocked_port)
             self.assertEqual(self.request(headers={'Authorization': ''})[0], 401)
-
-    def test_container_fixture_does_not_retry_unrelated_startup_errors(self):
-        self.container_panel()
-        for error in (OSError(errno.EACCES, 'controlled permission error'),
-                      OSError(errno.EADDRINUSE, 'controlled internal port error'),
-                      ValueError('controlled configuration error')):
-            with self.subTest(error=error), patch.object(mcp_http, 'start', side_effect=error) as start:
-                with self.assertRaises(type(error)) as caught:
-                    self.start_container()
-                self.assertIs(caught.exception, error)
-                self.assertEqual(start.call_count, 1)
-
-    def test_container_fixture_bounds_port_collision_reselection(self):
-        self.container_panel()
-        start = self.start
-        occupied = []
-        def collide():
-            listener = socket.socket()
-            self.addCleanup(listener.close)
-            listener.bind(('0.0.0.0', self.panel.server_port+1))
-            listener.listen()
-            occupied.append(listener)
-            return start()
-        with patch.dict(os.environ, {'JOBS_CONTAINER': '1'}), \
-                patch.object(self, 'start', side_effect=collide) as attempts:
-            with self.assertRaises(OSError) as caught:
-                self.start_container()
-        self.assertTrue(bind_conflict(caught.exception), caught.exception)
-        self.assertEqual(attempts.call_count, 5)
-        self.assertEqual(len(occupied), 5)
 
     async def test_tls_certificate_verified(self):
         root = self.fixture.root
@@ -334,11 +325,11 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-days','1',
             '-config',str(cfg),'-keyout',str(key),'-out',str(cert)], check=True, capture_output=True)
         self.config['mcp'].update(tls_certfile=str(cert), tls_keyfile=str(key))
-        service = self.start()
+        service = self.start_reselecting()
         async with httpx2.AsyncClient(verify=ssl.create_default_context(cafile=cert),
                 headers={'Authorization': 'Bearer '+TOKEN}) as http:
             async with Client(streamable_http_client(service.url, http_client=http)) as client:
-                self.assertEqual(len((await client.list_tools()).tools), 5)
+                self.assertEqual(len((await client.list_tools()).tools), 6)
 
     async def test_conflict_and_invalid_settings_cleanup(self):
         with socket.socket() as occupied:

@@ -12,8 +12,11 @@ executor, allowed files/actions, necessary checks, stop point and time/call
 budget before handing off. Use the repository's
 [verification skill](../.agents/skills/jobs-verify/SKILL.md). Keep one writer on
 the branch during the handoff; report unexpected head movement before writing.
-Replies, thread resolution, push, merge, release and deployment require their
-respective task authorization.
+Replies, push, merge, release and deployment require their respective task
+authorization. Thread resolution follows
+[jobs-pr-finish](../.agents/skills/jobs-pr-finish/SKILL.md#resolve-automated-review-threads):
+automated-review threads are resolved by the executor once dispositioned; a
+human reviewer's thread needs authorization.
 
 **Default: process the initial automatically triggered review, make one batch of
 permitted repairs, verify it and hand back.** Do not post a Codex review request,

@@ -258,19 +258,22 @@ def main():
             assert initialized['serverInfo']['name'] == 'AU Job Board (read-only)'
             available_tools = rpc('tools/list', {})['tools']
             assert {t['name'] for t in available_tools} == {
-                'list_jobs','get_job','list_batches','get_batch','review_plugin_permissions'}
+                'list_jobs','get_job','get_jobs','list_batches','get_batch','review_plugin_permissions'}
             review_tool = next(t for t in available_tools if t['name'] == 'review_plugin_permissions')
             assert review_tool['annotations']['readOnlyHint'] is True
             review = rpc('tools/call', {'name': 'review_plugin_permissions', 'arguments': {}})
             assert not review.get('isError')
-            assert 'explicit user consent' in review['structuredContent']['confirmation']
+            assert 'structuredContent' not in review
+            assert 'explicit user consent' in json.loads(review['content'][0]['text'])['confirmation']
             listed = rpc('tools/call', {'name':'list_jobs','arguments':{'query':{'limit':1}}})
             assert not listed.get('isError')
-            page = listed['structuredContent']
+            page = json.loads(listed['content'][0]['text'])
             detail = rpc('tools/call', {'name':'get_job','arguments':{
                 'uid':page['items'][0]['uid'],'snapshot_id':page['snapshot_id']}})
-            assert not detail.get('isError') and detail['structuredContent']['item']['description']
-            assert detail['structuredContent']['item']['panel_url'].startswith('http://127.0.0.1:8090/')
+            assert not detail.get('isError') and 'structuredContent' not in detail
+            item = json.loads(detail['content'][0]['text'])['item']
+            assert item['description']
+            assert item['panel_url'].startswith('http://127.0.0.1:8090/')
             print('PASS host-published API/MCP, initialization name, frozen JD and rejection guards', flush=True)
             print("Docker synthetic smoke passed:", architecture, flush=True)
         finally:

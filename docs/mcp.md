@@ -11,7 +11,7 @@ enable it in the persistent config with an owner-only token. The instructions
 below describe source installations. By default both transports identify as
 `AU Job Board (read-only)`.
 
-Two transports provide the same five read-only tools by default:
+Two transports provide the same six read-only tools by default:
 
 - **Streamable HTTP owned by the application** (recommended): starts and stops
   with `panel`, on the panel address and the panel port plus one.
@@ -86,7 +86,7 @@ the configured address and derived port; browser Origin headers are rejected.
 No CORS permissions are provided. The SDK uses stateless Streamable HTTP with
 JSON responses; application snapshots still persist in the internal reader for
 the configured TTL. A 64 KiB request-body limit protects the protocol endpoint.
-It exposes the same five read-only tools and error semantics as stdio (plus
+It exposes the same six read-only tools and error semantics as stdio (plus
 `batch_label_jobs` only when `agent_api.allow_label_writes` is true).
 
 For private data on a remote network, enable TLS with both `mcp.tls_certfile` and
@@ -171,19 +171,38 @@ owned by the application, use the Streamable HTTP mode above.
 
 ## Tools and a first read
 
-All five of these tools declare themselves read-only. Successful calls return the HTTP
-JSON object as structured content, with text content for compatible clients.
-The text copy is the same JSON value rendered compactly (no indentation or extra
-whitespace; Unicode and escaped newlines inside job text are preserved), and
-`outputSchema` stays published. No field, page size or `get_job` shape changes;
-errors remain tool errors. How much a client shows the model from the two
-channels differs by client, so this reduces text size but does not by itself
-establish a lower billed-token count.
+All six of these tools declare themselves read-only. A successful call returns
+one text content block holding compact JSON (no indentation or extra whitespace;
+Unicode and escaped newlines inside job text are preserved). There is no
+structured content and no published `outputSchema`, so clients that show both
+channels do not receive the result twice. Errors remain tool errors.
+
+The JSON is the HTTP API response, with two MCP-only differences:
+
+- `list_jobs` without `limit` or `cursor` requests 20 jobs per page (the HTTP
+  API default stays 100). An explicit `limit` (1 to 200) is passed through;
+  large pages may exceed a client's tool-output limit, so prefer following
+  `next_cursor`.
+- Job records (`list_jobs` items, the `get_job` item and the `get_jobs` records) are compacted
+  losslessly: keys whose value is null, `""`, `[]` or `{}` are omitted
+  recursively (`false` and `0` stay), so an absent field means null or empty;
+  `source_id` (always the `uid` after its first colon) and `human_scope`
+  (always `group`) are omitted; `human` disappears when all its fields are
+  empty; `reasons` becomes a JSON list only when the API string is a non-empty
+  list of strings that re-encodes to exactly the same string
+  (`json.dumps(list, ensure_ascii=False)`), otherwise it stays the original
+  string; and `history.scope_note`, a fixed sentence, is omitted and quoted
+  once in the `get_job` description. Response envelopes (`snapshot_id`,
+  `total`, `next_cursor: null` and so on), batch, plugin and label-write
+  results are unchanged.
+
+Tests rebuild the HTTP JSON from the MCP records using only these rules.
 
 | Tool | Arguments | Result |
 |---|---|---|
-| `list_jobs` | Optional `query` object of HTTP API fields | One frozen page, `total`, `snapshot_id`, `next_cursor` |
+| `list_jobs` | Optional `query` object of HTTP API fields (default `limit` 20) | One frozen page, `total`, `snapshot_id`, `next_cursor` |
 | `get_job` | Required `uid`, `snapshot_id` | Complete JD, machine evidence, local posting `history`, group human state, live panel link |
+| `get_jobs` | Required `uids`: 1 to 10 distinct non-empty strings (each at most 512 characters) | The same complete records as `get_job`, read fresh by exact uid with no `snapshot_id`, in request order; an unknown uid is an explicit `{"uid","error":"job_not_found"}` item |
 | `list_batches` | `limit` (default 50, maximum 200), `offset` (default 0) | Fresh batch metadata, `next_offset` |
 | `get_batch` | Required `batch_id` | Collection facts and separate pipeline evidence |
 | `review_plugin_permissions` | None | Full permission review, current status and user-operated confirmation paths |
@@ -194,6 +213,7 @@ Example tool calls:
 {"name":"list_jobs","arguments":{"query":{"view":"all","geo":"VIC","limit":20}}}
 {"name":"get_job","arguments":{"uid":"<returned uid>","snapshot_id":"<returned snapshot_id>"}}
 {"name":"list_jobs","arguments":{"query":{"cursor":"<returned next_cursor>"}}}
+{"name":"get_jobs","arguments":{"uids":["<exact uid>","<another exact uid>"]}}
 {"name":"list_batches","arguments":{"limit":10}}
 {"name":"get_batch","arguments":{"batch_id":"<returned batch_id>"}}
 ```
@@ -208,6 +228,16 @@ For subsequent job pages pass only `cursor`; follow it until `next_cursor=null`.
 Use the same snapshot ID for every full JD in that query. There is no implicit
 fallback to a fresh detail if a snapshot expires. Batch pagination uses offsets
 and fresh reads, independently of jobs snapshots.
+
+`get_jobs` is for reading jobs by exact uid when there is no list snapshot, for
+example uids the user copied from the panel workspace. It maps to
+`GET /api/v1/job-details` ([HTTP API](agent-api.md#endpoints-and-scopes)): the
+records are fresh, so they may differ from an earlier list, nothing is stored
+and no snapshot is created. Records use the same omission rule as `get_job`
+(`job_not_found` items are not records and pass through unchanged). A
+duplicate uid is a tool error. Its description also suggests that, when several
+steps or sub-agents will reuse the records, the agent may save each one to a
+private temporary file and delete those files when the task ends.
 
 Authentication/connection failures, invalid queries, expired snapshots and
 unknown tools are MCP errors, never empty successful results. Existing HTTP
@@ -224,7 +254,7 @@ data, so it can differ from the frozen snapshot.
 
 ## Optional batch label tool
 
-Off by default. When enabled, a sixth tool, `batch_label_jobs`, lets an MCP
+Off by default. When enabled, a seventh tool, `batch_label_jobs`, lets an MCP
 client set application progress and the priority star for exact UIDs; it is the
 only write tool and cannot edit notes, eligibility, jobs or JDs. It uses the
 [batch label route](agent-api.md#optional-batch-label-write), so read its
@@ -253,12 +283,12 @@ The tool takes `items`, 1 to 100 objects of `{uid, action?, priority?}`:
 ```
 
 `action` is `saved`, `applied`, `skipped` or `null` (cancel progress); `priority`
-is a real boolean; an omitted field is kept. The result is the same compact JSON
-(`updated`, `unchanged` and one `uid`/`action`/`priority`/`changed`/
-`human_scope` entry per item, never JD text or notes) in both text and
-structured content, with a published `outputSchema`. It is annotated
+is a real boolean; an omitted field is kept. The result is the HTTP response as
+compact JSON text (`updated`, `unchanged` and one `uid`/`action`/`priority`/`changed`/
+`human_scope` entry per item, never JD text or notes), not compacted further
+and without structured content or `outputSchema`. It is annotated
 `readOnlyHint=false`, `destructiveHint=true`, `idempotentHint=true`,
-`openWorldHint=false`; the five read tools keep their read-only annotations.
+`openWorldHint=false`; the six read tools keep their read-only annotations.
 Invalid arguments, unknown or duplicate UIDs, two UIDs of one group, an
 authentication or HTTP failure, a refused redirect or a lost connection are tool
 errors, never empty successes. Nothing is retried automatically: after a
@@ -274,8 +304,10 @@ The opt-in `tools/test_mcp.py` starts a real MCP subprocess and a loopback HTTP
 service using handwritten synthetic records and a temporary database. It checks
 discovery, legacy initialization, pagination, full JDs, folded source identity, group state, frozen
 reads after live edits, filter parity, batch facts, explicit errors, redirects,
-token permissions and unchanged DB bytes during reads. Its write cases check the
-label tool, annotations, compact/structured equality, persisted group state and
+token permissions and unchanged DB bytes during reads, plus the single text
+channel, the 20-job default page and its complete cursor chain, explicit limits,
+and lossless job-record compaction against the same snapshot's HTTP JSON. Its write cases check the
+label tool, annotations, compact text, persisted group state and
 that invalid, redirected, unauthenticated or API-refused writes leave the
 database unchanged; `tools/test_mcp_http.py` repeats this over Streamable HTTP. All processes stop on
 test exit. It does not inspect personal data or configure a desktop host.
@@ -288,6 +320,7 @@ python -B tools/test_mcp.py
 python -B tools/run_public_tests.py --with-mcp
 ```
 
-The default public suite runs 44 entries; `--with-mcp` adds two
-entries and fails if its SDK is missing. A passing SDK client test proves the
+`--with-mcp` adds two entries (`tools/test_mcp.py` and
+`tools/test_mcp_http.py`) to the default public suite and fails if its SDK is
+missing. A passing SDK client test proves the
 protocol/HTTP path.
