@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+import temp_cleanup  # noqa: E402
 from jobs import agent_api as api, db, labels, panel, panel_data, panel_views  # noqa: E402
 
 TOKEN = "synthetic-api-token-not-a-real-secret-000000"
@@ -81,7 +82,7 @@ class Fixture(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        self.temp.cleanup()
+        temp_cleanup.cleanup(self.temp)
 
     def query(self, view="all", filters=None, *, offset=0, limit=100, geo=None):
         values = dict(filters or {})

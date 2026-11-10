@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+import temp_cleanup  # noqa: E402
 from jobs import panel, skills
 
 
@@ -53,7 +54,7 @@ class UpdateHTTPTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=3)
-        self.temp.cleanup()
+        temp_cleanup.cleanup(self.temp)
 
     def request(self, path, method="GET", body=None, headers=None):
         client = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)

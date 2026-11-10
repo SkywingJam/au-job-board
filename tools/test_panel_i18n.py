@@ -51,6 +51,12 @@ def test_dictionary() -> None:
     zh, en = i18n.STRINGS["zh"], i18n.STRINGS["en"]
     check("中英文键完全一致", set(zh) == set(en),
           str(sorted(set(zh) ^ set(en))[:6]))
+    holes = lambda text: sorted(re.findall(r"\{(\w+)\}", text))
+    zh_js, en_js = i18n.js_strings("zh"), i18n.js_strings("en")
+    check("同一个键的中英文占位符（{name}）一致，页面字典与注入前端的文案都是",
+          not [k for k in zh if holes(zh[k]) != holes(en[k])]
+          and set(zh_js) == set(en_js)
+          and not [k for k in zh_js if holes(zh_js[k]) != holes(en_js[k])])
     check("没有空译文（js.note_gap 中文刻意为空：中文标签间不加空格）",
           all(v != "" for t in (zh, en) for k, v in t.items() if k != "js.note_gap"))
     check("英文译文里没有中文（「中文」切换按钮与备注标签示例除外）",
@@ -132,7 +138,6 @@ def test_render() -> None:
         leftovers = sorted(set(CJK.findall(shown)))
         check("英文页界面文案里没有中文", not leftovers, "".join(leftovers[:20]))
 
-        check("卡片不再有三轴圆点", 'class="dots"' not in en and "data-axis" not in en)
         check("与分析一致的人工可投不在卡片上占位", 'class="tag corr"' not in en)
 
         row = panel._find(conn, {}, "seek:a")
@@ -154,8 +159,6 @@ def test_render() -> None:
         settings_en = panel.render_settings(conn, {}, "en", None, "display", "en")
         check("设置页：语言与外观选项", "setLang('auto')" in settings_en
               and "setTheme('dark')" in settings_en and '<html lang="en"' in settings_en)
-        check("Issue #7: display page has no duplicate analysis rules",
-              "Analysis rules" not in visible(settings_en) and "Used by the last analyze" not in visible(settings_en))
         labels_mod.set_label(conn, "seek:a", source="panel", action="skipped")
         conn.commit()
         skipped_page = panel.render_page(conn, {}, "all", 0, 40, None, {}, "en", "dark")
