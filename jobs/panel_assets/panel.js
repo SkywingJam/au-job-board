@@ -148,6 +148,13 @@ function pluginHost(name,...args){
   const host=window.__JOBS_PLUGIN_HOST__;
   if(host && typeof host[name]==='function'){ try{ host[name](...args); }catch(_){} }
 }
+// A workspace hand-off is still being validated and stored: a reload now would lose it.
+function pluginHostBusy(){
+  const host=window.__JOBS_PLUGIN_HOST__;
+  try{ return !!(host && typeof host.busy==='function' && host.busy()); }catch(_){ return false; }
+}
+// Called by the plugin host when its last pending hand-off has settled.
+function pluginHostIdle(){ if(UPDATE_PENDING && !OPEN_UID && !SEL_MODE) applyLatestResults(); }
 function openUid(){ return OPEN_UID; }
 function readDetailHash(){
   const raw=location.hash.slice(1), cut=raw.indexOf('&location_id=');
@@ -2383,7 +2390,7 @@ function rememberListPosition(){
     top:list.scrollTop,windowY:window.scrollY}));}catch(e){}
 }
 function applyLatestResults(hash){
-  if(!UPDATE_PENDING || UPDATE_APPLYING || SEL_MODE || document.hidden || NOTE_REQUESTS.size || LABEL_WRITES.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
+  if(!UPDATE_PENDING || UPDATE_APPLYING || SEL_MODE || document.hidden || NOTE_REQUESTS.size || LABEL_WRITES.size || SKILL_SAVING || pluginHostBusy() || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
   UPDATE_APPLYING=true;
   UPDATE_BASELINE=UPDATE_PENDING;UPDATE_PENDING=null;
   rememberListPosition();

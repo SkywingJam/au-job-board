@@ -2314,6 +2314,20 @@ async function testPluginHostHooks() {
   const before = t.reloads();
   await t.api.closeDetail();
   eq("关闭后通知，且延后的新结果照常载入一次", [events.at(-1), t.reloads() - before], ["close", 1]);
+  // 工作区加入请求在途时不刷新；结束后恢复被推迟的刷新（恰好一次）。
+  const u = loadPanel();
+  let busy = true;
+  u.sandbox.__JOBS_PLUGIN_HOST__ = { busy: () => busy };
+  await u.api.openJob("A");
+  u.api.setUpdate({ uid: "A", baseline: "generation-1", pending: "generation-2" });
+  const start = u.reloads();
+  await u.api.closeDetail();
+  eq("加入在途：新结果推迟，不刷新", u.reloads() - start, 0);
+  busy = false;
+  u.sandbox.pluginHostIdle();
+  eq("加入结束：恢复刷新一次", u.reloads() - start, 1);
+  u.sandbox.pluginHostIdle();
+  eq("不重复刷新", u.reloads() - start, 1);
 }
 
 async function main() {

@@ -112,6 +112,7 @@ function makeEnv({context, plugins = {map: 'enabled', workspace: 'enabled'}, sto
     openJob: async uid => { e.opened.push(uid); return e.openResult ?? true; }, openUid: () => e.openUid,
     toast: m => e.toasts.push(m), copyPlain: async text => { e.copied.push(text); return e.copyOk; },
     openCopyDialog: (text, back) => { e.dialogs.push({text, back}); ids['copy-modal'].hidden = false; },
+    pluginHostIdle: () => { e.idle = (e.idle || 0) + 1; },
     fitLayout: () => { e.fits = (e.fits || 0) + 1; }, sidebarPrefs: () => e.prefs, storeSidebarPrefs: p => Object.assign(e.prefs, p),
     keyProfile: () => e.profile, navKeyIgnored: () => e.ignored, SEL: new Set()});
   e.message = async (frameKey, data) => e.winListeners.message({source: frames[frameKey].contentWindow, data});
@@ -206,6 +207,13 @@ e.handedStatus = 0; e.handedBody = uids => ({items: uids.map(uid => ({uid: uid +
 eq((await host.handOff(['seek:3'])).failed, true, 'mismatched response rejected');
 e.handedBody = null;
 e.quotaFull = true;
+// A pending hand-off blocks the page refresh; the host says when the last one settled.
+{
+  const idleBefore = e.idle || 0, a = host.handOff(['seek:1']), b = host.handOff(['seek:2']);
+  eq(host.busy(), true, 'busy while hand-offs are pending');
+  await a; await b; await Promise.resolve(); await Promise.resolve();
+  eq([host.busy(), (e.idle || 0) - idleBefore], [false, 1], 'idle reported once after the last hand-off');
+}
 eq((await host.handOff(['seek:3'])).failed, true, 'storage failure reported');
 eq(e.toasts.at(-1), 'sidebar.saved_failed', 'storage failure toast');
 e.quotaFull = false;

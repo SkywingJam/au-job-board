@@ -429,8 +429,17 @@ if(sidebarFrame){
   }
   // One host function for every entry point. Calls run one after another so two
   // quick adds never both read the same stored list.
-  let chain=Promise.resolve();
-  function handOff(uids){const run=chain.then(()=>handOffNow(uids));chain=run.catch(()=>{});return run;}
+  // While any hand-off is pending the page must not reload for new results (the add
+  // would be lost); the deferred refresh is resumed once the last one has settled.
+  let chain=Promise.resolve(), pendingHandOffs=0;
+  function handOff(uids){
+    pendingHandOffs++;
+    const run=chain.then(()=>handOffNow(uids));
+    chain=run.catch(()=>{}).then(()=>{
+      if(--pendingHandOffs===0&&typeof pluginHostIdle==='function')pluginHostIdle();
+    });
+    return run;
+  }
   async function handOffNow(raw){
     const uids=[...new Set((Array.isArray(raw)?raw:[]).filter(u=>typeof u==='string'&&u&&u.length<=512))];
     if(sidebarStopped||!uids.length)return {added:0,skipped:uids.length};
@@ -575,6 +584,7 @@ if(sidebarFrame){
     detailOpened(){injectDetailButton();sendCurrent();},
     detailClosed(){sendCurrent();},
     handOff,
+    busy(){return pendingHandOffs>0;},
   };
   syncHandoffUi();
   if(typeof sidebarPrefs==='function'&&sidebarPrefs().open===true&&!portrait())setSidebar(true,{focus:false,remember:false});
