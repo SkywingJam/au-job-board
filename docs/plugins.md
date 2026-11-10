@@ -161,3 +161,28 @@ Errors are explicit: `invalid_query`, `invalid_uid_count`, `invalid_uid` and
 `permission_not_granted` on `handed`, and handed plugins get the same on
 `jobs`, `member` and `reference`. The route adds no write path. Labels, notes,
 history and vocabulary are only read.
+
+The browser bridge keeps one instance per frame (own channel, request IDs and
+limits), so a map page and a sidebar from two plugins run side by side.
+Operations are dispatched by profile and slot; the map operations above are not
+available to a handed-profile frame and the reverse. Handed-profile operations:
+
+| Operation | Slots | Effect |
+|---|---|---|
+| `handed_jobs {uids, detail}` | sidebar, page | Reads the `handed` route; every UID must be in the host-owned list |
+| `remove_handed {uids}`, `clear_handed {}` | sidebar, page / sidebar | Shrinks the host-owned list |
+| `open_job {uid}` | sidebar, page | Opens a listed job in the core reader through the ordinary navigation guards |
+| `copy_text {text}` | sidebar, page | Core copies at most 2,000 characters and reports `{copied, fallback}` honestly; the fallback is the core manual-copy dialog |
+| `open_page {}` | sidebar | Opens the plugin's own page; "back" returns to where it was opened from |
+| `navigate_list {}` | page | Returns from the page |
+| `dismiss {}` | sidebar | Closes the phone sheet (keys pressed inside the frame never reach the board) |
+| `save_state {state}` | sidebar, page | Stores at most 4 KiB of plugin UI state in this browser and reports `{ok}` |
+
+The list of handed jobs (`jobs.plugin.handed:<id>`, at most ten) is owned and
+written only by core, in this browser's local storage. Core tells the frames
+about it with `jobs-plugin-handed` (also after a change in another tab) and tells
+the sidebar which job is open with `jobs-plugin-current` `{uid, title, company}`.
+That current-job notice is the only data about a job the user has not handed
+over, and the permission review says so. The only writes these operations make
+are the clipboard copy and the two browser-storage keys; none reaches the
+database, labels or notes, and no operation takes a URL.

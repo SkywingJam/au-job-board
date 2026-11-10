@@ -43,7 +43,9 @@ LABEL_BATCH_PATH = PREFIX + '/labels/batch'
 DETAILS_PATH = PREFIX + '/job-details'
 MAX_DETAIL_UIDS = 10
 MAX_UID_CHARS = 512
-MAX_DETAILS_TARGET = 60000  # 10 percent-encoded 512-character uids; still under the server's request-line cap
+# 10 uids x 512 characters x 12 bytes (a percent-encoded 4-byte character) plus framing;
+# still under the server's 65536-byte request-line cap.
+MAX_DETAILS_TARGET = 63000
 MAX_LABEL_BODY = 32 * 1024  # fits the 64 KiB MCP request envelope
 BODY_DEADLINE = 15  # seconds for a whole request body
 DRAIN_LIMIT = 256 * 1024  # unread bytes consumed before an early rejection

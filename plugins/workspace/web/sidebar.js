@@ -37,9 +37,11 @@ function setStatus(text, retry = null, tone = '', kind = '') {
   if (retry) s.append(' ', el('button', {class: 'link-btn', type: 'button', onclick: retry}, t('retry')));
 }
 
-function save(patch) {
+// Rejects unless the host confirms the state was stored.
+async function save(patch) {
   state = {...state, ...patch, v: 1};
-  return WS.request('save_state', {state});
+  const result = await WS.request('save_state', {state});
+  if (result?.ok !== true) throw Object.assign(new Error('state not stored'), {code: 'state_not_stored'});
 }
 
 /* ---------- data ---------- */
@@ -230,7 +232,9 @@ async function openCompare() {
   const sel = chooseSel.slice(0, compareLimit());
   if (sel.length < 2) return;
   try {
-    await save({compare: sel});
+    // The compare page reads this selection; without it it would show other jobs.
+    try { await save({compare: sel}); }
+    catch (e) { setStatus(t('saveFailed', {err: WS.errorText(e)}), null, 'error'); return; }
     await WS.request('open_page', {});
   } catch (e) { setStatus(WS.errorText(e), null, 'error'); }
 }
@@ -337,6 +341,8 @@ function wire() {
     if (e.key !== 'Escape' || e.isComposing) return;
     if (!$('confirm').hidden) { e.preventDefault(); closeConfirm(); }
     else if (view !== 'list') { e.preventDefault(); showView('list'); }
+    // Keys pressed in here never reach the board: ask it to close the phone sheet.
+    else WS.request('dismiss', {}).catch(() => {});
   });
 }
 

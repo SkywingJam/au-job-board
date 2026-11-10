@@ -27,8 +27,14 @@ function rememberList(){
   const card=Array.from(document.querySelectorAll('.list .card')).find(el=>el.getBoundingClientRect().bottom>list.getBoundingClientRect().top);
   try{sessionStorage.setItem('jobs.plugin.return-position',JSON.stringify({query:listQuery(context.query_url),top:list.scrollTop,uid:card?.dataset.uid||'',delta:card?card.getBoundingClientRect().top-list.getBoundingClientRect().top:0,windowY:window.scrollY}));}catch(_){}
 }
+function pageOrigin(){
+  // A page opened from a switch page (the map) goes back there, not to the list.
+  let origin='list';
+  try{origin=sessionStorage.getItem('jobs.plugin.page-origin')||'list';}catch(_){}
+  return solo&&(context.pages||[]).some(p=>p&&p.id===origin&&p.switch!==false)?origin:'list';
+}
 function returnToList(){
-  const target=navUrl(context.return_url,'list');
+  const target=navUrl(context.return_url,pageOrigin());
   try{
     const {query,...position}=JSON.parse(sessionStorage.getItem('jobs.plugin.return-position')||'null')||{};
     // Restore only when the list shows the same results; after a new search it starts at the top.
@@ -255,7 +261,14 @@ const HANDED_OPS={
     if(Object.keys(payload).length)throw new Error('invalid navigation');
     if(!(context.pages||[]).some(p=>p&&p.id===b.pluginId))throw failure('unsupported_operation');
     if(!isMap)rememberList();
+    try{sessionStorage.setItem('jobs.plugin.page-origin',isMap?String(context.display):'list');}catch(_){}
     return {ok:!!await navigatePanel(navUrl(context.query_url,b.pluginId))};
+  }},
+  dismiss:{slots:['sidebar'],async run(b,payload){
+    if(Object.keys(payload).length)throw new Error('invalid dismiss');
+    const sheet=document.body.classList.contains('sidebar-sheet')&&!document.querySelector('.modal:not([hidden])');
+    if(sheet)setSidebar(false);
+    return {closed:sheet};
   }},
   navigate_list:{slots:['page'],async run(b,payload){
     if(Object.keys(payload).length)throw new Error('invalid navigation');
@@ -323,7 +336,12 @@ if(pageFrame){
   if(pageBridge.profile==='map'){
     try{const saved=JSON.parse(sessionStorage.getItem(mapStateKey)||'null');if(validState(saved))mapState=saved;}catch(_){}
   }
-  if(solo)document.getElementById('plugin-page-back')?.addEventListener('click',()=>returnToList());
+  if(solo){
+    const back=document.getElementById('plugin-page-back'), origin=pageOrigin();
+    const from=(context.pages||[]).find(p=>p&&p.id===origin);
+    if(back&&from)back.textContent=HT('sidebar.back_page',{label:bilingual(from.label)||origin});
+    back?.addEventListener('click',()=>returnToList());
+  }
 }
 
 // ---- Sidebar slot -----------------------------------------------------------------
@@ -562,17 +580,23 @@ if(sidebarFrame){
 function sendThemeAll(){for(const b of bridges)b.sendTheme();}
 new MutationObserver(sendThemeAll).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',sendThemeAll);
-const timer=setInterval(poll,3000);
+// The interval only runs checks while a frame is live. Without one, a revoked plugin is
+// noticed on the next hand-off (403), a settings change in another tab or a tab switch.
+const timer=setInterval(()=>{if(bridges.some(b=>!b.closed))poll();},3000);
 window.addEventListener('pagehide',()=>{
   clearInterval(timer);
   for(const b of bridges){b.closed=true;b.abortAll();}
 });
 window.addEventListener('storage',event=>{
   if(event.key==='jobs.plugins.changed')poll();
-  else if(sidebarInfo&&!sidebarStopped&&(event.key===null||event.key===handedKey(sidebarInfo.id)))broadcastHanded(sidebarInfo.id);
+  else{
+    const ids=new Set(bridges.filter(b=>!b.closed&&b.profile==='handed').map(b=>b.pluginId));
+    if(sidebarInfo&&!sidebarStopped)ids.add(sidebarInfo.id);
+    for(const id of ids)if(event.key===null||event.key===handedKey(id))broadcastHanded(id);
+  }
 });
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
 // Back/forward cache restores a page whose bridges were disposed on pagehide.
-window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
+window.addEventListener('pageshow',event=>{if(event.persisted&&bridges.length)location.reload();});
 if(pageFrame)pageFrame.src=pageFrame.dataset.pluginSrc;
 })();

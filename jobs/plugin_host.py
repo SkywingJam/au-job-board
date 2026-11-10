@@ -246,16 +246,16 @@ def _handed_consent(manifest):
          '请只安装来自可信维护者的插件。', 'Only install plugins from maintainers you trust.'),
         ('jobs', '只读取你放进侧栏的岗位', 'Reads only jobs you put in the sidebar',
          ('只有你亲手放进侧栏的岗位才会被读取，最多 10 个。会读取标题、公司、地点、薪资、工作类型、发布日期、匹配分和星标，'
-          '还会读取岗位正文、技能、规则判断结果和你的标注状态（比如资格、处理进度和星标）。不读取备注内容、历史记录、简历或账号信息，也读不到其他岗位。'
+          '还会读取岗位正文、技能、规则判断结果和你的标注状态（比如资格、处理进度和星标）。不读取备注内容、历史记录、简历或账号信息。其他岗位只有一个例外：侧栏会收到你正在查看的那个岗位的编号、标题和公司，用来提示它是否已在侧栏里。'
           if detail else
           '只有你亲手放进侧栏的岗位才会被读取，最多 10 个。只读取标题、公司、地点、薪资、工作类型、发布日期、匹配分、星标和你的标注状态。'
-          '不读取岗位正文、备注内容、历史记录、简历或账号信息，也读不到其他岗位。'),
+          '不读取岗位正文、备注内容、历史记录、简历或账号信息。其他岗位只有一个例外：侧栏会收到你正在查看的那个岗位的编号、标题和公司，用来提示它是否已在侧栏里。'),
          ('It only reads jobs you put in the sidebar yourself, up to 10. It reads their title, company, location, salary, work type, '
           'listing date, score and star, plus the full job description, skills, rule results and your label states (such as eligibility, '
-          'progress and star). It never reads note text, history, your CV or account details, and cannot see other jobs.'
+          'progress and star). It never reads note text, history, your CV or account details, and nothing else from other jobs, with one exception: the sidebar is told the ID, title and company of the job you are currently viewing, so it can show whether that job is already in the sidebar.'
           if detail else
           'It only reads jobs you put in the sidebar yourself, up to 10: their title, company, location, salary, work type, listing date, '
-          'score, star and your label states. It never reads job descriptions, note text, history, your CV or account details, and cannot see other jobs.')),
+          'score, star and your label states. It never reads job descriptions, note text, history, your CV or account details, and nothing else from other jobs, with one exception: the sidebar is told the ID, title and company of the job you are currently viewing, so it can show whether that job is already in the sidebar.')),
         ('files', '不使用文件', 'No files',
          '插件不带数据文件，也读不到你的文件。侧栏里的岗位和插件设置只记在这个浏览器里。',
          'The plugin ships no data files and cannot read your files. The jobs in the sidebar and its settings are only kept in this browser.'),

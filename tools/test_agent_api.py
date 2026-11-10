@@ -144,6 +144,10 @@ class AgentAPI(unittest.TestCase):
         longest = [str(n) * 512 for n in range(10)]
         status, data, _ = self.details(*longest)
         self.assertEqual((status, [i['uid'] for i in data['items']]), (200, longest))
+        # ... and when every character needs the longest percent-encoding (12 bytes).
+        widest = [chr(0x1F600 + n) * 512 for n in range(10)]
+        status, data, _ = self.details(*widest)
+        self.assertEqual((status, [i['uid'] for i in data['items']]), (200, widest))
         self.assertEqual(self.request('/api/v1/job-details/?uid=synthetic%3Aa')[0], 404)
         # The sibling route is neither shadowed nor does it shadow this one.
         self.assertEqual(self.request('/api/v1/jobs/synthetic%3Aa')[1]['item']['uid'], 'synthetic:a')

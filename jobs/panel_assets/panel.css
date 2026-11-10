@@ -67,7 +67,7 @@ body.handoff-dragging.sidebar-open .sidebar-drop{display:flex;align-items:center
 .sidebar-drop.over{background:var(--accent-tint);border-style:solid}
 .sidebar-scrim{display:none}
 /* 竖屏：底部抽屉；开关只留图标和数字 */
-body.portrait.has-sidebar .sidebar-toggle{min-width:44px;height:44px;border:0;padding:0 8px;flex:0 0 auto}
+body.portrait.has-sidebar .sidebar-toggle{min-width:44px;height:44px;border:0;padding:0 8px;flex:0 0 auto;margin-right:84px}
 body.portrait .sidebar-toggle-label{display:none}
 body.portrait.sidebar-open .plugin-sidebar{position:fixed;top:auto;left:0;right:0;bottom:0;width:auto;height:min(82vh,680px);height:min(82dvh,680px);
  z-index:245;border:0;border-radius:18px 18px 0 0;box-shadow:0 -8px 32px var(--shadow);padding-bottom:env(safe-area-inset-bottom)}

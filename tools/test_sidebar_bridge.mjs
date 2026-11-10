@@ -172,6 +172,8 @@ eq((await e.request('map', 'handed_jobs', {uids: ['seek:1'], detail: false})).er
 eq((await e.request('map', 'clear_handed')).error.code, 'unsupported_operation', 'map cannot clear the handed list');
 eq((await e.request('map', 'load')).ok, true, 'map load still works');
 eq((await e.request('side', 'navigate_list')).error.code, 'unsupported_operation', 'navigate_list is a page operation');
+eq((await e.request('side', 'dismiss')).result, {closed: false}, 'dismiss does nothing outside the phone sheet');
+eq((await e.request('side', 'dismiss', {x: 1})).error.code, 'invalid_request', 'dismiss takes no payload');
 
 // ---- handOff: one host function, honest feedback --------------------------------------
 const host = e.window.__JOBS_PLUGIN_HOST__;
@@ -390,6 +392,12 @@ eq((await e.request('map', 'load')).ok, true, 'map keeps working after the sideb
   eq((await c.request('map', 'load')).error.code, 'unsupported_operation', 'compare page cannot load the list snapshot');
   r = await c.request('map', 'open_job', {uid: 'seek:1'});
   eq([r.result, c.doc.activeElement], [{opened: true}, c.ids['plugin-detail-back']], 'open_job from compare: overlay with a way back');
+  // A change made in another tab reaches the compare page too (there is no sidebar here).
+  c.store['jobs.plugin.handed:workspace'] = '[]';
+  c.winListeners.storage({key: 'jobs.plugin.handed:workspace'});
+  eq([c.mapOut.at(-1).m.type, c.mapOut.at(-1).m.handed], ['jobs-plugin-handed', []], 'compare page told about a cross-tab change');
+  eq((await c.request('map', 'handed_jobs', {uids: ['seek:1'], detail: true})).error.code, 'not_handed', 'removed job no longer readable');
+  eq((await c.request('map', 'dismiss')).error.code, 'unsupported_operation', 'dismiss is sidebar-only');
   r = await c.request('map', 'navigate_list');
   eq([r.result, c.navigated.at(-1)], [{ok: true}, '/?view=all&q=Python&display=list'], 'navigate_list returns to the list');
   c.ids['plugin-page-back'].fire('click');

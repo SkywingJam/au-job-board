@@ -4,7 +4,8 @@ description: >-
   Draft a tailored CV and cover letter for each of 1-10 stored AU Job Board
   jobs, from the user's own base CV, using the read-only Job Board MCP tool
   get_jobs. Use when the user hands over job uids, for example "Use the
-  jobs-write skill on these jobs: seek:1, seek:2" or "用 jobs-write 技能为这些岗位写
+  jobs-write skill to draft a CV and cover letter for these jobs: seek:1,
+  seek:2" or "用 jobs-write 技能为这些岗位写
   CV 和求职信：seek:1, seek:2". Follows Australian resume conventions, never
   invents experience, writes only to a private directory and never marks a job
   as applied.
@@ -35,7 +36,7 @@ Produce one tailored CV and one cover letter for each job, built only from what 
 1. **Check the tool.** Confirm the Job Board MCP server is connected and `get_jobs` is available. If not, stop and tell the user what is missing: the Job Board MCP must be enabled and added to this client (see `docs/mcp.md` in the Job Board source, and its note on the `get_jobs` tool).
 2. **Tidy old runs.** Under `<OS temp dir>/au-job-board/`, delete sibling run directories whose last modification is more than 24 hours old (left by crashed runs). Only direct child directories of that folder; do not follow symlinks.
 3. **Read.** Call `get_jobs` once with the exact uids given. Report every `job_not_found` item by uid and carry on with the jobs that were found; stop if none were.
-4. **Write reference files.** Create a fresh private directory `<OS temp dir>/au-job-board/<run-id>/` (random run id; owner-only, mode 0700 on macOS and Linux; verify the permissions). Write one plain-text file per job. Start each file with three header lines: uid, the response's `as_of` time, and the original URL. Then the record content: title, company, location, salary, work type, dates, the full description, rule evidence, human state and history. Later steps and any sub-agents read these files and do not call the MCP again.
+4. **Write reference files.** Create a fresh private directory `<OS temp dir>/au-job-board/<run-id>/` (random run id; owner-only, mode 0700 on macOS and Linux; verify the permissions). If `<OS temp dir>/au-job-board` already exists and is a symlink or is not owned by you, do not use it: use a private per-user temporary directory instead. Write one plain-text file per job. Start each file with three header lines: uid, the response's `as_of` time, and the original URL. Then the record content: title, company, location, salary, work type, dates, the full description, rule evidence, human state and history. Later steps and any sub-agents read these files and do not call the MCP again.
 5. **Read the CV** and note its sections, roles, dates, skills and stated work rights. Ask about anything missing that you need (for example the person's name and contact details for the header).
 6. **Draft per job** (see below). If your client can run sub-agents, give each job to its own sub-agent with only that job's reference file and the CV, so details never leak between jobs. Otherwise finish and save one job completely before starting the next, and re-read that job's reference file before writing.
 7. **Summarise** (see the end of this file).

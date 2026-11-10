@@ -11,6 +11,15 @@ let handed = [], state = {}, selection = [], records = null, epoch = 0, ready = 
 const CUES_EN = {'保密等级': 'Clearance level', '保密审查': 'Security clearance', '公民/PR': 'Citizen / PR',
   '工作权': 'Work rights', '警察检查': 'Police check', '原住民专属': 'Identified position', '驾照': 'Driver’s licence'};
 
+// Stored descriptions are often Markdown. Show them as readable plain text: drop
+// emphasis markers and backslash escapes, turn list markers into bullets. Text only.
+function plainText(text) {
+  return text.replace(/\\([\\`*_{}\[\]()#+\-.!&|<>~])/g, '$1')
+    .replace(/(\*\*|__)(?=\S)([^\n]*?\S)\1/g, '$2')
+    .replace(/^[ \t]*[*+-][ \t]+/gm, '• ')
+    .replace(/^[ \t]*#{1,6}[ \t]+/gm, '')
+    .replace(/\n{3,}/g, '\n\n');
+}
 function setStatus(text, retry = null, tone = '') {
   const s = $('status');
   s.className = 'status' + (tone ? ' ' + tone : '');
@@ -104,7 +113,7 @@ function column(r, index, others, wide) {
     ['rSkills', skillsNode(r, others)],
     ['rLabels', labelsNode(r.human_labels)],
   ];
-  const description = typeof r.description === 'string' && r.description.trim() ? r.description : '';
+  const description = typeof r.description === 'string' && r.description.trim() ? plainText(r.description) : '';
   return el('section', {class: 'col', 'aria-labelledby': headId, tabindex: wide ? '0' : null, 'data-uid': r.uid},
     el('header', {class: 'col-head', 'data-row': 'head'},
       el('h2', {id: headId}, title),

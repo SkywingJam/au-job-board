@@ -28,7 +28,7 @@ function host(m){
   if(m.operation==='handed_jobs'){const items=p.uids.map(u=>{if(!db[u])return{uid:u,missing:true};const r={...db[u]};if(!p.detail)for(const k of DETAIL)delete r[k];return r;});respond(m,true,{plugin_id:'workspace',as_of:'now',generation:1,items});}
   else if(m.operation==='remove_handed'){hostList=hostList.filter(h=>!p.uids.includes(h.uid));respond(m,true,{handed:hostList});setTimeout(()=>send('jobs-plugin-handed',{handed:hostList}),20);}
   else if(m.operation==='clear_handed'){hostList=[];respond(m,true,{handed:[]});setTimeout(()=>send('jobs-plugin-handed',{handed:[]}),20);}
-  else if(m.operation==='save_state'){saved=p.state;respond(m,true,{ok:true});}
+  else if(m.operation==='save_state'){if(mode.save_refused){respond(m,true,{ok:false});return;}saved=p.state;respond(m,true,{ok:true});}
   else if(m.operation==='copy_text')respond(m,true,copyResult);
   else if(m.operation==='open_job')respond(m,true,{opened:true});
   else respond(m,true,{});
@@ -165,6 +165,13 @@ try {
     assert.deepEqual(await page.evaluate(() => saved), {compare: ['seek:1', 'seek:2', 'seek:4'], v: 1});
     const order = await page.evaluate(() => calls.map(c => c.operation).slice(-2));
     assert.deepEqual(order, ['save_state', 'open_page'], 'selection saved before opening');
+    // A refused save must not open a comparison of other jobs.
+    await page.evaluate(() => { mode.save_refused = true; });
+    const opensBefore = await page.evaluate(() => calls.filter(c => c.operation === 'open_page').length);
+    await frame.locator('#open-compare').click();
+    await frame.getByText(/couldn’t be saved/).waitFor();
+    assert.equal(await page.evaluate(() => calls.filter(c => c.operation === 'open_page').length), opensBefore, 'no page opened after a refused save');
+    await page.evaluate(() => { mode.save_refused = false; });
     // Escape returns to the list with focus on the Compare button.
     await frame.locator('#choose-title').press('Escape');
     assert.ok(await frame.locator('#list-view').isVisible());
@@ -378,7 +385,7 @@ try {
     assert.equal(await frame.locator('.col').nth(1).locator('.chip.cue').textContent(), 'Updated since added');
     assert.equal(await frame.locator('.col').nth(0).locator('.col-head .chip.cue').count(), 0);
     assert.equal(await frame.locator('input,textarea,select,[contenteditable]').count(), 0, 'read-only');
-    await frame.locator('.col').nth(2).getByRole('button', {name: 'Open “Third” in the list'}).click();
+    await frame.locator('.col').nth(2).getByRole('button', {name: 'Open “Third”'}).click();
     await page.waitForFunction(() => calls.some(c => c.operation === 'open_job'));
     assert.deepEqual((await ops(page, 'open_job'))[0], {uid: 'seek:3'});
     await frame.locator('.col').nth(0).press('Escape');

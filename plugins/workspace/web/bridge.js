@@ -69,7 +69,7 @@ const words = {
     idSep: ', ',
     // compare page
     pageTitle: 'Compare jobs',
-    openInList: 'Open in list', openInListAria: 'Open “{x}” in the list',
+    openInList: 'Open job', openInListAria: 'Open “{x}”',
     rSalary: 'Salary', rLocation: 'Location', rWorkType: 'Work type', rListed: 'Listed',
     rQualification: 'Eligibility', rEvidence: 'Eligibility evidence', rSkills: 'Skills',
     rLabels: 'Your labels', rJd: 'Job description',
@@ -141,7 +141,7 @@ const words = {
     iWrite: '用 jobs-write 技能为这些岗位写 CV 和求职信：{ids}',
     idSep: '、',
     pageTitle: '岗位对比',
-    openInList: '在列表中打开', openInListAria: '在列表中打开「{x}」',
+    openInList: '打开岗位', openInListAria: '打开「{x}」',
     rSalary: '薪资', rLocation: '地点', rWorkType: '工作类型', rListed: '发布日期',
     rQualification: '可投性', rEvidence: '可投性依据', rSkills: '技能',
     rLabels: '你的标注', rJd: '岗位描述',

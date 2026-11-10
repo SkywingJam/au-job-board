@@ -159,6 +159,7 @@ Windows-exit cases are explicitly skipped on macOS.
 
 | Test | Why it is excluded |
 |---|---|
+| `tools/test_workspace_frontend.mjs` | Opt-in synthetic browser checks of the Workspace sidebar and compare frames against a mock host. Same Playwright/Chromium requirements; run `node tools/test_workspace_frontend.mjs`. |
 | `tools/test_map_frontend.mjs` | Opt-in synthetic browser journeys. Requires a maintainer Playwright installation and Chromium; run `TEST_MODULE_CORS=1 node tools/test_map_frontend.mjs` with `CHROMIUM_PATH` and `PLAYWRIGHT_MODULE` when needed. Basemap networking is blocked. |
 | `tools/build_map_reference.py` | Maintainer-only pinned ABS package rebuild, with GIS tooling and a public source ZIP cached outside the checkout. |
 | `tools/test_public_snapshot.py` | It tests the maintainer public-snapshot planner, not the installed product. It is internal release tooling, so it does not belong in a user-facing public suite. |

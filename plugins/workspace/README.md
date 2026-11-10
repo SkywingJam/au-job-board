@@ -2,13 +2,13 @@
 
 The Workspace plugin lets you collect up to 10 jobs while you browse, look at them side by side, and hand them to a local coding agent.
 
-- **Sidebar.** Add a job to the workspace from the job view (**Add to workspace**). The sidebar lists the jobs you collected, so you can keep them while you search and filter.
+- **Sidebar.** Add a job to the workspace from the job view (**Add to workspace**), by dragging its card onto the sidebar, with the + on a card, with the keyboard shortcut shown in Settings, or by selecting several jobs and adding them together. The sidebar lists the jobs you collected, so you can keep them while you search and filter.
 - **Compare page.** Shows the collected jobs next to each other, with the full description, rule results and your label states.
-- **Hand to agent.** Copies a one-line instruction such as `Use the jobs-compare skill on these jobs: seek:1, seek:2` for Claude Code or Codex. The line carries only job IDs.
+- **Hand to agent.** Copies a one-line instruction such as `Use the jobs-compare skill to compare these jobs: seek:1, seek:2` for Claude Code or Codex. The line carries only job IDs.
 
 ## What it can read, and when
 
-The plugin reads only the jobs you put into the workspace. The sidebar uses the job summary fields: title, company, location, salary, work type, listing date, score, priority and the panel link. The compare page also reads each collected job's full description, skills, tags, qualification result, eligibility evidence and your label states. It does not read note text. A job you have not added is never read.
+The plugin reads only the jobs you put into the workspace. The sidebar uses the job summary fields: title, company, location, salary, work type, listing date, score, priority and the panel link. The compare page also reads each collected job's full description, skills, tags, qualification result, eligibility evidence and your label states. It does not read note text. A job you have not added is never read, with one exception: the sidebar is told the ID, title and company of the job you are currently viewing, so it can show whether that job is already in the workspace.
 
 It has no network access. It writes nothing to the board: no labels, notes or settings change. The workspace list lives in this browser only, up to 10 jobs, and does not follow you to another browser or device. Disabling the plugin keeps your existing board data unchanged.
 
