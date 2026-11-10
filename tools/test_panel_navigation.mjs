@@ -70,7 +70,6 @@ class FakeClock {
       static now() { return clock.now; }
     };
   }
-  pending() { return this.timers.size; }
   /* 前进 ms：到期定时器按 (时间, 登记顺序) 依次运行，运行时 now 就是它的到期时刻。 */
   advance(ms) {
     const target = this.now + ms;

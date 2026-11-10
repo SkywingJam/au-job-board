@@ -39,11 +39,16 @@ from jobs import labels as labels_mod              # noqa: E402
 from jobs import panel                             # noqa: E402
 from jobs import report                            # noqa: E402
 
-# The removed candidate parser (AGENTS.md: keep it removed). Other deleted
-# modules are not listed: nothing current depends on their absence.
 REMOVED_MODULES = (
     "jobs.eligibility_extraction",
     "jobs.clearance_extraction",
+    "jobs.eligibility_assessment",
+    "jobs.eligibility_combination",
+    "jobs.eligibility_adapter",
+    "jobs.eligibility_comparison",
+    "jobs.handover_policy",
+    "jobs.handover_orchestration",
+    "jobs.eligibility_runtime",
 )
 
 SYNTHETIC_RULES = r"""version: 999
@@ -255,7 +260,7 @@ def test_removed_modules() -> None:
     print("== 2. candidate modules and evidence API are gone ==")
     found = [name for name in REMOVED_MODULES
              if importlib.util.find_spec(name) is not None]
-    check("the removed candidate parser is not importable", not found, str(found))
+    check("no removed module is importable", not found, str(found))
     evidence_api = [name for name in (
         "evidence_map", "ensure_evidence_schema", "replace_evidence",
         "clear_evidence", "evidence_table_exists", "EVIDENCE_COLUMNS",

@@ -165,6 +165,7 @@ def build_env() -> dict:
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"  # keeps stdout and stderr in order when captured
     return env
 
 
@@ -250,6 +251,15 @@ def run_command(command: list, env: dict, capture: bool):
             _live[proc.pid] = proc
         try:
             proc.wait()
+        except BaseException:
+            # Interrupted while waiting (e.g. Ctrl-C/SIGTERM with --jobs 1):
+            # stop this child tree before forgetting it.
+            _kill_tree(proc, force=False)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                _kill_tree(proc, force=True)
+            raise
         finally:
             with _live_lock:
                 _live.pop(proc.pid, None)
@@ -313,15 +323,21 @@ def run_parallel(entries: list, total: int, env: dict, jobs: int) -> None:
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=jobs)
     try:
         futures = {pool.submit(execute, e, env, True): e for e in entries}
-        for future in concurrent.futures.as_completed(futures):
-            entry = futures[future]
-            output = future.result()
-            print_header(entry, total)
-            if output:
-                emit(output)
-                if not output.endswith(b"\n"):
-                    print()
-            print_result(entry)
+        pending = set(futures)
+        while pending:
+            # Short timed waits keep the main thread interruptible by Ctrl-C
+            # on Windows, where an untimed wait is not.
+            done, pending = concurrent.futures.wait(
+                pending, timeout=0.5, return_when=concurrent.futures.FIRST_COMPLETED)
+            for future in sorted(done, key=lambda f: futures[f].index):
+                entry = futures[future]
+                output = future.result()
+                print_header(entry, total)
+                if output:
+                    emit(output)
+                    if not output.endswith(b"\n"):
+                        print()
+                print_result(entry)
     except BaseException:
         kill_all_children()
         pool.shutdown(wait=True, cancel_futures=True)
