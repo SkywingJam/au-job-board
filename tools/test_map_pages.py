@@ -138,7 +138,9 @@ class MapPages(unittest.TestCase):
         self.assertEqual(member(first['snapshot_id'], second['items'][0]['uid'])[0], 404)
         self.assertEqual(member('unknown', first['items'][0]['uid'])[0], 410)
         store = self.server.page_snapshots.store
-        store.clock = lambda: max(item.created for item in store.items.values()) + store.ttl
+        # One second past the limit: (created + ttl) - created can round just below ttl
+        # when Windows' coarse monotonic clock gives both snapshots the same timestamp.
+        store.clock = lambda: max(item.created for item in store.items.values()) + store.ttl + 1
         self.assertEqual(member(first['snapshot_id'], first['items'][0]['uid'])[0], 410)
         store.max_snapshots = len(store.items)
         self.assertEqual(self.request('/api/plugin-view/map/jobs?view=all')[0], 429)
