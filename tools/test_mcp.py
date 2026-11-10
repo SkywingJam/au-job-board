@@ -59,8 +59,6 @@ def rehydrate(mcp, api, uid=None, key=None):
                 out[k] = 'group'
             elif k == 'scope_note':
                 out[k] = history.SCOPE_NOTE
-            elif k == 'reasons' and value == '[]':   # decoded to [] and then omitted
-                out[k] = json.dumps([])
             else:
                 assert _empty(value), (k, value)
                 out[k] = rehydrate({}, value, uid, k) if isinstance(value, dict) else value
@@ -500,7 +498,7 @@ class MCPCompactRecords(MCPFixture, unittest.IsolatedAsyncioTestCase):
             # Specific evidence for each rule.
             item = lambda uid: items[uid]
             self.assertEqual(item('synthetic:p01')['reasons'], ['synthetic +1', 'Caf\u00e9 \u65e5\u672c "q"'])
-            self.assertNotIn('reasons', item('synthetic:p04'))         # "[]" -> [] -> omitted
+            self.assertEqual(item('synthetic:p04')['reasons'], '[]')    # empty list stays the API string
             self.assertEqual(item('synthetic:p05')['reasons'], '["compact","spacing"]')
             self.assertEqual(item('synthetic:p06')['reasons'], 'not json')
             self.assertEqual(item('synthetic:p07')['reasons'], '[1, 2]')

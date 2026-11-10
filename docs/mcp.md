@@ -188,8 +188,10 @@ The JSON is the HTTP API response, with two MCP-only differences:
   recursively (`false` and `0` stay), so an absent field means null or empty;
   `source_id` (always the `uid` after its first colon) and `human_scope`
   (always `group`) are omitted; `human` disappears when all its fields are
-  empty; `reasons` is a JSON list when the API string encodes a list of
-  strings; and `history.scope_note`, a fixed sentence, is omitted and quoted
+  empty; `reasons` becomes a JSON list only when the API string is a non-empty
+  list of strings that re-encodes to exactly the same string
+  (`json.dumps(list, ensure_ascii=False)`), otherwise it stays the original
+  string; and `history.scope_note`, a fixed sentence, is omitted and quoted
   once in the `get_job` description. Response envelopes (`snapshot_id`,
   `total`, `next_cursor: null` and so on), batch, plugin and label-write
   results are unchanged.

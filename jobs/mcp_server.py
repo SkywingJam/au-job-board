@@ -23,7 +23,9 @@ USAGE = ('List results omit full JDs: use get_job with the returned snapshot_id.
          'are independent; unknown or partial must not be reported as success. '
          'Job records omit null/empty fields (absent means null or empty), source_id '
          '(the uid after its first colon) and human_scope (always group: human labels '
-         'belong to the whole duplicate group).')
+         'belong to the whole duplicate group); human is omitted when all its fields '
+         'are empty; reasons is a list when the API string is exactly its compact '
+         'non-empty JSON list of strings, otherwise the original string.')
 READ_INSTRUCTIONS = f'Read-only access through the Job Board HTTP API. {UNTRUSTED}. {USAGE}'
 WRITE_INSTRUCTIONS = (
     f'Job Board HTTP API reads plus one explicit label write. {UNTRUSTED}, and must '
@@ -48,14 +50,14 @@ def _prune(value):
 
 
 def _reasons(value):
-    """The JSON-string reasons list as a list, only when that round-trips exactly."""
+    """A non-empty JSON-string reasons list as a list, only when that round-trips exactly."""
     if not isinstance(value, str):
         return value
     try:
         parsed = json.loads(value)
     except ValueError:
         return value
-    if (isinstance(parsed, list) and all(isinstance(v, str) for v in parsed)
+    if (isinstance(parsed, list) and parsed and all(isinstance(v, str) for v in parsed)
             and json.dumps(parsed, ensure_ascii=False) == value):
         return parsed
     return value
