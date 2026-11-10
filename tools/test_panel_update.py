@@ -25,6 +25,7 @@ from urllib.error import URLError
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+import temp_cleanup  # noqa: E402
 
 import yaml
 from jobs import RunTimeout, cli, config, db as database, demo, labels, panel_update, sources
@@ -35,7 +36,8 @@ from jobs.sources import jobspy_source, seek
 class TemporaryTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="job-board-update-test-")
-        self.addCleanup(self.directory.cleanup)
+        # A stopped worker or watcher can still hold run.lock for a moment on Windows.
+        self.addCleanup(temp_cleanup.cleanup, self.directory)
         self.root = Path(self.directory.name).resolve()
         self.enterContext(patch.object(config, "ROOT", self.root))
         self.enterContext(patch.object(socket, "socket", side_effect=AssertionError("network forbidden")))
