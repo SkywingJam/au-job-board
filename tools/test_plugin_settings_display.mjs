@@ -109,7 +109,7 @@ console.log("-- incompatible plugin --");
     compatibility: { host_api: 1, core: ">=9.0.0" }, incompatible: { core: "1.4.0", requires: ">=9.0.0" } };
   const p = page(item);
   await settle();
-  check("one sentence with both versions", p.state.textContent === 'plugin.incompatible|{"requires":">=9.0.0","core":"1.4.0"}', p.state.textContent);
+  check("one sentence with both versions", p.state.textContent === 'plugin.incompatible|{"requires":"plugin.range_min|{\\"a\\":\\"9.0.0\\"}","core":"1.4.0"}', p.state.textContent);
   check("sentence is visible and not an error tone", p.state.hidden === false);
   check("no switch", p.toggle.hidden === true);
   check("no review entry", p.review.hidden === true);
@@ -128,7 +128,7 @@ console.log("-- incompatible plugin --");
     { withSwitch: false, others: [other] });
   await settle();
   check("a row rendered without a switch is filled from the API and breaks nothing",
-    p.state.textContent === 'plugin.incompatible|{"requires":">=2","core":"1.4.0"}', p.state.textContent);
+    p.state.textContent === 'plugin.incompatible|{"requires":"plugin.range_min|{\\"a\\":\\"2\\"}","core":"1.4.0"}', p.state.textContent);
   check("the other plugin on the page is still applied", p.rest[0].state.textContent === "plugin.consent_granted_short");
 }
 {

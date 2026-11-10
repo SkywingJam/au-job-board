@@ -1038,10 +1038,11 @@ def cmd_plugin(args):
 
 
 def _plugin_line(item):
-    line = f"{item['id']}  {item.get('version') or '-'}  {item.get('origin', 'builtin')}  {item['status']}"
+    from .plugin_install import visible
+    line = f"{item['id']}  {visible(item.get('version') or '-')}  {item.get('origin', 'builtin')}  {item['status']}"
     reason = item.get('incompatible')
     if reason:
-        line += f"  (requires board {reason['requires']}, this board is {reason['core']})"
+        line += f"  (requires board {visible(reason['requires'])}, this board is {visible(reason['core'])})"
     return line
 
 
@@ -1075,6 +1076,18 @@ def _cmd_plugin_package(args):
         print('The configuration could not be read.', file=sys.stderr)
         return 1
     if action == 'list':
+        # Finish an interrupted upgrade first, when no run holds the lock, so the list is true.
+        try:
+            lock = run_state.acquire_lock(current)
+        except OSError:
+            lock = None
+        if lock is not None:
+            try:
+                plugin_install.recover(current)
+            except plugin_install.InstallError as exc:
+                print(exc.message, file=sys.stderr)
+            finally:
+                lock.close()
         items = plugin_host.list_plugins(current)
         if args.json:
             print(json.dumps(items, ensure_ascii=False, indent=2))
@@ -1144,18 +1157,19 @@ def _plugin_install(args, config, upgrade):
     name = manifest['name']
     if isinstance(name, dict):
         name = name.get('en') or name.get('zh')
-    print(f'Plugin:   {plugin_id} ({name})')
+    visible = plugin_install.visible
+    print(f'Plugin:   {plugin_id} ({visible(name)})')
     if upgrade:
         old = previous['version'] if previous else 'unknown'
-        print(f"Version:  {old} -> {manifest['version']}")
+        print(f"Version:  {visible(old)} -> {visible(manifest['version'])}")
         if previous and _version_key(manifest['version']) < _version_key(old):
             print('          This is a downgrade.')
     else:
-        print(f"Version:  {manifest['version']}")
+        print(f"Version:  {visible(manifest['version'])}")
     print('Access:   ' + profile)
     print('Python:   ' + ('yes, this package runs Python code on this machine' if runs_python
                           else 'no, it runs only in the browser'))
-    print('Source:   ' + archive.source)
+    print('Source:   ' + visible(archive.source))
     print('SHA-256:  ' + archive.sha256)
     for permission in plugin_host.consent(config, manifest)['permissions']:
         print(f"  - {permission['title']['en']}: {permission['description']['en']}")
@@ -1229,14 +1243,22 @@ def _plugin_uninstall(args, config):
     plugin_id = args.plugin_id
     if not plugin_host._ID.fullmatch(plugin_id):
         raise InstallError('Plugin ids are lowercase letters, digits, "_" or "-", starting with a letter.')
-    if plugin_id in plugin_host.RESERVED_IDS or plugin_id in plugin_host.bundled_ids():
+    plugin_install.checked_root(config)
+    present = plugin_install.installed(config, plugin_id) or plugin_install.record_path(config, plugin_id).exists()
+    # A later release can bundle an id that was installed earlier. The bundled plugin
+    # is the one in use; the ignored installed copy can still be removed.
+    stale = plugin_install.is_bundled(plugin_id)
+    if stale and not present:
         raise InstallError(f'"{plugin_id}" is bundled with the board and cannot be uninstalled; '
                            'disable it in Settings > Plugins instead.')
-    plugin_install.checked_root(config)
-    if not plugin_install.installed(config, plugin_id) and not plugin_install.record_path(config, plugin_id).exists():
+    if not present:
         raise InstallError(f'"{plugin_id}" is not an installed plugin.')
-    print(f'Uninstall {plugin_id}: its package is removed, it is disabled and its permission grant is revoked. '
-          'Its stored data and results are kept.')
+    if stale:
+        print(f'Uninstall the installed copy of {plugin_id}: the board now bundles this plugin and already ignores '
+              'the installed copy. Only that copy is removed; the bundled plugin, its setting, grant and data stay.')
+    else:
+        print(f'Uninstall {plugin_id}: its package is removed, it is disabled and its permission grant is revoked. '
+              'Its stored data and results are kept.')
     if not _confirm(args, 'Uninstall this plugin?'):
         print('Nothing was uninstalled: confirm by typing yes, or pass --yes when not running interactively.',
               file=sys.stderr)
@@ -1249,12 +1271,18 @@ def _plugin_uninstall(args, config):
         plugin_install.recover(config)
         if not plugin_install.installed(config, plugin_id) and not plugin_install.record_path(config, plugin_id).exists():
             raise InstallError(f'"{plugin_id}" is not an installed plugin.')
-        # Inert first: if removing the files then fails, nothing can run.
-        editor.disable_plugin_locked(plugin_id)
-        plugin_install.uninstall(config, plugin_id)
+        if stale:
+            plugin_install.uninstall(config, plugin_id, stale=True)
+        else:
+            # Inert first: if removing the files then fails, nothing can run.
+            editor.disable_plugin_locked(plugin_id)
+            plugin_install.uninstall(config, plugin_id)
     finally:
         lock.close()
-    print(f'Uninstalled {plugin_id}. Its data and results were kept in {plugin_host._root(config) / plugin_id}.')
+    if stale:
+        print(f'Removed the installed copy of {plugin_id}. The bundled plugin is unchanged.')
+    else:
+        print(f'Uninstalled {plugin_id}. Its data and results were kept in {plugin_host._root(config) / plugin_id}.')
     return 0
 
 

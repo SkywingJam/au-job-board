@@ -540,8 +540,8 @@ class PluginPanelTests(unittest.TestCase):
         self.assertNotIn('a' * 300, detail)
 
     def test_incompatible_row_has_one_plain_sentence_and_no_switch_or_review(self):
-        for lang, sentence in (('en', 'Needs Job Board &gt;=9.0.0; this is 1.4.0. It stays off until you upgrade the plugin or Job Board.'),
-                               ('zh', '需要 Job Board &gt;=9.0.0，当前是 1.4.0。在升级插件或 Job Board 之前它保持关闭。')):
+        for lang, sentence in (('en', 'Needs Job Board 9.0.0 or later; this is 1.4.0. It stays off until you upgrade the plugin or Job Board.'),
+                               ('zh', '需要 Job Board 9.0.0 或更高版本，当前是 1.4.0。在升级插件或 Job Board 之前它保持关闭。')):
             with self.subTest(lang=lang):
                 # Even with a stored grant and "enabled" in the configuration, nothing to switch or review.
                 page = self.settings_page(self.incompatible_item(), lang)
@@ -559,11 +559,23 @@ class PluginPanelTests(unittest.TestCase):
             with self.subTest(lang=lang):
                 page = self.settings_page(self.incompatible_item(), lang, detail=True)
                 body = self.markup(page)
-                self.assertIn('data-grant-state data-consent="">' + i18n.t(lang, 'plugin.incompatible', requires='&gt;=9.0.0', core='1.4.0') + '<', body)
-                for gone in ('data-grant-switch', 'data-plugin-review', 'data-plugin-revoke', 'data-plugin-scope',
+                needs = i18n.t(lang, 'plugin.range_min', a='9.0.0')
+                self.assertIn('data-grant-state data-consent="">' + i18n.t(lang, 'plugin.incompatible', requires=needs, core='1.4.0') + '<', body)
+                # A compatibility matter, not a permission one; a kept grant can still be revoked.
+                self.assertIn('>' + i18n.t(lang, 'plugin.compat_section') + '</h3>', body)
+                self.assertIn(i18n.t(lang, 'plugin.incompatible_hint'), body)
+                self.assertIn('data-plugin-revoke="sponsorship" hidden', body)
+                for gone in ('data-grant-switch', 'data-plugin-review', 'data-plugin-scope',
                              'plugin.consent_required', i18n.t(lang, 'plugin.consent_required_short')):
                     self.assertNotIn(gone, body)
                 self.assertIn('data-plugin-debug="sponsorship"', body)
+
+    def test_version_range_is_shown_in_words(self):
+        from jobs import panel_views
+        self.assertEqual(panel_views._plugin_range_text('>=1.5.0,<2.0.0', 'en'), '1.5.0 or later, below 2.0.0')
+        self.assertEqual(panel_views._plugin_range_text('<2', 'en'), 'a version below 2')
+        self.assertEqual(panel_views._plugin_range_text('>=1.5', 'zh'), '1.5 或更高版本')
+        self.assertEqual(panel_views._plugin_range_text('~1.5', 'en'), '~1.5')          # unexpected: as written
 
     def test_incompatible_text_escapes_the_reason_and_falls_back_without_one(self):
         item = self.incompatible_item(incompatible={'core': '<b>1</b>', 'requires': '"><script>'})

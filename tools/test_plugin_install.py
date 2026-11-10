@@ -163,6 +163,16 @@ class Base(unittest.TestCase):
         path, _, digest = build_plugin_package.build(source, out)
         return path, digest
 
+    def build_unchecked(self, manifest):
+        """A package the builder would refuse: the manifest goes in as written."""
+        source = write_plugin(self.root / ('raw-' + manifest['id']), manifest)
+        out = self.packages / (manifest['id'] + '-raw.zip')
+        with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(source.rglob('*')):
+                if path.is_file():
+                    archive.write(path, path.relative_to(source).as_posix())
+        return out, hashlib.sha256(out.read_bytes()).hexdigest()
+
     def cli(self, *argv, stdin=None):
         out, err = io.StringIO(), io.StringIO()
         stream = stdin if stdin is not None else io.StringIO('')
@@ -643,6 +653,62 @@ class UpgradeAndUninstall(Base):
         fresh, _ = self.build(sidebar_manifest('demo-fresh'))
         self.assertIn('turned off and without a permission grant', self.cli('install', str(fresh))[1])
 
+    def test_review_text_cannot_hide_or_forge_lines(self):
+        for field, value in (('name', {'en': 'Nice\x1b[8m', 'zh': '好'}), ('version', '1.0\nPython:   no'),
+                             ('description', {'en': 'ok\u202egnp.exe', 'zh': '好'})):
+            manifest = sidebar_manifest('demo-esc')
+            manifest[field] = value
+            path, _ = self.build_unchecked(manifest)
+            code, out, err = self.cli('install', str(path), '--yes')
+            self.assertEqual(code, 1, field)
+            self.assertIn('control or direction characters', err)
+            self.assertNotIn('\x1b', out + err)
+            self.assertEqual(self.landed(), [])
+        # Text already on disk (an older record or manifest) is escaped when listed.
+        self.assertEqual(install.visible('a\x1b[8mb\nc\u202e'), 'a\\x1b[8mb\\x0ac\\u202e')
+        self.install(sidebar_manifest())
+        record = self.installed_root() / 'demo-sidebar.install.json'
+        (self.installed_root() / 'demo-sidebar' / 'manifest.json').write_text(
+            json.dumps({**sidebar_manifest(), 'version': '1\x1b[8m'}), encoding='utf-8')
+        code, out, _ = self.cli('list')
+        self.assertEqual(code, 0)
+        self.assertNotIn('\x1b', out)
+        self.assertTrue(record.exists())
+
+    def test_interrupted_upgrade_is_repaired_by_list_and_by_the_next_run(self):
+        for repair in ('list', 'run'):
+            with self.subTest(repair=repair):
+                if not (self.installed_root() / 'demo-sidebar').exists():
+                    self.install(sidebar_manifest())
+                root = self.installed_root()
+                (root / 'demo-sidebar').rename(root / ('.old-demo-sidebar-' + 'd' * 32))   # killed mid-upgrade
+                self.assertIsNone(self.item('demo-sidebar'))
+                if repair == 'list':
+                    code, out, _ = self.cli('list')
+                    self.assertIn('demo-sidebar', out)
+                else:
+                    self.write_config({'demo-sidebar': {'enabled': True}})
+                    host.dispatch(ConfigEditor(self.config, self.config_path).plugin_config(), 'after_fetch')
+                self.assertEqual(self.item('demo-sidebar')['version'], '1.0.0')
+                self.assertEqual([n for n in self.landed() if n.startswith('.')], [])
+
+    def test_stale_installed_copy_of_a_now_bundled_id_can_be_removed(self):
+        self.install(sidebar_manifest())
+        self.write_config({'demo-sidebar': {'enabled': True}})
+        host.grant(self.config, sidebar_manifest(), host.fingerprint(sidebar_manifest()), 'test')
+        write_plugin(self.bundled, sidebar_manifest())                 # a later release bundles the id
+        self.assertEqual(self.item('demo-sidebar')['origin'], 'builtin')
+        before = self.config_path.read_bytes()
+        code, out, err = self.cli('uninstall', 'demo-sidebar', '--yes')
+        self.assertEqual(code, 0, err)
+        self.assertIn('installed copy', out)
+        self.assertEqual(self.landed(), [])
+        self.assertEqual(self.config_path.read_bytes(), before)        # the bundled plugin keeps its setting
+        self.assertTrue((host._root(self.config) / 'demo-sidebar' / 'consent.json').exists())   # and its grant
+        code, _, err = self.cli('uninstall', 'demo-sidebar', '--yes')
+        self.assertEqual(code, 1)
+        self.assertIn('bundled', err)
+
     def test_missing_or_damaged_record_only_hides_provenance(self):
         self.install(sidebar_manifest())
         record = self.installed_root() / 'demo-sidebar.install.json'
@@ -720,6 +786,19 @@ class ArchiveRejections(Base):
         # The manifest names an entry that is not in the package.
         self.refuse(raw_zip(self.good_entries()[:2]), 'web/compare.html')
         self.refuse(raw_zip([('manifest.json', json.dumps(hook_manifest()).encode(), None)]), 'plugin.py')
+
+    def test_archive_written_with_writestr_installs(self):
+        manifest = sidebar_manifest('demo-plain')
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:      # modes 0600, no file-type bits
+            archive.writestr('manifest.json', json.dumps(manifest))
+            archive.writestr('web/index.html', '<p>plain</p>')
+            archive.writestr('web/compare.html', '<p>plain</p>')
+        path = self.packages / 'plain.zip'
+        path.write_bytes(buffer.getvalue())
+        code, _, err = self.cli('install', str(path), '--yes')
+        self.assertEqual(code, 0, err)
+        self.assertTrue((self.installed_root() / 'demo-plain' / 'web' / 'index.html').is_file())
 
     def test_size_entry_and_bomb_limits(self):
         good = self.good_entries()

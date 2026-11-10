@@ -77,6 +77,17 @@ class Package:
 
 # ---------------------------------------------------------------- obtaining bytes
 
+_HIDDEN = re.compile('[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]')
+
+
+def visible(text):
+    """Text that is safe to print in a terminal: control characters, newlines and
+    direction overrides are shown as escapes so a manifest or record cannot hide
+    or forge lines of the review."""
+    return _HIDDEN.sub(lambda m: '\\x%02x' % ord(m.group()) if ord(m.group()) < 256 else '\\u%04x' % ord(m.group()),
+                       str(text))
+
+
 def normalize_sha256(value):
     if value is None:
         return None
@@ -239,7 +250,7 @@ def _entry_kind(info, directory):
         raise InstallError('The package uses a compression method other than stored or deflate.')
     mode = info.external_attr >> 16
     if info.create_system == 3 and mode:
-        kind = stat.S_IFMT(mode)
+        kind = stat.S_IFMT(mode) or (stat.S_IFDIR if directory else stat.S_IFREG)   # permission bits only
         if kind == stat.S_IFLNK:
             raise InstallError('The package contains a symbolic link.')
         if kind not in (stat.S_IFREG, stat.S_IFDIR) or (kind == stat.S_IFDIR) != directory:
@@ -392,6 +403,11 @@ def _package_manifest(raw):
     plugin_id = value.get('id') if isinstance(value, dict) else None
     if not isinstance(plugin_id, str) or not plugin_host._ID.fullmatch(plugin_id):
         raise InstallError('The package manifest id must be lowercase letters, digits, "_" or "-", starting with a letter.')
+    for key in ('name', 'description', 'version'):
+        texts = value.get(key)
+        texts = list(texts.values()) if isinstance(texts, dict) else [texts]
+        if any(isinstance(text, str) and visible(text) != text for text in texts):
+            raise InstallError(f'The package manifest {key} contains control or direction characters.')
     try:
         return plugin_host.validate_manifest(value, plugin_id)
     except RunTimeout:
@@ -635,12 +651,17 @@ def install(config, archive, package, *, upgrade=False):
     return record
 
 
-def uninstall(config, plugin_id):
+def is_bundled(plugin_id):
+    return plugin_id in plugin_host.RESERVED_IDS or plugin_id in plugin_host.bundled_ids()
+
+
+def uninstall(config, plugin_id, *, stale=False):
     """Remove an installed package and its record; plugin data stays.
-    Caller holds the run lock and already disabled and revoked the plugin."""
+    Caller holds the run lock and already disabled and revoked the plugin.
+    `stale` removes an ignored installed copy whose id a later release bundles."""
     if not isinstance(plugin_id, str) or not plugin_host._ID.fullmatch(plugin_id):
         raise InstallError('Plugin ids are lowercase letters, digits, "_" or "-", starting with a letter.')
-    if plugin_id in plugin_host.RESERVED_IDS or plugin_id in plugin_host.bundled_ids():
+    if not stale and is_bundled(plugin_id):
         raise InstallError(f'"{plugin_id}" is bundled with the board and cannot be uninstalled; disable it in Settings > Plugins instead.')
     root = checked_root(config)
     target, record = root / plugin_id, record_path(config, plugin_id)

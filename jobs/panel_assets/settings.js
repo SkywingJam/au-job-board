@@ -486,7 +486,19 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
   const originOf=item=>item&&(item.origin==='builtin'||item.origin==='installed')?T('plugin.origin_'+item.origin):'';
   function incompatibleText(item){
     const r=item&&item.incompatible,core=r&&typeof r==='object'?clip(r.core,64):'',requires=r&&typeof r==='object'?clip(r.requires,64):'';
-    return core&&requires?T('plugin.incompatible',{requires,core}):T('plugin.incompatible_generic');
+    return core&&requires?T('plugin.incompatible',{requires:rangeText(requires),core}):T('plugin.incompatible_generic');
+  }
+  /* `>=1.5.0,<2.0.0` in words; anything unexpected is shown as written. */
+  function rangeText(requires){
+    let low='',high='';
+    for(const part of requires.split(',')){
+      if(part.startsWith('>=')&&!low)low=part.slice(2);
+      else if(part.startsWith('<')&&!part.startsWith('<=')&&!high)high=part.slice(1);
+      else return requires;
+    }
+    if(low&&high)return T('plugin.range_both',{a:low,b:high});
+    if(low)return T('plugin.range_min',{a:low});
+    return high?T('plugin.range_max',{b:high}):requires;
   }
   function installFacts(item){
     const record=item&&item.install;if(!record||typeof record!=='object')return null;
@@ -499,7 +511,7 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
   }
   /* The switch is the saved on/off setting; this line says whether it can actually run. */
   function stateOf(item){
-    if(item.status==='incompatible')return [incompatibleText(item),'is-note',''];
+    if(item.status==='incompatible')return [incompatibleText(item),'is-note',T('plugin.incompatible_hint')];
     if(item.status==='error')return [T('plugin.unavailable_hint'),'is-bad',''];
     const c=consentOf(item);if(!c)return ['','',''];
     if(c.status==='granted')return [T('plugin.consent_granted_short'),'is-ok',T('plugin.consent_granted_hint')];
@@ -550,7 +562,7 @@ document.addEventListener('DOMContentLoaded',bindConfigEditor);
       setState(state,text||T('plugin.consent_unknown_hint'),text?tone:'is-bad',status);
       const hintEl=detail.querySelector('[data-grant-hint]');if(hintEl)hintEl.textContent=hint;
       const reviewBtn=detail.querySelector('[data-plugin-review]');if(reviewBtn)reviewBtn.hidden=!needs;
-      const revokeBtn=detail.querySelector('[data-plugin-revoke]');if(revokeBtn)revokeBtn.hidden=incompatible||!(c&&c.status!=='required');
+      const revokeBtn=detail.querySelector('[data-plugin-revoke]');if(revokeBtn)revokeBtn.hidden=!(c&&c.status!=='required');   // a kept grant can be revoked while incompatible
       if(!incompatible)renderScope(detail.querySelector('[data-plugin-scope]'),item);
     }
   }

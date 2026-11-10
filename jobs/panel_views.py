@@ -1458,8 +1458,25 @@ def _plugin_incompatible_text(item: dict, lang: str) -> str:
     core = _plugin_clip(reason.get("core"), 64) if isinstance(reason, dict) else ""
     requires = _plugin_clip(reason.get("requires"), 64) if isinstance(reason, dict) else ""
     if core and requires:
-        return i18n.t(lang, "plugin.incompatible", requires=requires, core=core)
+        return i18n.t(lang, "plugin.incompatible", requires=_plugin_range_text(requires, lang), core=core)
     return i18n.t(lang, "plugin.incompatible_generic")
+
+
+def _plugin_range_text(requires: str, lang: str) -> str:
+    """`>=1.5.0,<2.0.0` in words; anything unexpected is shown as written."""
+    low = high = ""
+    for part in requires.split(","):
+        if part.startswith(">=") and not low:
+            low = part[2:]
+        elif part.startswith("<") and not part.startswith("<=") and not high:
+            high = part[1:]
+        else:
+            return requires
+    if low and high:
+        return i18n.t(lang, "plugin.range_both", a=low, b=high)
+    if low:
+        return i18n.t(lang, "plugin.range_min", a=low)
+    return i18n.t(lang, "plugin.range_max", b=high) if high else requires
 
 
 def _plugin_install_facts(item: dict, lang: str) -> list[tuple[str, str, str]]:
@@ -1558,13 +1575,17 @@ def _plugin_detail(item: dict, name: str, lang: str) -> str:
                         + _e(value) + '</dd></div>' for label, value, cls in facts)
               + '</dl></section>') if facts else ''
     if incompatible:
-        # The grant is kept but cannot be used now: show the reason, no switch, review or revoke.
+        # A compatibility matter, not a permission one. The grant is kept and cannot be
+        # used now: no switch and no review, but a stored grant can still be revoked.
         grant = ('<section class="plugin-grant" aria-labelledby="plugin-grant-title">'
-                 f'<h3 id="plugin-grant-title">{_e(T("plugin.grant_section"))}</h3>'
+                 f'<h3 id="plugin-grant-title">{_e(T("plugin.compat_section"))}</h3>'
                  '<dl class="plugin-grant-facts">'
-                 f'<div><dt>{_e(T("plugin.consent_label"))}</dt><dd><span class="plugin-state {tone}" '
+                 f'<div><dt>{_e(T("plugin.compat_label"))}</dt><dd><span class="plugin-state {tone}" '
                  f'data-grant-state data-consent="">{_e(text)}</span></dd></div></dl>'
-                 '<p class="plugin-grant-hint" data-grant-hint></p>'
+                 f'<p class="plugin-grant-hint" data-grant-hint>{_e(T("plugin.incompatible_hint"))}</p>'
+                 '<div class="plugin-grant-actions">'
+                 f'<button type="button" class="btn plugin-revoke-btn" data-plugin-revoke="{_e(plugin_id)}" hidden>'
+                 f'{_e(T("plugin.revoke"))}</button></div>'
                  '<p class="plugin-row-message" data-grant-message role="status" aria-live="polite"></p>'
                  '</section>')
         scope = ''
