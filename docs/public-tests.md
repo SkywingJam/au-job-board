@@ -10,8 +10,8 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 57 checks: 48 Python tests
-plus nine Node behavior tests.
+be collected by accident. The entry currently has 59 checks: 49 Python tests
+plus ten Node behavior tests.
 
 Run it from the project root with the project interpreter:
 
@@ -21,10 +21,10 @@ Run it from the project root with the project interpreter:
 ```
 
 The optional MCP adapter has two opt-in integration entries:
-`python tools/run_public_tests.py --with-mcp` (59 entries on macOS).
+`python tools/run_public_tests.py --with-mcp` (61 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default local command keeps
-57 entries. Release CI installs the optional SDK and runs the platform-applicable inventory.
+59 entries. Release CI installs the optional SDK and runs the platform-applicable inventory.
 See [MCP](mcp.md).
 
 Entries run concurrently: `--jobs N` sets the worker count (default
@@ -52,7 +52,7 @@ serial group in the runner.
 
 - **Python 3.12** with the runtime dependencies:
   `python -m pip install -r requirements.txt`.
-- **Node.js 24.21.0** for the nine panel behavior tests. Node is only
+- **Node.js 24.21.0** for the ten panel behavior tests. Node is only
   needed to run the full public suite. It is **not** part of the product
   installation, the panel does not depend on it at runtime, and a normal
   install does not need it.

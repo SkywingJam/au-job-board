@@ -73,7 +73,10 @@ def resource(config, plugin_id, relative):
     if (not isinstance(relative, str) or not re.fullmatch(r'[A-Za-z0-9_.\-/]+', relative)
             or any(p in ('', '.', '..') for p in relative.split('/'))):
         raise APIError('invalid_asset', 404)
-    base = plugin_host.PLUGIN_ROOT / plugin_id / 'web'
+    directory = plugin_host.plugin_dir(config, plugin_id)
+    if directory is None:
+        raise APIError('invalid_asset', 404)
+    base = directory / 'web'
     path = base / relative
     current = path
     while current != base.parent:
@@ -93,7 +96,10 @@ def resource(config, plugin_id, relative):
 def reference(config, plugin_id, filename):
     """Verify public package bytes before decompression; never read private data."""
     _require_list(config, plugin_id)
-    base = plugin_host.PLUGIN_ROOT / plugin_id / 'reference'
+    directory = plugin_host.plugin_dir(config, plugin_id)
+    if directory is None:
+        raise APIError('reference_unavailable', 503)
+    base = directory / 'reference'
     if base.is_symlink():
         raise APIError('reference_unavailable', 503)
     index = plugin_host._read(base / 'index.json', 2 * 1024 * 1024)

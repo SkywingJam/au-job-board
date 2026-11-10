@@ -20,11 +20,15 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import RunTimeout
+from . import RunTimeout, __version__ as CORE_VERSION
 from .config import ROOT, db_path
 from .run_state import atomic_json
 
 PLUGIN_ROOT = ROOT / 'plugins'
+MAX_PLUGINS = 32
+# Ids of the plugins shipped with core. An installed package may never use one,
+# even when a bundled directory is missing from this checkout.
+RESERVED_IDS = frozenset({'sponsorship', 'map', 'workspace'})
 MAX_MANIFEST = 32 * 1024
 MAX_RESULT = 8 * 1024 * 1024
 MAX_REQUEST = 8 * 1024 * 1024
@@ -66,8 +70,173 @@ def _root(config):
     return db.parent / ('.' + db.name + '.plugins')
 
 
+def packages_root(config):
+    """Installed plugin packages, beside the plugin data root of this instance."""
+    db = db_path(config).resolve()
+    return db.parent / ('.' + db.name + '.plugin-packages')
+
+
+def _plugin_entries(root):
+    try:
+        return sorted(root.iterdir())
+    except OSError:
+        return []
+
+
+def _usable(path):
+    return bool(_ID.fullmatch(path.name)) and not path.is_symlink() and path.is_dir()
+
+
+def _bundled():
+    # Exactly the previous discovery: the first 32 entries of plugins/, filtered.
+    return [(path.name, path, 'builtin') for path in _plugin_entries(PLUGIN_ROOT)[:MAX_PLUGINS]
+            if _usable(path)]
+
+
+def bundled_ids():
+    return {plugin_id for plugin_id, _, _ in _bundled()}
+
+
+def plugin_dirs(config):
+    """[(id, directory, origin)] for every plugin directory the host reads.
+
+    Bundled plugins come first, exactly as before (the first 32 entries of
+    `plugins/`); installed packages fill the remaining places. Symlinked
+    directories are ignored, and an installed package can never shadow a
+    bundled or reserved id.
+    """
+    found = _bundled()
+    taken = {plugin_id for plugin_id, _, _ in found} | RESERVED_IDS
+    if len(found) >= MAX_PLUGINS or 'demo' in config:
+        return found
+    try:
+        root = packages_root(config)
+        if root.is_symlink() or not root.is_dir():
+            return found
+    except (OSError, ValueError):
+        return found
+    for path in _plugin_entries(root):
+        if len(found) >= MAX_PLUGINS:
+            break
+        if path.name not in taken and _usable(path):
+            found.append((path.name, path, 'installed'))
+    return found
+
+
+def plugin_dir(config, plugin_id):
+    """The directory of a plugin the host reads, or None."""
+    if not isinstance(plugin_id, str) or not _ID.fullmatch(plugin_id):
+        return None
+    # A bundled plugin never needs the instance's package directory.
+    bundled = next((path for i, path, _ in _bundled() if i == plugin_id), None)
+    if bundled is not None:
+        return bundled
+    return next((path for i, path, _ in plugin_dirs(config) if i == plugin_id), None)
+
+
+def load_manifest(config, plugin_id):
+    """The validated manifest of a plugin the host reads; ValueError when absent."""
+    path = plugin_dir(config, plugin_id)
+    if path is None:
+        raise ValueError('plugin not found')
+    return _manifest(path, plugin_id)
+
+
+def read_install_record(config, plugin_id):
+    """Provenance of an installed package, or None when missing or damaged."""
+    try:
+        value = _read(packages_root(config) / (plugin_id + '.install.json'), MAX_LOG)
+    except RunTimeout:
+        raise
+    except Exception:
+        return None
+    keys = ('version', 'sha256', 'source', 'installed_at')
+    if (not isinstance(value, dict) or value.get('id') != plugin_id
+            or not all(isinstance(value.get(k), str) and len(value[k]) <= 2048 for k in keys)
+            or not re.fullmatch(r'[0-9a-f]{64}', value['sha256'])):
+        return None
+    return {k: value[k] for k in keys}
+
+
+# `compatibility.core`: one or two comparators `>=X` / `<X`, X = 1-4 dot-separated
+# non-negative integers without leading zeros; missing parts count as 0.
+_CORE_NUMBER = r'(?:0|[1-9][0-9]{0,8})'
+_CORE_COMPARATOR = re.compile(r'(>=|<)(' + _CORE_NUMBER + r'(?:\.' + _CORE_NUMBER + r'){0,3})')
+
+
+def _version_tuple(text):
+    parts = [int(x) for x in text.split('.')]
+    return tuple(parts + [0] * (4 - len(parts)))
+
+
+def parse_core_range(text):
+    """[(operator, version tuple)] for a valid range; ValueError otherwise."""
+    if not isinstance(text, str) or not 0 < len(text) <= 64:
+        raise ValueError('invalid core range')
+    result = []
+    for part in text.split(','):
+        match = _CORE_COMPARATOR.fullmatch(part)
+        if not match:
+            raise ValueError('invalid core range')
+        result.append((match.group(1), _version_tuple(match.group(2))))
+    if not 1 <= len(result) <= 2 or len({op for op, _ in result}) != len(result):
+        raise ValueError('invalid core range')
+    return result
+
+
+def core_version_tuple(version=None):
+    """The running core version as a 4-tuple, or None when it is not numeric."""
+    match = re.match(r'(' + _CORE_NUMBER + r'(?:\.' + _CORE_NUMBER + r'){0,3})(?![0-9])',
+                     CORE_VERSION if version is None else version)
+    return _version_tuple(match.group(1)) if match else None
+
+
+def core_satisfies(text, version=None):
+    current = core_version_tuple(version)
+    if current is None:
+        return False
+    return all(current >= bound if op == '>=' else current < bound
+               for op, bound in parse_core_range(text))
+
+
+def host_api(manifest):
+    """1 or 2 for a validated manifest; compared by value as before."""
+    api = (manifest.get('compatibility') or {}).get('host_api')
+    return 2 if api == 2 else 1
+
+
+def compatibility(manifest):
+    """{host_api, core} of a validated manifest; core is null when undeclared."""
+    return {'host_api': host_api(manifest), 'core': manifest['compatibility'].get('core')}
+
+
+def incompatibility(manifest, version=None):
+    """None, or {core, requires} when the running core is outside the range."""
+    required = manifest['compatibility'].get('core')
+    if required is None or core_satisfies(required, version):
+        return None
+    return {'core': CORE_VERSION if version is None else version, 'requires': required}
+
+
+def _check_compatibility(value):
+    compat = value.get('compatibility')
+    if not isinstance(compat, dict) or set(compat) - {'host_api', 'core'} or 'host_api' not in compat:
+        raise ValueError('incompatible host API')
+    # The same comparison as before (`== {'host_api': n}`), so nothing that
+    # loaded until now is refused.
+    if compat['host_api'] not in (1, 2):
+        raise ValueError('incompatible host API')
+    if 'core' in compat:
+        parse_core_range(compat['core'])
+    return 2 if compat['host_api'] == 2 else 1
+
+
 def _manifest(path, plugin_id):
-    value = _read(path / 'manifest.json', MAX_MANIFEST)
+    return validate_manifest(_read(path / 'manifest.json', MAX_MANIFEST), plugin_id)
+
+
+def validate_manifest(value, plugin_id):
+    """The host's manifest check on an already parsed value."""
     if not isinstance(value, dict) or value.get('id') != plugin_id:
         raise ValueError('invalid manifest id')
     if not isinstance(value.get('version'), str) or not value['version'] or len(value['version']) > 64:
@@ -80,10 +249,8 @@ def _manifest(path, plugin_id):
     if not (isinstance(description, str) and len(description) <= 200 or
             isinstance(description, dict) and all(k in ('zh', 'en') and isinstance(v, str) and len(v) <= 200 for k, v in description.items())):
         raise ValueError('invalid description')
-    if value.get('compatibility') == {'host_api': 2}:
+    if _check_compatibility(value) == 2:
         return _page_manifest(value)
-    if value.get('compatibility') != {'host_api': 1}:
-        raise ValueError('incompatible host API')
     if value.get('entry') != 'plugin.py':
         raise ValueError('invalid entry')
     if not isinstance(value.get('hooks'), list) or not set(value['hooks']) <= {'after_fetch', 'after_analyze_success'} or any(not isinstance(x, str) for x in value['hooks']):
@@ -160,16 +327,18 @@ def _handed_manifest(value):
 
 def handed(manifest):
     """True for the handed-jobs profile (sidebar + page, no list access)."""
-    return (manifest.get('compatibility') == {'host_api': 2}
+    return (host_api(manifest) == 2
             and (manifest.get('permissions') or {}).get('job_scope') == 'handed')
 
 
 def fingerprint(manifest):
     scope = {key: manifest.get(key) for key in ('id', 'hooks', 'network', 'display', 'permissions')}
-    if manifest.get('compatibility') == {'host_api': 2}:
+    if host_api(manifest) == 2:
         # `sidebar` only joins the scope when declared, so map fingerprints are unchanged.
         keys = ('compatibility', 'entry', 'page') + (('sidebar',) if 'sidebar' in manifest else ())
         scope.update({key: manifest.get(key) for key in keys})
+        # The core version range is not a permission: changing it needs no new consent.
+        scope['compatibility'] = {k: v for k, v in scope['compatibility'].items() if k != 'core'}
         for key in ('page', 'sidebar'):   # display icons are cosmetic, not permissions
             if isinstance(scope.get(key), dict):
                 scope[key] = {k: v for k, v in scope[key].items() if k != 'icon'}
@@ -193,7 +362,7 @@ def consent(config, manifest):
     if handed(manifest):
         return {'status': status, 'fingerprint': current,
                 'permissions': _handed_consent(manifest), 'limits': _handed_limits()}
-    if manifest.get('compatibility') == {'host_api': 2}:
+    if host_api(manifest) == 2:
         entries = [
             ('identity', '插件来源', 'Plugin source',
              '请只安装来自可信维护者的插件。', 'Only install plugins from maintainers you trust.'),
@@ -350,51 +519,48 @@ def _log(config, plugin_id, stage, error, message="Plugin operation failed."):
         pass
 
 
-def list_plugins(config: dict) -> list[dict]:
+def _scan(config):
+    """[(item, manifest or None)]: status and manifest come from the same read."""
     if 'demo' in config:
         return []
-    try:
-        paths = sorted(PLUGIN_ROOT.iterdir())[:32]
-    except OSError:
-        return []
     result = []
-    for path in paths:
-        plugin_id = path.name
-        if not _ID.fullmatch(plugin_id) or not path.is_dir() or path.is_symlink():
-            continue
+    for plugin_id, path, origin in plugin_dirs(config):
         item = {'id': plugin_id, 'name': plugin_id, 'version': '', 'enabled': False,
-                'description': '', 'status': 'disabled', 'error_count': len(read_debug(config, plugin_id)['entries'])}
+                'description': '', 'status': 'disabled', 'error_count': len(read_debug(config, plugin_id)['entries']),
+                'origin': origin, 'compatibility': None}
+        if origin == 'installed':
+            item['install'] = read_install_record(config, plugin_id)
+        manifest = None
         try:
             item['enabled'] = _enabled(config, plugin_id)
             manifest = _manifest(path, plugin_id)
             item.update(name=manifest['name'], version=manifest['version'], description=manifest.get('description', ''))
+            item['compatibility'] = compatibility(manifest)
             item['consent'] = consent(config, manifest)
-            item['status'] = ('enabled' if item['consent']['status'] == 'granted' else 'consent_required') if item['enabled'] else 'disabled'
+            reason = incompatibility(manifest)
+            if reason is not None:
+                # Inert like a disabled plugin; its grant and results are kept.
+                item['status'], item['incompatible'] = 'incompatible', reason
+            else:
+                item['status'] = ('enabled' if item['consent']['status'] == 'granted' else 'consent_required') if item['enabled'] else 'disabled'
         except RunTimeout:
             raise
         except Exception:
-            item['status'] = 'error'
-        result.append(item)
+            item['status'], manifest = 'error', None
+        result.append((item, manifest))
     return result
+
+
+def list_plugins(config: dict) -> list[dict]:
+    return [item for item, _ in _scan(config)]
 
 
 def _display_manifests(config):
     """(id, manifest) for authorized, compatible host API 2 plugins; disabled path is inert."""
     if not _configured(config) or 'demo' in config:
         return []
-    found = []
-    for item in list_plugins(config):
-        if item['status'] != 'enabled':
-            continue
-        try:
-            manifest = _manifest(PLUGIN_ROOT / item['id'], item['id'])
-            if manifest.get('compatibility') == {'host_api': 2}:
-                found.append((item['id'], manifest))
-        except RunTimeout:
-            raise
-        except (OSError, ValueError, TypeError):
-            continue
-    return found
+    return [(item['id'], manifest) for item, manifest in _scan(config)
+            if item['status'] == 'enabled' and manifest is not None and host_api(manifest) == 2]
 
 
 def display_manifest(config, plugin_id):
@@ -522,9 +688,13 @@ def _run_isolated(config, plugin_id, hook, request, *, trusted_download=False):
         request_path, result_path = Path(tmp) / 'input.json', Path(tmp) / 'output.json'
         request_path.write_bytes(payload)
         request_path.chmod(0o600)
-        command = ([sys.executable, '-m', 'jobs.plugin_downloads', str(request_path), str(result_path)]
-                   if trusted_download else
-                   [sys.executable, '-m', 'jobs.plugin_worker', str(PLUGIN_ROOT / plugin_id / 'plugin.py'), hook, str(request_path), str(result_path)])
+        if trusted_download:
+            command = [sys.executable, '-m', 'jobs.plugin_downloads', str(request_path), str(result_path)]
+        else:
+            directory = plugin_dir(config, plugin_id)
+            if directory is None:
+                raise ValueError('plugin not found')
+            command = [sys.executable, '-m', 'jobs.plugin_worker', str(directory / 'plugin.py'), hook, str(request_path), str(result_path)]
         process = job = lock = None
         try:
             if os.name == 'nt':
@@ -592,7 +762,9 @@ def _dispatch(config: dict, hook: str, jobs: list | None = None, analysis_id: in
             continue
         plugin_id = item['id']
         try:
-            manifest = _manifest(PLUGIN_ROOT / plugin_id, plugin_id)
+            manifest = load_manifest(config, plugin_id)
+            if incompatibility(manifest) is not None:
+                continue
             if consent(config, manifest)['status'] != 'granted':
                 continue
             if hook not in manifest['hooks']:

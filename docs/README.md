@@ -11,8 +11,8 @@ English.
 | [install.md](install.md) | Source installation for a new machine, and the license boundary |
 | [docker.md](docker.md) | Optional Docker / Compose deployment, persistent volumes, commands and backup; macOS still prefers source |
 | [agent-install.md](agent-install.md) | The same install steps for an AI coding agent |
-| [plugin-interface.md](plugin-interface.md) | Reference for plugin authors: manifest, permission profiles, hooks, frame bridge operations, limits and the stability rule |
-| [plugins.md](plugins.md) | Optional plugins (including the job map), process isolation, settings and diagnostic output |
+| [plugin-interface.md](plugin-interface.md) | Reference for plugin authors: manifest, permission profiles, hooks, frame bridge operations, package format, core version range, limits and the stability rule |
+| [plugins.md](plugins.md) | Optional plugins (including the job map), installing, upgrading and removing them, process isolation, settings and diagnostic output |
 | [sponsorship.md](sponsorship.md) | Employer reference facts and accredited-list import |
 | [usage.md](usage.md) | The fetch, analyze, report and panel workflow, commands, labels and notes, local data and provenance |
 | [manual-updates.md](manual-updates.md) | Editable next-run fetch settings, background updates, configuration timing and failure states |

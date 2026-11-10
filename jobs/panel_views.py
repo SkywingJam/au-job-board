@@ -1436,9 +1436,52 @@ def _plugin_consent_status(item: dict) -> str:
     return status if status in ("required", "changed", "granted") else ""
 
 
+def _plugin_clip(value, limit: int) -> str:
+    """Plain text from a plugin- or archive-derived field: strings only, bounded."""
+    if not isinstance(value, str):
+        return ""
+    value = " ".join(value.split())
+    return value if len(value) <= limit else value[:limit - 1] + "…"
+
+
+def _plugin_origin_text(item: dict, lang: str) -> str:
+    """'Built in' / 'Installed'; empty when the server did not report an origin."""
+    origin = item.get("origin")
+    return i18n.t(lang, "plugin.origin_" + origin) if origin in ("builtin", "installed") else ""
+
+
+def _plugin_incompatible_text(item: dict, lang: str) -> str:
+    """One plain sentence for an `incompatible` plugin; empty for every other status."""
+    if item.get("status") != "incompatible":
+        return ""
+    reason = item.get("incompatible")
+    core = _plugin_clip(reason.get("core"), 64) if isinstance(reason, dict) else ""
+    requires = _plugin_clip(reason.get("requires"), 64) if isinstance(reason, dict) else ""
+    if core and requires:
+        return i18n.t(lang, "plugin.incompatible", requires=requires, core=core)
+    return i18n.t(lang, "plugin.incompatible_generic")
+
+
+def _plugin_install_facts(item: dict, lang: str) -> list[tuple[str, str, str]]:
+    """(label, text, css class) rows from an installed plugin's record; [] when there is none."""
+    record = item.get("install")
+    if not isinstance(record, dict):
+        return []
+    when = record.get("installed_at")
+    when = when[:10] if isinstance(when, str) and re.match(r"\d{4}-\d{2}-\d{2}", when) else _plugin_clip(when, 32)
+    sha = record.get("sha256")
+    rows = [("plugin.provenance_source", _plugin_clip(record.get("source"), 200), ""),
+            ("plugin.provenance_sha", sha[:12] if isinstance(sha, str) else "", "plugin-sha"),
+            ("plugin.provenance_date", when, "")]
+    return [(i18n.t(lang, key), text, cls) for key, text, cls in rows if text]
+
+
 def _plugin_state_text(item: dict, lang: str) -> tuple[str, str]:
     """(状态文字, 样式)：开关只代表配置里的开/关，这一行说明它此刻能不能运行。"""
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    if item.get("status") == "incompatible":
+        # Not an error and not a missing permission: the stored grant is kept.
+        return _plugin_incompatible_text(item, lang), "is-note"
     if item.get("status") == "error":
         return T("plugin.unavailable_hint"), "is-bad"
     status = _plugin_consent_status(item)
@@ -1460,32 +1503,40 @@ def _plugin_row(item: dict, name: str, lang: str) -> str:
                                        "pl-msg-" + plugin_id, "pl-state-" + plugin_id)
     errors = (T("plugin.error_count", n=item["error_count"]) if item.get("error_count") else "")
     text, tone = _plugin_state_text(item, lang)
-    consent = _plugin_consent_status(item)
+    incompatible = state == "incompatible"
+    consent = "" if incompatible else _plugin_consent_status(item)
     version = item.get("version") or ""
-    return (f'<div class="plugin-row" data-plugin-id="{_e(plugin_id)}">'
-            '<div class="plugin-row-main"><div class="plugin-identity">'
-            f'<b id="{_e(name_id)}">{_e(name)}'
-            + (f' <span class="plugin-version">{_e(T("plugin.version", version=version))}</span>' if version else '')
-            + '</b>'
-            f'<small id="{_e(desc_id)}">{_e(description)}</small>'
-            f'<small id="{_e(st_id)}" class="plugin-state {tone}" data-consent="{_e(consent)}"'
-            f'{" hidden" if not text else ""}>{_e(text)}</small>'
-            f'<small class="plugin-error-count"{" hidden" if not errors else ""}>{_e(errors)}</small></div>'
+    origin = _plugin_origin_text(item, lang)
+    # An incompatible plugin has no switch and no review entry: nothing the user can do here.
+    toggle = '' if incompatible else (
             f'<button type="button" class="plugin-toggle" role="switch" '
             f'aria-checked="{"true" if item["enabled"] else "false"}" '
             f'aria-labelledby="{_e(name_id)}" aria-describedby="{_e(desc_id)} {_e(st_id)} {_e(msg_id)}" '
             f'aria-disabled="{"true" if state == "error" and not item["enabled"] else "false"}" '
             f'data-unavailable="{"true" if state == "error" else "false"}" '
             f'data-plugin-toggle="{_e(plugin_id)}" data-enabled="{"true" if item["enabled"] else "false"}">'
-            '<span class="plugin-toggle-track" aria-hidden="true"><span></span></span></button>'
+            '<span class="plugin-toggle-track" aria-hidden="true"><span></span></span></button>')
+    review = '' if incompatible else (
+            # 需要授权时，审阅入口与开关并列在行内，不藏进详情页。
+            f'<button type="button" class="plugin-review-link" data-plugin-review="{_e(plugin_id)}"'
+            f'{" hidden" if consent not in ("required", "changed") or state == "error" else ""}>'
+            f'{_e(T("plugin.review_enable"))}</button>')
+    return (f'<div class="plugin-row" data-plugin-id="{_e(plugin_id)}">'
+            '<div class="plugin-row-main"><div class="plugin-identity">'
+            f'<b id="{_e(name_id)}">{_e(name)}'
+            + (f' <span class="plugin-version">{_e(T("plugin.version", version=version))}</span>' if version else '')
+            + (f'<span class="plugin-origin">{_e(origin)}</span>' if origin else '')
+            + '</b>'
+            f'<small id="{_e(desc_id)}">{_e(description)}</small>'
+            f'<small id="{_e(st_id)}" class="plugin-state {tone}" data-consent="{_e(consent)}"'
+            f'{" hidden" if not text else ""}>{_e(text)}</small>'
+            f'<small class="plugin-error-count"{" hidden" if not errors else ""}>{_e(errors)}</small></div>'
+            + toggle +
             f'<a class="plugin-open" href="/settings?section=plugins&amp;plugin={_e(plugin_id)}" '
             f'aria-label="{_e(T("plugin.settings", name=name))}">'
             '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></a></div>'
             f'<p id="{_e(msg_id)}" class="plugin-row-message" role="status" aria-live="polite"></p>'
-            # 需要授权时，审阅入口与开关并列在行内，不藏进详情页。
-            f'<button type="button" class="plugin-review-link" data-plugin-review="{_e(plugin_id)}"'
-            f'{" hidden" if consent not in ("required", "changed") or state == "error" else ""}>'
-            f'{_e(T("plugin.review_enable"))}</button></div>')
+            + review + '</div>')
 
 
 def _plugin_detail(item: dict, name: str, lang: str) -> str:
@@ -1494,33 +1545,55 @@ def _plugin_detail(item: dict, name: str, lang: str) -> str:
     version = item.get("version") or ""
     description = _plugin_text(item.get("description"), lang)
     text, tone = _plugin_state_text(item, lang)
-    consent = _plugin_consent_status(item)
-    meta = " · ".join(x for x in (T("plugin.version", version=version) if version else "", plugin_id) if x)
+    incompatible = item.get("status") == "incompatible"
+    consent = "" if incompatible else _plugin_consent_status(item)
+    meta = " · ".join(x for x in (T("plugin.version", version=version) if version else "",
+                                  _plugin_origin_text(item, lang), plugin_id) if x)
     switch = T("plugin.enabled") if item.get("enabled") else T("plugin.disabled")
+    facts = _plugin_install_facts(item, lang)
+    source = ('<section class="plugin-source" aria-labelledby="plugin-source-title">'
+              f'<h3 id="plugin-source-title">{_e(T("plugin.provenance_title"))}</h3>'
+              '<dl class="plugin-source-facts">'
+              + "".join('<div><dt>' + _e(label) + '</dt><dd' + (f' class="{cls}"' if cls else '') + '>'
+                        + _e(value) + '</dd></div>' for label, value, cls in facts)
+              + '</dl></section>') if facts else ''
+    if incompatible:
+        # The grant is kept but cannot be used now: show the reason, no switch, review or revoke.
+        grant = ('<section class="plugin-grant" aria-labelledby="plugin-grant-title">'
+                 f'<h3 id="plugin-grant-title">{_e(T("plugin.grant_section"))}</h3>'
+                 '<dl class="plugin-grant-facts">'
+                 f'<div><dt>{_e(T("plugin.consent_label"))}</dt><dd><span class="plugin-state {tone}" '
+                 f'data-grant-state data-consent="">{_e(text)}</span></dd></div></dl>'
+                 '<p class="plugin-grant-hint" data-grant-hint></p>'
+                 '<p class="plugin-row-message" data-grant-message role="status" aria-live="polite"></p>'
+                 '</section>')
+        scope = ''
+    else:
+        grant = ('<section class="plugin-grant" aria-labelledby="plugin-grant-title">'
+                 f'<h3 id="plugin-grant-title">{_e(T("plugin.grant_section"))}</h3>'
+                 '<dl class="plugin-grant-facts">'
+                 f'<div><dt>{_e(T("plugin.switch_label"))}</dt><dd data-grant-switch>{_e(switch)}</dd></div>'
+                 f'<div><dt>{_e(T("plugin.consent_label"))}</dt><dd><span class="plugin-state {tone}" '
+                 f'data-grant-state data-consent="{_e(consent)}">{_e(text or T("plugin.loading"))}</span></dd></div></dl>'
+                 '<p class="plugin-grant-hint" data-grant-hint></p>'
+                 '<div class="plugin-grant-actions">'
+                 f'<button type="button" class="primary-btn" data-plugin-review="{_e(plugin_id)}" hidden>'
+                 f'{_e(T("plugin.review_enable"))}</button>'
+                 f'<button type="button" class="btn plugin-revoke-btn" data-plugin-revoke="{_e(plugin_id)}" hidden>'
+                 f'{_e(T("plugin.revoke"))}</button></div>'
+                 '<p class="plugin-row-message" data-grant-message role="status" aria-live="polite"></p>'
+                 '</section>')
+        scope = ('<section class="plugin-scope" aria-labelledby="plugin-scope-title">'
+                 f'<h3 id="plugin-scope-title">{_e(T("plugin.permissions_title"))}</h3>'
+                 f'<div class="plugin-scope-body" data-plugin-scope><p class="hint">{_e(T("plugin.loading"))}</p></div>'
+                 '</section>')
     return (f'<div class="plugin-detail" data-plugin-detail="{_e(plugin_id)}" '
             f'data-enabled="{"true" if item.get("enabled") else "false"}" '
             f'data-unavailable="{"true" if item.get("status") == "error" else "false"}">'
             f'<h2>{_e(name)}</h2>'
             f'<p class="plugin-meta">{_e(meta)}</p>'
             + (f'<p class="set-hint">{_e(description)}</p>' if description else '')
-            + '<section class="plugin-grant" aria-labelledby="plugin-grant-title">'
-            f'<h3 id="plugin-grant-title">{_e(T("plugin.grant_section"))}</h3>'
-            '<dl class="plugin-grant-facts">'
-            f'<div><dt>{_e(T("plugin.switch_label"))}</dt><dd data-grant-switch>{_e(switch)}</dd></div>'
-            f'<div><dt>{_e(T("plugin.consent_label"))}</dt><dd><span class="plugin-state {tone}" '
-            f'data-grant-state data-consent="{_e(consent)}">{_e(text or T("plugin.loading"))}</span></dd></div></dl>'
-            '<p class="plugin-grant-hint" data-grant-hint></p>'
-            '<div class="plugin-grant-actions">'
-            f'<button type="button" class="primary-btn" data-plugin-review="{_e(plugin_id)}" hidden>'
-            f'{_e(T("plugin.review_enable"))}</button>'
-            f'<button type="button" class="btn plugin-revoke-btn" data-plugin-revoke="{_e(plugin_id)}" hidden>'
-            f'{_e(T("plugin.revoke"))}</button></div>'
-            '<p class="plugin-row-message" data-grant-message role="status" aria-live="polite"></p>'
-            '</section>'
-            '<section class="plugin-scope" aria-labelledby="plugin-scope-title">'
-            f'<h3 id="plugin-scope-title">{_e(T("plugin.permissions_title"))}</h3>'
-            f'<div class="plugin-scope-body" data-plugin-scope><p class="hint">{_e(T("plugin.loading"))}</p></div>'
-            '</section>'
+            + grant + source + scope +
             '<section class="plugin-debug" aria-labelledby="plugin-debug-title">'
             f'<h3 id="plugin-debug-title">{_e(T("plugin.debug"))}</h3>'
             f'<p class="set-hint">{_e(T("plugin.debug_hint"))}</p>'
@@ -1576,6 +1649,9 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             if not plugins:
                 pane += f'<p class="set-hint">{_e(T("plugin.empty"))}</p>'
             pane += '</div>'
+            # Installing is a local command-line action only: the panel has no login, so it gets no install path.
+            if "demo" not in config:
+                pane += f'<p class="set-hint plugin-cli-hint">{_e(T("plugin.cli_hint"))}</p>'
         # Empty shell; settings.js fills it with textContent from GET /api/plugins.
         pane += '<div class="modal plugin-consent" id="plugin-consent" hidden></div>'
         extra = {}

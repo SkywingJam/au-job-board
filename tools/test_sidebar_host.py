@@ -23,6 +23,7 @@ from jobs import agent_api, db, labels, panel, plugin_host, plugin_pages  # noqa
 # silently asks every user to grant again, so it must be deliberate.
 SPONSORSHIP_FINGERPRINT = 'ac036e6e6b8c337dcd2828821e82c0c26c44313643e7e378cd4c550ef64b0e0b'
 MAP_FINGERPRINT = '65d50333a09235d241be631b156a0d9a2ae949582078c6b30701a11fff28ab21'
+WORKSPACE_FINGERPRINT = 'fcf6a8283d3181ad79c54fb56c00fe2de27f1d7b3c99533c0620c636c6a9eff2'
 WORKSPACE = json.loads((ROOT / 'plugins/workspace/manifest.json').read_text())
 MAP = json.loads((ROOT / 'plugins/map/manifest.json').read_text())
 
@@ -49,7 +50,8 @@ class ManifestProfile(unittest.TestCase):
         return plugin_host._manifest(target, target.name)
 
     def test_shipped_fingerprints_are_pinned(self):
-        for plugin_id, expected in (('sponsorship', SPONSORSHIP_FINGERPRINT), ('map', MAP_FINGERPRINT)):
+        for plugin_id, expected in (('sponsorship', SPONSORSHIP_FINGERPRINT), ('map', MAP_FINGERPRINT),
+                                    ('workspace', WORKSPACE_FINGERPRINT)):
             manifest = plugin_host._manifest(ROOT / 'plugins' / plugin_id, plugin_id)
             self.assertEqual(plugin_host.fingerprint(manifest), expected, plugin_id)
         workspace = plugin_host._manifest(ROOT / 'plugins/workspace', 'workspace')

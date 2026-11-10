@@ -205,7 +205,7 @@ Tests rebuild the HTTP JSON from the MCP records using only these rules.
 | `get_jobs` | Required `uids`: 1 to 10 distinct non-empty strings (each at most 512 characters) | The same complete records as `get_job`, read fresh by exact uid with no `snapshot_id`, in request order; an unknown uid is an explicit `{"uid","error":"job_not_found"}` item |
 | `list_batches` | `limit` (default 50, maximum 200), `offset` (default 0) | Fresh batch metadata, `next_offset` |
 | `get_batch` | Required `batch_id` | Collection facts and separate pipeline evidence |
-| `review_plugin_permissions` | None | Full permission review, current status and user-operated confirmation paths |
+| `review_plugin_permissions` | None | Full permission review, current status (including origin, compatibility and an `incompatible` reason) and user-operated confirmation paths; it cannot install, upgrade or remove a plugin |
 
 Example tool calls:
 

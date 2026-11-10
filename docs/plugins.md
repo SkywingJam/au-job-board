@@ -29,6 +29,56 @@ Manifest, request, result and diagnostic sizes are bounded. Exceptions, invalid 
 The host download helper runs trusted core code in its own supervised process before the fetch hook. It has the same fetch wall-clock and process-resource limits as that hook; installed plugin code is not imported there. This bounds a stalled public source without allowing plugin networking. Configuration is saved before a new grant is published; a grant write failure leaves the plugin unable to run. Revocation is persisted before disabling so a failed setting save cannot restore authorization.
 
 
+## Installing, upgrading and removing plugins
+
+Plugins live in two places:
+
+- **Bundled** plugins are in `plugins/<id>/` in the Job Board folder. `sponsorship`, `map` and `workspace` are bundled.
+- **Installed** packages are in `.<database-name>.plugin-packages/<id>/` beside the database, next to the plugin data directory `.<database-name>.plugins/`. For `jobs.db` that is `.jobs.db.plugin-packages/`. They belong to the instance, so they follow the database. In Docker they are in the data volume (see [docker.md](docker.md#installed-plugins)).
+
+A bundled ID cannot be replaced by an installed package: install refuses it. The host reads at most 32 plugins in total, bundled and installed together.
+
+Installing, upgrading and removing is possible only from the local command line, on the machine that runs Job Board. The panel, the agent API and MCP cannot do it, and a plugin cannot do it to itself. The panel has no authentication, so an install action there could not tell who asked for it. Settings > Plugins shows where each plugin comes from and how to install one, and nothing more.
+
+```sh
+python -m jobs.cli --config config.yaml plugin list
+python -m jobs.cli --config config.yaml plugin install ./example-plugin-1.0.0.zip
+python -m jobs.cli --config config.yaml plugin install https://example.com/example-plugin-1.0.0.zip --sha256 HEX
+python -m jobs.cli --config config.yaml plugin upgrade ./example-plugin-1.1.0.zip
+python -m jobs.cli --config config.yaml plugin uninstall example-plugin
+```
+
+| Command | What it does |
+|---|---|
+| `plugin list [--json]` | One line per plugin: ID, version, origin (`builtin` or `installed`), status, and the reason when a plugin is incompatible. `--json` prints the same items as JSON. |
+| `plugin install SOURCE [--sha256 HEX] [--version V] [--yes]` | Installs a package that is not installed yet. |
+| `plugin upgrade SOURCE [--sha256 HEX] [--version V] [--yes]` | Replaces an installed package. The plugin ID in the package must already be installed. |
+| `plugin uninstall ID [--yes]` | Removes an installed package. A bundled plugin is refused with a message. |
+
+`SOURCE` is a local `.zip` file or an `https://` URL. `--sha256` is the SHA-256 of the `.zip` file. It is required for a URL and optional for a local file; when given, it must match or nothing is opened. `--version V` stops the install unless the version in the package manifest is exactly `V`. Both commands print the computed SHA-256. `--yes` answers the confirmation question; without `--yes` and without a terminal, nothing is installed.
+
+A download accepts only `https`, no credentials in the URL, and redirects only to `https` (at most 5). It has a 60-second time limit and the 128 MiB package size limit, and a failed or partial download installs nothing. The request names the application and its version and sends no job data, configuration or token.
+
+Install checks, in this order, and writes nothing until all pass:
+
+1. The hash, when one is given or required.
+2. The archive: size, entry count and entry kinds, as listed in [plugin-interface.md](plugin-interface.md#packages-and-installation).
+3. The manifest, against the same three permission profiles as a bundled plugin. A package with any other permission set is refused.
+4. The core version range in `compatibility.core`, if the manifest declares one. A package that does not fit this Job Board is refused.
+5. The ID: not a bundled ID, and not already installed (use `upgrade`).
+
+Install then prints a review: ID, name, version, the permission profile in plain words, whether the plugin runs Python code on this machine, the source and the SHA-256. It asks for `yes` before writing anything. Files go into a staging directory and are moved into place in one step; if anything fails, the previous state is intact. Install, upgrade and uninstall use the same run lock as updates, or refuse with a message while an update holds it, so a running update never sees a half-replaced package.
+
+**Install never enables a plugin and never grants permission.** The new plugin is installed disabled. Review and accept its permissions the usual way, in Settings > Plugins or with `plugin review` and `plugin grant` above. An installed plugin shows "Installed" next to its version in Settings > Plugins. Its details and review show the source, the first 12 characters of its SHA-256 and the install date, as plain text.
+
+**Upgrade** prints the old and the new version. A downgrade is allowed and is stated. The package is replaced in one step, and the old one is put back if the replacement fails. The enabled setting is kept. The grant is kept only when the permission declaration is unchanged; a changed declaration, including a reduction, needs a new review, and the plugin does not run until you accept it. Name, description, version, icon and `compatibility.core` changes keep the grant.
+
+**Uninstall** removes the package and its install record, disables the plugin in the configuration and revokes its grant. It keeps the plugin's data, error records and results in `.<database-name>.plugins/<id>/` and says so. Delete that directory yourself if you want them gone.
+
+**Core version range.** A manifest can declare which Job Board versions it works with (`compatibility.core`, see [plugin-interface.md](plugin-interface.md#core-version-range)). When the running version is outside the range, the plugin gets the status `incompatible`. It is never run, served or shown as a page or sidebar. Its stored grant and results are kept, and Settings > Plugins says which version it needs and which one is running. This applies to bundled and installed plugins. Upgrade the plugin or Job Board and it starts working again; the earlier grant applies if its permissions did not change.
+
+**Trust.** A package with Python hooks (host API 1) runs code on this machine, with the limits described on this page, which contain accidents and are not a sandbox for hostile code. A page plugin (host API 2) runs in the sandboxed frame described below. Install only packages from a source you trust. The SHA-256 shows that the file is the one the publisher described: compare it with the value the publisher states, in a place other than the download link. It does not show that the plugin is safe. The install review states whether the package runs Python code, and the permission review still comes before it can run.
+
 ## Browser display pages (host API 2)
 
 The optional Map plugin registers a display choice next to List in the common
