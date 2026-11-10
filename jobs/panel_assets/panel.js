@@ -1289,8 +1289,12 @@ function sidebarRoom(natural){
 }
 function sidebarFit(natural,portrait){
   // Portrait: keep the toggle clear of the Filters button, whatever its label width.
-  const sheetBtn=portrait&&document.querySelector('.sheet-btn');
-  if(sheetBtn&&sheetBtn.offsetWidth)document.body.style.setProperty('--sheet-btn-w',(sheetBtn.offsetWidth+2)+'px');
+  const sheetBtn=portrait&&document.querySelector('.sheet-btn'), toggleBtn=document.getElementById('sidebar-toggle');
+  if(sheetBtn&&toggleBtn&&sheetBtn.offsetWidth&&toggleBtn.offsetWidth){
+    const t=toggleBtn.getBoundingClientRect(), s=sheetBtn.getBoundingClientRect();
+    const now=parseFloat(getComputedStyle(toggleBtn).marginRight)||0;
+    document.body.style.setProperty('--sb-toggle-gap',Math.max(0,Math.round(now+t.right-(s.left-4)))+'px');
+  }
   const pane=sidebarPane();
   if(!pane) return 0;
   const body=document.body, root=document.documentElement;
