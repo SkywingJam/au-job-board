@@ -137,7 +137,8 @@ and observed again in a specific batch remain separate fields.
 ### Local posting history
 
 A job detail (`GET /api/v1/jobs/{uid}`, MCP `get_job`) includes `history`, the
-same facts the panel's "Copy job" text carries. List pages omit it.
+same facts the panel's "Copy job" text carries. List pages omit it. MCP omits
+null/empty fields from job records; see [MCP tools](mcp.md#tools-and-a-first-read).
 
 | Field | Meaning |
 |---|---|
@@ -146,7 +147,7 @@ same facts the panel's "Copy job" text carries. List pages omit it.
 | `related_basis` | `same_dedupe_group`: the stored duplicate group from the last analysis (same employer, similar title; cities merge unless `dedupe.include_city`) |
 | `related_total` | Other rows in that group; `null` before the job has been analysed |
 | `related` | Up to five of them, newest first observed: `uid`, `source`, `title`, `location`, `listing_date`, `first_seen_at`, `last_seen_at`, `seen_in_latest_successful_fetch` (against that posting's own source) |
-| `scope_note` | Fixed reminder that these are local collection records |
+| `scope_note` | Fixed reminder that these are local collection records (MCP omits it and quotes it in the `get_job` description) |
 
 These are observations only. Not appearing in a later fetch can mean the
 search no longer matched it; it does not establish that the job closed. A
@@ -163,7 +164,7 @@ include `snapshot_id`, `as_of`, `expires_at`, `resolved_batch_id`, normalized
 `?cursor=<next_cursor>`; changing query or page size requires a new snapshot.
 Every detail read for that result must include its `snapshot_id`.
 
-The default page size is 100, maximum 200. Snapshots live for 300 seconds,
+The default page size is 100 (MCP `list_jobs`: 20), maximum 200. Snapshots live for 300 seconds,
 maximum eight at once, with serialized-payload budgets of 128 MiB per snapshot
 and 512 MiB total (not a bound on Python process RSS). The current service
 conservatively rejects materialization if the source database has over 50,000

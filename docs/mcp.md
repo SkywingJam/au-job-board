@@ -171,18 +171,36 @@ owned by the application, use the Streamable HTTP mode above.
 
 ## Tools and a first read
 
-All five of these tools declare themselves read-only. Successful calls return the HTTP
-JSON object as structured content, with text content for compatible clients.
-The text copy is the same JSON value rendered compactly (no indentation or extra
-whitespace; Unicode and escaped newlines inside job text are preserved), and
-`outputSchema` stays published. No field, page size or `get_job` shape changes;
-errors remain tool errors. How much a client shows the model from the two
-channels differs by client, so this reduces text size but does not by itself
-establish a lower billed-token count.
+All five of these tools declare themselves read-only. A successful call returns
+one text content block holding compact JSON (no indentation or extra whitespace;
+Unicode and escaped newlines inside job text are preserved). There is no
+structured content and no published `outputSchema`, so clients that show both
+channels do not receive the result twice. Errors remain tool errors.
+
+The JSON is the HTTP API response, with two MCP-only differences:
+
+- `list_jobs` without `limit` or `cursor` requests 20 jobs per page (the HTTP
+  API default stays 100). An explicit `limit` (1 to 200) is passed through;
+  large pages may exceed a client's tool-output limit, so prefer following
+  `next_cursor`.
+- Job records (`list_jobs` items and the `get_job` item) are compacted
+  losslessly: keys whose value is null, `""`, `[]` or `{}` are omitted
+  recursively (`false` and `0` stay), so an absent field means null or empty;
+  `source_id` (always the `uid` after its first colon) and `human_scope`
+  (always `group`) are omitted; `human` disappears when all its fields are
+  empty; `reasons` becomes a JSON list only when the API string is a non-empty
+  list of strings that re-encodes to exactly the same string
+  (`json.dumps(list, ensure_ascii=False)`), otherwise it stays the original
+  string; and `history.scope_note`, a fixed sentence, is omitted and quoted
+  once in the `get_job` description. Response envelopes (`snapshot_id`,
+  `total`, `next_cursor: null` and so on), batch, plugin and label-write
+  results are unchanged.
+
+Tests rebuild the HTTP JSON from the MCP records using only these rules.
 
 | Tool | Arguments | Result |
 |---|---|---|
-| `list_jobs` | Optional `query` object of HTTP API fields | One frozen page, `total`, `snapshot_id`, `next_cursor` |
+| `list_jobs` | Optional `query` object of HTTP API fields (default `limit` 20) | One frozen page, `total`, `snapshot_id`, `next_cursor` |
 | `get_job` | Required `uid`, `snapshot_id` | Complete JD, machine evidence, local posting `history`, group human state, live panel link |
 | `list_batches` | `limit` (default 50, maximum 200), `offset` (default 0) | Fresh batch metadata, `next_offset` |
 | `get_batch` | Required `batch_id` | Collection facts and separate pipeline evidence |
@@ -253,10 +271,10 @@ The tool takes `items`, 1 to 100 objects of `{uid, action?, priority?}`:
 ```
 
 `action` is `saved`, `applied`, `skipped` or `null` (cancel progress); `priority`
-is a real boolean; an omitted field is kept. The result is the same compact JSON
-(`updated`, `unchanged` and one `uid`/`action`/`priority`/`changed`/
-`human_scope` entry per item, never JD text or notes) in both text and
-structured content, with a published `outputSchema`. It is annotated
+is a real boolean; an omitted field is kept. The result is the HTTP response as
+compact JSON text (`updated`, `unchanged` and one `uid`/`action`/`priority`/`changed`/
+`human_scope` entry per item, never JD text or notes), not compacted further
+and without structured content or `outputSchema`. It is annotated
 `readOnlyHint=false`, `destructiveHint=true`, `idempotentHint=true`,
 `openWorldHint=false`; the five read tools keep their read-only annotations.
 Invalid arguments, unknown or duplicate UIDs, two UIDs of one group, an
@@ -274,8 +292,10 @@ The opt-in `tools/test_mcp.py` starts a real MCP subprocess and a loopback HTTP
 service using handwritten synthetic records and a temporary database. It checks
 discovery, legacy initialization, pagination, full JDs, folded source identity, group state, frozen
 reads after live edits, filter parity, batch facts, explicit errors, redirects,
-token permissions and unchanged DB bytes during reads. Its write cases check the
-label tool, annotations, compact/structured equality, persisted group state and
+token permissions and unchanged DB bytes during reads, plus the single text
+channel, the 20-job default page and its complete cursor chain, explicit limits,
+and lossless job-record compaction against the same snapshot's HTTP JSON. Its write cases check the
+label tool, annotations, compact text, persisted group state and
 that invalid, redirected, unauthenticated or API-refused writes leave the
 database unchanged; `tools/test_mcp_http.py` repeats this over Streamable HTTP. All processes stop on
 test exit. It does not inspect personal data or configure a desktop host.
@@ -288,6 +308,7 @@ python -B tools/test_mcp.py
 python -B tools/run_public_tests.py --with-mcp
 ```
 
-The default public suite runs 44 entries; `--with-mcp` adds two
-entries and fails if its SDK is missing. A passing SDK client test proves the
+`--with-mcp` adds two entries (`tools/test_mcp.py` and
+`tools/test_mcp_http.py`) to the default public suite and fails if its SDK is
+missing. A passing SDK client test proves the
 protocol/HTTP path.
