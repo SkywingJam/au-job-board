@@ -248,8 +248,12 @@ class MCPIntegration(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn('\n', text)      # newlines inside the JD stay escaped
             # Non-job tools are passed through unchanged, nulls included.
             direct = agent_client.APIClient(self.base, TOKEN)
-            self.assertEqual(payload(results['get_batch']),
-                             direct.get('/api/v1/batches/' + self.batch_id, {}))
+            # as_of is the time of each read; the two calls can straddle a second.
+            via_mcp = payload(results['get_batch'])
+            via_http = direct.get('/api/v1/batches/' + self.batch_id, {})
+            self.assertEqual({k: v for k, v in via_mcp.items() if k != 'as_of'},
+                             {k: v for k, v in via_http.items() if k != 'as_of'})
+            self.assertEqual(set(via_mcp), set(via_http))
             self.assertEqual(payload(results['get_job'])['item']['description'], body)
             self.assertEqual(payload(results['get_jobs'])['items'][0]['description'], body)
             self.assertIn('Caf\u00e9 \u65e5\u672c', results['get_job'].content[0].text)
