@@ -286,6 +286,42 @@ class InstallFlow(Base):
         self.assertEqual(self.cli('install', str(path), stdin=Terminal('yes\n'))[0], 0)
         self.assertIn('demo-sidebar', self.landed())
 
+    def test_confirmation_without_an_answer_changes_nothing(self):
+        """Issue #41 family: a terminal-looking stdin at end of file (Windows NUL), no stdin
+        or a closed one refuses install, upgrade and uninstall cleanly; --yes never reads stdin."""
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+        closed = io.StringIO()
+        closed.close()
+        def run(stdin, *argv):
+            out, err = io.StringIO(), io.StringIO()
+            with patch.object(sys, 'stdin', stdin), redirect_stdout(out), redirect_stderr(err):
+                code = cli.main(['--config', str(self.config_path), 'plugin', *argv])
+            return code, out.getvalue(), err.getvalue()
+        first, _ = self.build(sidebar_manifest())
+        second, _ = self.build(sidebar_manifest(version='1.1.0'))
+        unanswered = (('terminal at EOF', lambda: Terminal('')), ('no stdin', lambda: None), ('closed stdin', lambda: closed))
+        for label, stdin in unanswered:
+            with self.subTest('install', stdin=label):
+                code, _, err = run(stdin(), 'install', str(first))
+                self.assertEqual(code, 1)
+                self.assertIn('Nothing was installed', err)
+                self.assertEqual(self.landed(), [])
+        code, out, _ = run(Terminal(''), 'install', str(first))
+        self.assertIn('Type yes: \n', out)                         # refusal is not glued to the prompt
+        self.assertEqual(run(None, 'install', str(first), '--yes')[0], 0)
+        for label, stdin in unanswered:
+            with self.subTest('upgrade', stdin=label):
+                self.assertEqual(run(stdin(), 'upgrade', str(second))[0], 1)
+                listed = json.loads(run(None, 'list', '--json')[1])
+                self.assertEqual(next(p for p in listed if p['id'] == 'demo-sidebar')['version'], '1.0.0')
+            with self.subTest('uninstall', stdin=label):
+                self.assertEqual(run(stdin(), 'uninstall', 'demo-sidebar')[0], 1)
+                self.assertIn('demo-sidebar', self.landed())
+        self.assertEqual(run(Terminal('yes\n'), 'uninstall', 'demo-sidebar')[0], 0)
+        self.assertEqual(self.landed(), [])
+
     def test_hash_and_version_mismatch_stop_before_anything_is_written(self):
         path, digest = self.build(sidebar_manifest())
         for argv, phrase in ((('--sha256', '0' * 64), 'not the expected value'),

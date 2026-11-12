@@ -201,7 +201,9 @@ class ConsentTests(unittest.TestCase):
 
     def test_cli_requires_reviewed_fingerprint_for_noninteractive_grant(self):
         from jobs import cli
-        with patch.object(cli, 'load_config', return_value=self.config), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+        # stdin is fixed here: the runner's own stdin (a terminal, a pipe, Windows NUL) must not decide the result.
+        with patch.object(cli, 'load_config', return_value=self.config), patch.object(sys, 'stdin', io.StringIO('yes\n')), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(['--config', str(self.config_path), 'plugin', 'grant', 'sample']), 1)
             self.assertEqual(cli.main(['--config', str(self.config_path), 'plugin', 'grant', 'sample', '--fingerprint', 'incorrect']), 1)
             fp = host.fingerprint(self.manifest)
@@ -209,6 +211,51 @@ class ConsentTests(unittest.TestCase):
             self.assertEqual(host.list_plugins(self.config)[0]['consent']['status'], 'granted')
             self.assertEqual(cli.main(['--config', str(self.config_path), 'plugin', 'revoke', 'sample']), 0)
             self.assertEqual(host.list_plugins(self.config)[0]['consent']['status'], 'required')
+
+    def test_cli_grant_prompt_without_an_answer_records_nothing(self):
+        """Issue #41: no stdin, a closed one, or a terminal-looking one at end of file
+        (Windows NUL reports isatty) all mean "not confirmed", never a traceback or a grant."""
+        from jobs import cli
+
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+        closed = io.StringIO()
+        closed.close()
+        def grant(stdin):
+            out, err = io.StringIO(), io.StringIO()
+            with patch.object(cli, 'load_config', return_value=self.config), patch.object(sys, 'stdin', stdin), \
+                    redirect_stdout(out), redirect_stderr(err):
+                code = cli.main(['--config', str(self.config_path), 'plugin', 'grant', 'sample'])
+            return code, out.getvalue(), err.getvalue()
+        for label, stdin in (('terminal at EOF', Terminal('')), ('no stdin', None), ('closed stdin', closed),
+                             ('pipe with yes', io.StringIO('yes\n')), ('terminal answers no', Terminal('no\n')),
+                             ('terminal answers yes later', Terminal('\nyes\n'))):
+            with self.subTest(label):
+                code, out, err = grant(stdin)
+                self.assertEqual(code, 1)
+                self.assertEqual(err, 'No grant recorded.\n')
+                self.assertNotIn('Plugin settings saved', out)
+                self.assertEqual(host.list_plugins(self.config)[0]['consent']['status'], 'required')
+        # Both streams redirected to one log: what reaches it, in order, keeps the refusal on its own line.
+        log = []
+        class Buffered(io.StringIO):                 # like a redirected stdout: visible only once flushed
+            def flush(self):
+                log.append(self.getvalue()); self.seek(0); self.truncate()
+        class Unbuffered(io.StringIO):               # like stderr
+            def write(self, text):
+                log.append(text); return len(text)
+        stdout = Buffered()
+        with patch.object(cli, 'load_config', return_value=self.config), patch.object(sys, 'stdin', Terminal('')), \
+                redirect_stdout(stdout), redirect_stderr(Unbuffered()):
+            self.assertEqual(cli.main(['--config', str(self.config_path), 'plugin', 'grant', 'sample']), 1)
+        stdout.flush()
+        self.assertIn('Type yes: \nNo grant recorded.\n', ''.join(log))
+        # A person at a terminal typing yes still grants the reviewed permissions.
+        code, out, err = grant(Terminal(' yes \n'))
+        self.assertEqual((code, err), (0, ''))
+        self.assertIn('Plugin settings saved.', out)
+        self.assertEqual(host.list_plugins(self.config)[0]['consent']['status'], 'granted')
 
     def test_worker_denies_direct_io_for_both_hooks(self):
         outside = self.base / 'outside.txt'

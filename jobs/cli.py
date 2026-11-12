@@ -1024,7 +1024,7 @@ def cmd_plugin(args):
         elif args.plugin_action == 'grant':
             current = item['consent']['fingerprint']
             if args.fingerprint is None:
-                if not sys.stdin.isatty() or input('Grant the displayed permissions? Type yes: ').strip() != 'yes':
+                if not _ask_yes('Grant the displayed permissions?'):
                     print('No grant recorded.', file=sys.stderr)
                     return 1
                 payload['consent_fingerprint'] = current
@@ -1047,15 +1047,28 @@ def _plugin_line(item):
     return line
 
 
-def _confirm(args, question):
-    if args.yes:
-        return True
-    if not sys.stdin.isatty():
+def _ask_yes(question):
+    """True only when someone at a terminal types yes.
+
+    No stdin (None or closed) counts as no terminal. A terminal-looking stdin
+    can still be at end of file, for example Windows NUL, which reports
+    isatty(); that is no answer, so not confirmed.
+    """
+    try:
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+    except ValueError:                      # closed stream
+        interactive = False
+    if not interactive:
         return False
     try:
         return input(question + ' Type yes: ').strip() == 'yes'
     except EOFError:
+        print(flush=True)                   # end the prompt line before the refusal (stderr) message
         return False
+
+
+def _confirm(args, question):
+    return bool(args.yes) or _ask_yes(question)
 
 
 def _cmd_plugin_package(args):
